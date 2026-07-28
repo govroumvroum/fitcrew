@@ -1,0 +1,97 @@
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+export const tone = v.union(v.literal("motivant"), v.literal("neutre"), v.literal("direct"));
+
+export const onboarding = v.object({
+  experience: v.union(v.literal("debutant"), v.literal("intermediaire"), v.literal("avance")),
+  goals: v.array(v.string()),
+  sport: v.optional(v.string()),
+  limitations: v.optional(v.string()),
+  daysPerWeek: v.number(),
+  sessionMinutes: v.number(),
+  equipment: v.array(v.string()),
+});
+
+// A program is written once per generation and read whole: nesting days and
+// exercises keeps it one document. Bounded (~5 days x ~8 exercises).
+export const programExercise = v.object({
+  name: v.string(),
+  sets: v.number(),
+  reps: v.string(), // "8" or "8-12" or "AMRAP"
+  restSeconds: v.number(),
+  notes: v.optional(v.string()),
+});
+
+export default defineSchema({
+  users: defineTable({
+    tokenIdentifier: v.string(),
+    name: v.string(),
+    email: v.optional(v.string()),
+    avatarUrl: v.optional(v.string()),
+    onboarding: v.optional(onboarding),
+    tone: v.optional(tone),
+    currentProgramId: v.optional(v.id("programs")),
+  }).index("by_token", ["tokenIdentifier"]),
+
+  programs: defineTable({
+    userId: v.id("users"),
+    version: v.number(),
+    name: v.string(),
+    days: v.array(
+      v.object({
+        name: v.string(), // "Jour 1 — Push"
+        exercises: v.array(programExercise),
+      }),
+    ),
+    progressionRules: v.string(),
+    deloadEveryWeeks: v.optional(v.number()),
+  }).index("by_user_and_version", ["userId", "version"]),
+
+  workouts: defineTable({
+    userId: v.id("users"),
+    programId: v.optional(v.id("programs")),
+    dayIndex: v.optional(v.number()), // which program day this session follows
+    date: v.string(), // YYYY-MM-DD, local to the user
+    startedAt: v.number(),
+    endedAt: v.optional(v.number()),
+    notes: v.optional(v.string()),
+  }).index("by_user_and_date", ["userId", "date"]),
+
+  // Own table, not an array on workouts: every set check-off is a write, and
+  // progression graphs read across workouts by exercise.
+  sets: defineTable({
+    workoutId: v.id("workouts"),
+    userId: v.id("users"),
+    exerciseName: v.string(),
+    index: v.number(), // set order within the exercise
+    weight: v.number(),
+    reps: v.number(),
+    completed: v.boolean(),
+  })
+    .index("by_workout", ["workoutId"])
+    .index("by_user_and_exercise", ["userId", "exerciseName"]),
+
+  prs: defineTable({
+    userId: v.id("users"),
+    exerciseName: v.string(),
+    type: v.union(v.literal("max_weight"), v.literal("max_reps"), v.literal("max_volume")),
+    value: v.number(),
+    date: v.string(),
+    workoutId: v.id("workouts"),
+  })
+    .index("by_user_and_exercise", ["userId", "exerciseName"])
+    .index("by_user_and_date", ["userId", "date"]),
+
+  screenshots: defineTable({
+    userId: v.id("users"),
+    storageId: v.id("_storage"),
+    source: v.optional(
+      v.union(v.literal("apple_health"), v.literal("zepp"), v.literal("mi_fitness")),
+    ),
+    // Shape varies per source app and is only ever read back into the
+    // confirmation form; validated at the extraction boundary instead.
+    extracted: v.optional(v.any()),
+    confirmed: v.boolean(),
+  }).index("by_user", ["userId"]),
+});
