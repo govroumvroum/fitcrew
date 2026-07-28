@@ -75,7 +75,12 @@ function Programme({ date }: { date: string }) {
             <details
               key={day.name}
               open={next}
-              className={cn("group rounded-lg border p-3", next && "border-primary")}
+              // min-w-0 is load-bearing: a grid item defaults to min-width:auto,
+              // so without it this column widens to fit "Jour 1 — Haut du corps
+              // et puissance (pectoraux, dos, épaules, gainage)" and the whole
+              // page scrolls sideways. The inner `truncate` can't help until an
+              // ancestor is actually allowed to be narrower than its content.
+              className={cn("group min-w-0 rounded-lg border p-3", next && "border-primary")}
             >
               <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 marker:hidden">
                 <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground -rotate-90 transition-transform duration-200 ease-[cubic-bezier(0.2,0,0,1)] group-open:rotate-0" />

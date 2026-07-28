@@ -2,6 +2,7 @@
 
 import { useAction, useQuery } from "convex/react";
 import { PlayIcon } from "lucide-react";
+import { useReducedMotion } from "motion/react";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,16 +49,49 @@ export function useExerciseDemos(names: string[]) {
 
 /** Bottom sheet: thumb-reachable, and it doesn't steal room from the set chips. */
 export function ExerciseDemo({ name, gifUrl }: { name: string; gifUrl: string }) {
+  // A looping GIF has no pause control, and inline there are one per exercise
+  // playing at once — WCAG 2.2.2 wants a way to stop that. Branching in JS
+  // rather than hiding one of two triggers in CSS: a display:none <img> still
+  // gets fetched, and the whole point of the icon fallback is to not fetch.
+  const reduce = useReducedMotion();
+
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button
-          variant="outline"
-          className="size-11 shrink-0 [&_svg]:size-4"
-          aria-label={`Voir la démo : ${name}`}
-        >
-          <PlayIcon />
-        </Button>
+        {reduce ? (
+          <Button
+            variant="outline"
+            className="size-11 shrink-0 [&_svg]:size-4"
+            aria-label={`Voir la démo : ${name}`}
+          >
+            <PlayIcon />
+          </Button>
+        ) : (
+          // ghost, not outline: the outline treatment lives on the image itself
+          // (the button's own `outline-none` would fight it), and a border
+          // around a bordered thumbnail is just noise.
+          <Button
+            variant="ghost"
+            className="size-14 shrink-0 p-0"
+            aria-label={`Voir la démo : ${name}`}
+          >
+            {/* Plain <img>, not next/image: hotlinked third-party GIF, and their
+                terms say don't proxy or re-host — which is exactly what the
+                optimizer would do. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={gifUrl}
+              alt=""
+              // 56px against a 180px source: a downscale, so this is the one
+              // place in the app the GIF actually looks sharp. Fixed square box
+              // so the card can't reflow when it decodes; lazy so a day's worth
+              // of cards below the fold doesn't hit the CDN on first paint.
+              className="aspect-square size-full rounded-lg bg-muted object-contain outline outline-white/10"
+              loading="lazy"
+              decoding="async"
+            />
+          </Button>
+        )}
       </SheetTrigger>
       <SheetContent side="bottom" className="gap-3 rounded-t-xl p-4">
         <SheetHeader className="p-0 pr-10">
