@@ -5,7 +5,7 @@ import type { Metadata, Viewport } from "next";
 import { Archivo, Geist } from "next/font/google";
 import { ConvexClientProvider } from "@/components/convex-client-provider";
 import { StoreUser } from "@/components/store-user";
-import { TabBar } from "@/components/tab-bar";
+import { NavRail, TabBar } from "@/components/nav";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -45,13 +45,17 @@ export default function RootLayout({
       lang="fr"
       className={`dark ${geistSans.variable} ${archivo.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      {/* pl-18 clears the rail at md+. Padding rather than a flex sibling: the
+          rail is fixed, so pages keep their own scrolling and full height, and
+          /coach's own fixed sidebar only needs its left edge moved to match. */}
+      <body className="min-h-full flex flex-col md:pl-18">
         <ClerkProvider localization={frFR} appearance={{ theme: shadcn }}>
           <ConvexClientProvider>
             <StoreUser />
             {children}
             <Show when="signed-in">
               <TabBar />
+              <NavRail />
             </Show>
             {/* Lifted clear of the tab bar: toasts render bottom-anchored at a
                 higher z-index and would otherwise sit on top of it. */}

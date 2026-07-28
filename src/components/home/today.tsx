@@ -74,78 +74,83 @@ export function Today({ date }: { date: string }) {
         </CardContent>
       </Card>
 
-      {stats.hasHistory ? (
-        // Cardio and weight tiles appear only for people who have that data:
-        // a permanent 0 tells you nothing, a zero week tells you something.
-        <div className="grid grid-cols-3 gap-2">
-          <Tile label="Semaines d'affilée" value={stats.streak} />
-          <Tile label="Séances cette semaine" value={stats.thisWeek} />
-          <Tile label="Séances ce mois" value={stats.thisMonth} />
-          <Tile label="Volume 7 jours" value={stats.volume7d} unit="kg" />
-          {stats.doesCardio && (
-            <Tile
-              label={`Cardio 7 jours${stats.cardio7d.sessions > 0 ? ` · ${stats.cardio7d.sessions}×` : ""}`}
-              value={stats.cardio7d.minutes}
-              unit="min"
-            />
-          )}
-          {stats.measure?.weightKg !== undefined && (
-            <Tile
-              label="Poids"
-              value={stats.measure.weightKg}
-              unit="kg"
-              digits={1}
-              delta={stats.measure.deltaKg}
-            />
-          )}
-          {stats.measure?.bodyFatPct !== undefined && (
-            <Tile label="Masse grasse" value={stats.measure.bodyFatPct} unit="%" digits={1} />
-          )}
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Tes stats arrivent dès la première séance terminée.
-        </p>
-      )}
+      {/* Everything under the hero pairs up at md+: tiles, régularité, records
+          are all short blocks that read fine side by side. items-start so a tall
+          records list doesn't stretch the sparkline card next to it. */}
+      <div className="grid gap-4 md:grid-cols-2 md:items-start">
+        {stats.hasHistory ? (
+          // Cardio and weight tiles appear only for people who have that data:
+          // a permanent 0 tells you nothing, a zero week tells you something.
+          <div className="grid grid-cols-3 gap-2">
+            <Tile label="Semaines d'affilée" value={stats.streak} />
+            <Tile label="Séances cette semaine" value={stats.thisWeek} />
+            <Tile label="Séances ce mois" value={stats.thisMonth} />
+            <Tile label="Volume 7 jours" value={stats.volume7d} unit="kg" />
+            {stats.doesCardio && (
+              <Tile
+                label={`Cardio 7 jours${stats.cardio7d.sessions > 0 ? ` · ${stats.cardio7d.sessions}×` : ""}`}
+                value={stats.cardio7d.minutes}
+                unit="min"
+              />
+            )}
+            {stats.measure?.weightKg !== undefined && (
+              <Tile
+                label="Poids"
+                value={stats.measure.weightKg}
+                unit="kg"
+                digits={1}
+                delta={stats.measure.deltaKg}
+              />
+            )}
+            {stats.measure?.bodyFatPct !== undefined && (
+              <Tile label="Masse grasse" value={stats.measure.bodyFatPct} unit="%" digits={1} />
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Tes stats arrivent dès la première séance terminée.
+          </p>
+        )}
 
-      {stats.weeks8.some((week) => week.sessions > 0) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Régularité</CardTitle>
-            <CardDescription>8 dernières semaines</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Sparkline weeks={stats.weeks8} />
-          </CardContent>
-        </Card>
-      )}
+        {stats.weeks8.some((week) => week.sessions > 0) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Régularité</CardTitle>
+              <CardDescription>8 dernières semaines</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Sparkline weeks={stats.weeks8} />
+            </CardContent>
+          </Card>
+        )}
 
-      {stats.prs.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Derniers records</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y text-sm">
-              {stats.prs.map((pr) => (
-                <li
-                  key={`${pr.date}|${pr.exerciseName}|${pr.type}`}
-                  className="flex items-center gap-2 py-2"
-                >
-                  <TrophyIcon className={TROPHY} />
-                  <span className="truncate">{pr.exerciseName}</span>
-                  <Badge variant="secondary" className="shrink-0">
-                    {PR_LABELS[pr.type].text}
-                  </Badge>
-                  <span className="ml-auto shrink-0 font-heading font-semibold tabular-nums">
-                    {pr.value} {PR_LABELS[pr.type].unit}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      ) : null}
+        {stats.prs.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Derniers records</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ul className="divide-y text-sm">
+                {stats.prs.map((pr) => (
+                  <li
+                    key={`${pr.date}|${pr.exerciseName}|${pr.type}`}
+                    className="flex items-center gap-2 py-2"
+                  >
+                    <TrophyIcon className={TROPHY} />
+                    <span className="truncate">{pr.exerciseName}</span>
+                    <Badge variant="secondary" className="shrink-0">
+                      {PR_LABELS[pr.type].text}
+                    </Badge>
+                    <span className="ml-auto shrink-0 font-heading font-semibold tabular-nums">
+                      {pr.value} {PR_LABELS[pr.type].unit}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
     </div>
   );
 }

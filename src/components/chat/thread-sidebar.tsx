@@ -104,7 +104,13 @@ export function ThreadSidebar() {
 
   return (
     <>
-      <Sidebar>
+      {/* The panel is `fixed left-0`, which ignores the body's rail padding, so
+          the rail would sit on top of the thread titles. Nudged by the rail's
+          width with a transform, not `left`: the shadcn `left-*` classes are
+          data-attribute-scoped (higher specificity) and there are two of them —
+          open and off-canvas — so a transform shifts both without a fight.
+          Below md there is no rail and no offset. */}
+      <Sidebar className="md:translate-x-18">
         <SidebarHeader>
           <Button className="h-11 justify-start" variant="outline" onClick={() => void create()}>
             <PlusIcon />

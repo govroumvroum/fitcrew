@@ -31,7 +31,11 @@ export default function CoachPage() {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto flex h-full w-full max-w-md flex-col">{children}</div>;
+  // Deliberately not as wide as the other routes: a chat line past ~70
+  // characters is a chore to read, whatever the screen can fit.
+  return (
+    <div className="mx-auto flex h-full w-full max-w-md flex-col md:max-w-2xl">{children}</div>
+  );
 }
 
 function CoachSkeleton() {

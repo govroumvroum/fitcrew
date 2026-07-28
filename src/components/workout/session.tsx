@@ -182,6 +182,10 @@ export function Session({ date }: { date: string }) {
           </Card>
         ) : null}
         {workout.notes ? <p className="text-sm text-muted-foreground">{workout.notes}</p> : null}
+        {/* Looking back is exactly what you do once it's done — without this the
+            history vanished for the rest of the day. No rotation here: the next
+            séance isn't today's business. */}
+        <History date={date} />
         {/* A finished session is a dead end otherwise: nothing left to tap. */}
         <div className="flex flex-col gap-2 pt-2">
           <Button asChild size="lg" className="h-14 text-base">
@@ -224,8 +228,10 @@ export function Session({ date }: { date: string }) {
         </div>
       </div>
 
-      {/* 6rem clears the sticky action bar, --tab-bar clears the tab bar under it. */}
-      <div className="space-y-4 px-4 pb-[calc(6rem+var(--tab-bar))]">
+      {/* 6rem clears the sticky action bar, --tab-bar clears the tab bar under it.
+          Two columns at md+ halves the scroll during a session; a single-column
+          grid with gap-4 is the same geometry as the space-y-4 it replaces. */}
+      <div className="grid gap-4 px-4 pb-[calc(6rem+var(--tab-bar))] md:grid-cols-2 md:items-start">
         {day.exercises.map((exercise) => {
           const rows = rowsFor(exercise.name);
           const values = valuesFor(exercise.name, exercise.reps);
@@ -295,7 +301,7 @@ export function Session({ date }: { date: string }) {
         {/* ponytail: native <details> instead of a collapsible component, and
             one notes field for the whole séance — the schema has no
             per-exercise notes field. */}
-        <details className="rounded-lg border p-4">
+        <details className="rounded-lg border p-4 md:col-span-2">
           <summary className="min-h-12 cursor-pointer text-sm font-medium">Notes de séance</summary>
           <Textarea
             className="mt-2"
@@ -339,18 +345,22 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Its own subscription, mounted only before a séance starts: a live session
+ * Its own subscription, and never mounted during a live session: that screen
  * resubscribes `today` on every check-off and must not drag the history along.
  */
-function History({ date, dayIndex }: { date: string; dayIndex: number }) {
+function History({ date, dayIndex }: { date: string; dayIndex?: number }) {
   const data = useQuery(api.workouts.history, { date });
   if (!data) return null;
 
   // No dates, ever: program days rotate one per séance, whenever you train, so
-  // "next" is an order and not a calendar. Wraps past the last day.
-  const upcoming = Array.from({ length: Math.max(0, data.dayNames.length - 1) }, (_, offset) => {
-    return data.dayNames[(dayIndex + 1 + offset) % data.dayNames.length];
-  });
+  // "next" is an order and not a calendar. Wraps past the last day. No dayIndex
+  // (the finished screen) means no rotation at all — just "déjà fait".
+  const upcoming =
+    dayIndex === undefined
+      ? []
+      : Array.from({ length: Math.max(0, data.dayNames.length - 1) }, (_, offset) => {
+          return data.dayNames[(dayIndex + 1 + offset) % data.dayNames.length];
+        });
 
   return (
     <>

@@ -144,6 +144,15 @@
   --tab-bar: calc(4rem + env(safe-area-inset-bottom));
 }
 
+/* md and up the bar becomes a left rail, so nothing is owed at the bottom. One
+   knob: page padding, the séance action bar and /coach's viewport height all
+   follow from here — none of them mention the breakpoint. */
+@media (width >= 48rem) {
+  :root {
+    --tab-bar: 0px;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

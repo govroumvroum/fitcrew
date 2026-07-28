@@ -8,7 +8,7 @@ export default function ProgresPage() {
   const today = useLocalDate();
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col pb-[var(--tab-bar)]">
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col pb-[var(--tab-bar)] md:max-w-3xl lg:max-w-6xl">
       {today ? <Dashboard today={today} /> : <Skeleton className="m-4 h-64" />}
     </main>
   );

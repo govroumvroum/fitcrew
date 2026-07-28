@@ -1,0 +1,84 @@
+"use client";
+
+import { ChartLineIcon, DumbbellIcon, HouseIcon, MessageCircleIcon } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
+
+const TABS = [
+  { href: "/", label: "Accueil", Icon: HouseIcon },
+  { href: "/seance", label: "Séance", Icon: DumbbellIcon },
+  { href: "/coach", label: "Coach", Icon: MessageCircleIcon },
+  { href: "/progres", label: "Progrès", Icon: ChartLineIcon },
+];
+
+const isActive = (pathname: string, href: string) =>
+  href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+// Same lightened brand hue as the trophies — plain red fails contrast on our
+// background.
+const ACTIVE = "font-semibold text-[oklch(0.8_0.086_27.255)]";
+
+/**
+ * Phone navigation. Reserve --tab-bar at the bottom of a page so the bar never
+ * covers content; at md+ the bar is gone and --tab-bar is 0.
+ */
+export function TabBar() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden">
+      <div className="mx-auto flex w-full max-w-md">
+        {TABS.map(({ href, label, Icon }) => {
+          const active = isActive(pathname, href);
+          return (
+            <Link
+              key={href}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]",
+                active ? ACTIVE : "text-muted-foreground",
+              )}
+            >
+              <Icon className="size-5" aria-hidden />
+              {label}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+/**
+ * Desktop navigation: a rail, not a sidebar. /coach renders its own thread
+ * sidebar against the same edge, and two wide rails side by side is a mess — so
+ * this one stays icon-width. Its w-18 is echoed by the body's md:pl-18 offset in
+ * layout.tsx and by the thread sidebar's md:left-18.
+ */
+export function NavRail() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="fixed inset-y-0 left-0 z-40 hidden w-18 flex-col gap-1 border-r bg-background/95 py-3 backdrop-blur md:flex">
+      {TABS.map(({ href, label, Icon }) => {
+        const active = isActive(pathname, href);
+        return (
+          <Link
+            key={href}
+            href={href}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "flex min-h-11 flex-col items-center justify-center gap-1 py-2 text-center text-[11px]",
+              active ? ACTIVE : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="size-5" aria-hidden />
+            {label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}

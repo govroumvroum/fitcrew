@@ -109,107 +109,118 @@ export function Dashboard({ today }: { today: string }) {
         ) : null
       ) : (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Volume par semaine</CardTitle>
-              <CardDescription>Kilos déplacés, séries validées uniquement</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Scroller count={data.weeks.length}>
-                <BarChart data={data.weeks}>
-                  <Grid />
-                  <XAxis {...axis} dataKey="week" tickFormatter={dayLabel} />
-                  <YAxis {...axis} width={40} />
-                  <Tooltip {...tooltip} labelFormatter={(week) => `Semaine du ${dayLabel(week)}`} />
-                  <Bar dataKey="volume" name="kg" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </Scroller>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Séances par semaine</CardTitle>
-              <CardDescription>La régularité, c&apos;est tout ce qui compte</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Scroller count={data.weeks.length} height="h-32">
-                <BarChart data={data.weeks}>
-                  <Grid />
-                  <XAxis {...axis} dataKey="week" tickFormatter={dayLabel} />
-                  <YAxis {...axis} width={40} allowDecimals={false} />
-                  <Tooltip {...tooltip} labelFormatter={(week) => `Semaine du ${dayLabel(week)}`} />
-                  <Bar
-                    dataKey="sessions"
-                    name="séances"
-                    fill="var(--chart-2)"
-                    radius={[3, 3, 0, 0]}
-                  />
-                </BarChart>
-              </Scroller>
-            </CardContent>
-          </Card>
-
-          {selected ? (
+          {/* Charts pair up only at lg+: at md the column is still narrow enough
+              that halving it would put every bar chart back into Scroller's
+              horizontal scroll. */}
+          <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
             <Card>
               <CardHeader>
-                <CardTitle>Par exercice</CardTitle>
-                <CardDescription>Charge max, 1RM estimé et volume par séance</CardDescription>
+                <CardTitle>Volume par semaine</CardTitle>
+                <CardDescription>Kilos déplacés, séries validées uniquement</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <Select value={selected.name} onValueChange={setExercise}>
-                  <SelectTrigger className="h-12 w-full text-base sm:text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {data.exercises.map((item) => (
-                      <SelectItem key={item.name} value={item.name}>
-                        {item.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Scroller count={selected.points.length}>
-                  <LineChart data={selected.points}>
+              <CardContent>
+                <Scroller count={data.weeks.length}>
+                  <BarChart data={data.weeks}>
                     <Grid />
-                    <XAxis {...axis} dataKey="date" tickFormatter={dayLabel} />
-                    <YAxis {...axis} yAxisId="kg" width={40} />
-                    <YAxis {...axis} yAxisId="vol" orientation="right" width={40} />
-                    <Tooltip {...tooltip} labelFormatter={dayLabel} />
-                    <Line
-                      yAxisId="kg"
-                      dataKey="maxWeight"
-                      name="charge (kg)"
-                      stroke="var(--chart-1)"
-                      strokeWidth={2}
-                      dot={{ r: 2 }}
+                    <XAxis {...axis} dataKey="week" tickFormatter={dayLabel} />
+                    <YAxis {...axis} width={40} />
+                    <Tooltip
+                      {...tooltip}
+                      labelFormatter={(week) => `Semaine du ${dayLabel(week)}`}
                     />
-                    <Line
-                      yAxisId="kg"
-                      dataKey="est1rm"
-                      name="1RM est. (kg)"
-                      stroke="var(--chart-2)"
-                      strokeWidth={2}
-                      strokeDasharray="4 3"
-                      dot={false}
-                    />
-                    <Line
-                      yAxisId="vol"
-                      dataKey="volume"
-                      name="volume (kg)"
-                      stroke="var(--chart-3)"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  </LineChart>
+                    <Bar dataKey="volume" name="kg" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
+                  </BarChart>
                 </Scroller>
-                <p className="text-xs text-muted-foreground">
-                  Un point par séance : les semaines sans cet exercice n&apos;en ont pas.
-                </p>
               </CardContent>
             </Card>
-          ) : null}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Séances par semaine</CardTitle>
+                <CardDescription>La régularité, c&apos;est tout ce qui compte</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Scroller count={data.weeks.length} height="h-32">
+                  <BarChart data={data.weeks}>
+                    <Grid />
+                    <XAxis {...axis} dataKey="week" tickFormatter={dayLabel} />
+                    <YAxis {...axis} width={40} allowDecimals={false} />
+                    <Tooltip
+                      {...tooltip}
+                      labelFormatter={(week) => `Semaine du ${dayLabel(week)}`}
+                    />
+                    <Bar
+                      dataKey="sessions"
+                      name="séances"
+                      fill="var(--chart-2)"
+                      radius={[3, 3, 0, 0]}
+                    />
+                  </BarChart>
+                </Scroller>
+              </CardContent>
+            </Card>
+
+            {selected ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Par exercice</CardTitle>
+                  <CardDescription>Charge max, 1RM estimé et volume par séance</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <Select value={selected.name} onValueChange={setExercise}>
+                    <SelectTrigger className="h-12 w-full text-base sm:text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {data.exercises.map((item) => (
+                        <SelectItem key={item.name} value={item.name}>
+                          {item.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Scroller count={selected.points.length}>
+                    <LineChart data={selected.points}>
+                      <Grid />
+                      <XAxis {...axis} dataKey="date" tickFormatter={dayLabel} />
+                      <YAxis {...axis} yAxisId="kg" width={40} />
+                      <YAxis {...axis} yAxisId="vol" orientation="right" width={40} />
+                      <Tooltip {...tooltip} labelFormatter={dayLabel} />
+                      <Line
+                        yAxisId="kg"
+                        dataKey="maxWeight"
+                        name="charge (kg)"
+                        stroke="var(--chart-1)"
+                        strokeWidth={2}
+                        dot={{ r: 2 }}
+                      />
+                      <Line
+                        yAxisId="kg"
+                        dataKey="est1rm"
+                        name="1RM est. (kg)"
+                        stroke="var(--chart-2)"
+                        strokeWidth={2}
+                        strokeDasharray="4 3"
+                        dot={false}
+                      />
+                      <Line
+                        yAxisId="vol"
+                        dataKey="volume"
+                        name="volume (kg)"
+                        stroke="var(--chart-3)"
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                    </LineChart>
+                  </Scroller>
+                  <p className="text-xs text-muted-foreground">
+                    Un point par séance : les semaines sans cet exercice n&apos;en ont pas.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
 
           <Card>
             <CardHeader>
