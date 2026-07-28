@@ -92,6 +92,10 @@ export const stats = query({
       // A month is comfortably inside MAX_WORKOUTS, unlike an all-time count.
       thisMonth: workouts.filter((workout) => workout.date >= args.date.slice(0, 7)).length,
       volume7d: Math.round(volume7d),
+      // Free: `weeks` is already built for the streak, and session counts come
+      // from workout headers. A volume sparkline would mean reading sets across
+      // two months instead of seven days.
+      weeks8: weeks.slice(-8),
       doesCardio,
       cardio7d: {
         sessions: cardio7d.length,

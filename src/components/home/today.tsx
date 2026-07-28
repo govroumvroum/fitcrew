@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatFull } from "@/lib/dates";
 import { PR_LABELS, TROPHY } from "@/lib/prs";
-import { formatNumber } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 
 export function Today({ date }: { date: string }) {
@@ -108,6 +108,18 @@ export function Today({ date }: { date: string }) {
         </p>
       )}
 
+      {stats.weeks8.some((week) => week.sessions > 0) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Régularité</CardTitle>
+            <CardDescription>8 dernières semaines</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Sparkline weeks={stats.weeks8} />
+          </CardContent>
+        </Card>
+      )}
+
       {stats.prs.length > 0 ? (
         <Card>
           <CardHeader>
@@ -143,6 +155,46 @@ function Cta({ href, children }: { href: string; children: React.ReactNode }) {
     <Button asChild size="lg" className="h-14 w-full rounded-lg text-base">
       <Link href={href}>{children}</Link>
     </Button>
+  );
+}
+
+/**
+ * Eight bars, no charting library: home is the landing page and recharts is a
+ * lot of bundle for one glanceable graphic. /progres has the real charts.
+ *
+ * The bars are decoration; the sentence above them is the real content. A
+ * screen reader handed eight bare numbers and no weeks learns nothing.
+ */
+function Sparkline({ weeks }: { weeks: { week: string; sessions: number }[] }) {
+  const peak = Math.max(...weeks.map((week) => week.sessions), 1);
+
+  return (
+    <>
+      <p className="sr-only">
+        {weeks
+          .map((week) => `Semaine du ${formatFull(week.week)} : ${week.sessions} séance(s).`)
+          .join(" ")}
+      </p>
+      <div className="flex items-end gap-1">
+        {weeks.map((week, i) => (
+          <div key={week.week} className="flex flex-1 flex-col items-center gap-1" aria-hidden>
+            <span className="font-heading text-xs tabular-nums text-muted-foreground">
+              {week.sessions > 0 ? week.sessions : ""}
+            </span>
+            {/* min-h so an empty week is still a visible baseline, not a gap. */}
+            <div
+              className={cn(
+                "min-h-0.5 w-full rounded-sm",
+                // The last bucket is the current, unfinished week: dimmed so a
+                // Monday doesn't read as a collapse in form.
+                i === weeks.length - 1 ? "bg-primary/40" : "bg-primary",
+              )}
+              style={{ height: `${(week.sessions / peak) * 40}px` }}
+            />
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
