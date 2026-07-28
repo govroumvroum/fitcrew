@@ -25,7 +25,6 @@ import {
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import {
   PromptInput,
-  PromptInputBody,
   PromptInputButton,
   PromptInputFooter,
   PromptInputSubmit,
@@ -188,21 +187,26 @@ export function CoachChat() {
       </Conversation>
 
       <div className="p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        {/*
+          No PromptInputBody: it renders `display: contents`, and InputGroup only
+          switches to a column via `has-[>[data-align=block-end]]` — a
+          direct-child selector. `contents` changes box generation, not selector
+          matching, so the wrapper stayed the real child, the selector never
+          matched, and everything collapsed onto one 32px row.
+        */}
         <PromptInput accept="image/*" maxFiles={4} onSubmit={submit}>
-          <PromptInputBody>
-            <PendingAttachments />
-            <PromptInputTextarea
-              placeholder="Écris au coach…"
-              className="text-base sm:text-sm"
-              disabled={!threadId}
-            />
-            <PromptInputFooter>
-              <PromptInputTools>
-                <AttachButton />
-              </PromptInputTools>
-              <PromptInputSubmit status={chatStatus} disabled={!threadId} />
-            </PromptInputFooter>
-          </PromptInputBody>
+          <PendingAttachments />
+          <PromptInputTextarea
+            placeholder="Écris au coach…"
+            className="text-base sm:text-sm"
+            disabled={!threadId}
+          />
+          <PromptInputFooter>
+            <PromptInputTools>
+              <AttachButton />
+            </PromptInputTools>
+            <PromptInputSubmit status={chatStatus} disabled={!threadId} />
+          </PromptInputFooter>
         </PromptInput>
       </div>
     </>
