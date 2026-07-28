@@ -65,8 +65,12 @@ export function ExerciseDemo({ name, gifUrl }: { name: string; gifUrl: string })
           <SheetDescription>Mouvement en boucle, pas une consigne de charge.</SheetDescription>
         </SheetHeader>
         {/* Fixed box: the GIF is only fetched now that the sheet is open (Radix
-            doesn't mount closed content), so the layout must not jump on load. */}
-        <div className="aspect-square w-full overflow-hidden rounded-lg bg-muted outline outline-white/10">
+            doesn't mount closed content), so the layout must not jump on load.
+            Capped at 360px because the source is 180x180 and that's the ceiling
+            on the free tier — no @2x, and ?resolution= is ignored. A phone shows
+            it near that width anyway; without the cap a wide desktop sheet
+            stretched a 180px GIF past 600px. */}
+        <div className="mx-auto aspect-square w-full max-w-[360px] overflow-hidden rounded-lg bg-muted outline outline-white/10">
           {/* Plain <img>, not next/image: hotlinked third-party GIF, and their
               terms say don't proxy or re-host — which is exactly what the
               optimizer would do. */}
@@ -74,7 +78,10 @@ export function ExerciseDemo({ name, gifUrl }: { name: string; gifUrl: string })
           <img
             src={gifUrl}
             alt={`Démonstration de ${name}`}
-            className="size-full object-cover"
+            // contain, not cover: every GIF is square today, but a non-square one
+            // would get cropped rather than letterboxed, and a cropped
+            // demonstration is worse than a padded one.
+            className="size-full object-contain"
             loading="lazy"
             decoding="async"
           />
