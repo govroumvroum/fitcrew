@@ -2,8 +2,8 @@
 
 import { useUIMessages, type UIMessage } from "@convex-dev/agent/react";
 import type { ChatStatus } from "ai";
-import { useAction, useMutation, useQuery } from "convex/react";
-import { ImagePlusIcon, RotateCcwIcon } from "lucide-react";
+import { useAction, useMutation } from "convex/react";
+import { ImagePlusIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -44,16 +44,15 @@ import {
   type ProgramInput,
   type SwapInput,
 } from "@/components/chat/tool-cards";
+import { useCoachThread } from "@/components/chat/use-coach-thread";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
-import { useLocalDate, useLocalDayStart } from "@/lib/dates";
+import { useLocalDate } from "@/lib/dates";
 
 export function CoachChat() {
-  // undefined while loading OR while the profile row is still being created.
-  const dayStart = useLocalDayStart();
-  const coachThread = useQuery(api.coach.thread, dayStart ? { dayStart } : "skip");
-  const threadId = coachThread?.threadId ?? undefined;
+  const { threadId, rollover } = useCoachThread();
   const today = useLocalDate();
 
   const newThread = useMutation(api.coach.newThread);
@@ -70,20 +69,22 @@ export function CoachChat() {
   // The user's own message only exists once the action has saved it, so it's
   // echoed locally until it comes back over the subscription.
   const [pending, setPending] = useState<string | null>(null);
-  const greeted = useRef(false);
+  // Holds the thread already greeted, not a boolean: switching conversations must
+  // let an empty one be greeted too.
+  const greeted = useRef<string | null>(null);
 
   // A brand-new user has no thread yet: the coach's first session starts here.
   useEffect(() => {
-    if (coachThread && coachThread.threadId === null) {
+    if (rollover && rollover.threadId === null) {
       void newThread().catch(() => toast.error("Le coach ne répond pas."));
     }
-  }, [coachThread, newThread]);
+  }, [rollover, newThread]);
 
   // Empty thread → the coach speaks first (no user message is saved for this).
   useEffect(() => {
-    if (!threadId || !today || greeted.current) return;
+    if (!threadId || !today || greeted.current === threadId) return;
     if (status !== "Exhausted" || results.length > 0) return;
-    greeted.current = true;
+    greeted.current = threadId;
     void greet({ threadId, today }).catch(() => toast.error("Le coach ne répond pas."));
   }, [threadId, today, status, results.length, greet]);
 
@@ -142,17 +143,8 @@ export function CoachChat() {
           <Link href="/">Retour</Link>
         </Button>
         <span className="font-heading text-base font-semibold tracking-tight">Coach</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label="Nouvelle conversation"
-          onClick={() => {
-            greeted.current = false;
-            void newThread();
-          }}
-        >
-          <RotateCcwIcon />
-        </Button>
+        {/* "Nouvelle conversation" lives in the sidebar now — one button, one place. */}
+        <SidebarTrigger className="size-11" aria-label="Conversations" />
       </header>
 
       <Conversation>

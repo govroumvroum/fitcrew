@@ -6,11 +6,12 @@ import {
   listUIMessages,
   stepCountIs,
   syncStreams,
+  updateThreadMetadata,
   type ToolCtx,
   vStreamArgs,
 } from "@convex-dev/agent";
 import { paginationOptsValidator } from "convex/server";
-import { v } from "convex/values";
+import { v, type GenericId } from "convex/values";
 import { z } from "zod";
 import { api, components, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -473,13 +474,75 @@ export const thread = query({
   },
 });
 
+/** Untitled on purpose: the first user message names it (see `titleFrom`). */
 export const newThread = mutation({
   args: {},
   handler: async (ctx) => {
     const user = await requireCurrentUser(ctx);
-    return await createThread(ctx, components.agent, { userId: user._id, title: "Coach" });
+    return await createThread(ctx, components.agent, { userId: user._id });
   },
 });
+
+/** The sidebar's list. Paginated — nobody needs every conversation at once. */
+export const threads = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return { page: [], isDone: true, continueCursor: "" };
+    const result = await ctx.runQuery(components.agent.threads.listThreadsByUserId, {
+      userId: user._id,
+      order: "desc",
+      paginationOpts: args.paginationOpts,
+    });
+    return {
+      ...result,
+      page: result.page.map((t) => ({
+        _id: t._id,
+        _creationTime: t._creationTime,
+        title: t.title ?? null,
+      })),
+    };
+  },
+});
+
+export const renameThread = mutation({
+  args: { threadId: v.string(), title: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    await authorize(ctx, args.threadId, user._id);
+    await updateThreadMetadata(ctx, components.agent, {
+      threadId: args.threadId,
+      patch: { title: args.title.slice(0, 80) },
+    });
+    return null;
+  },
+});
+
+/** Real delete, not archive: the component deletes the messages too, in pages. */
+export const deleteThread = mutation({
+  args: { threadId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    await authorize(ctx, args.threadId, user._id);
+    await ctx.runMutation(components.agent.threads.deleteAllForThreadIdAsync, {
+      threadId: args.threadId as GenericId<"threads">,
+    });
+    return null;
+  },
+});
+
+/**
+ * First user message becomes the title, truncated. No LLM call: a substring is
+ * a perfectly good label and the whole point of this app's prompt budget is not
+ * paying for prose nobody reads.
+ * `"Coach"` was the old blanket title — treat it as unset so old threads get one.
+ */
+async function ensureTitle(ctx: ActionCtx, threadId: string, prompt: string) {
+  const meta = await getThreadMetadata(ctx, components.agent, { threadId });
+  if (meta.title && meta.title !== "Coach") return;
+  const title = prompt.length > 40 ? `${prompt.slice(0, 39).trimEnd()}…` : prompt;
+  await updateThreadMetadata(ctx, components.agent, { threadId, patch: { title } });
+}
 
 export const listMessages = query({
   args: {
@@ -550,6 +613,8 @@ async function stream(
 ) {
   const { user, program } = await ctx.runQuery(internal.coach.context, {});
   await authorize(ctx, threadId, user._id);
+  // After authorize, never before: this writes to the thread.
+  if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);
 
   const result = await coach().streamText(
     ctx,

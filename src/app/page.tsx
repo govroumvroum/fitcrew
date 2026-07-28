@@ -1,16 +1,16 @@
 "use client";
 
 import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
-import { useQuery } from "convex/react";
-import Link from "next/link";
+import { Today } from "@/components/home/today";
 import { Button } from "@/components/ui/button";
-import { api } from "../../convex/_generated/api";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useLocalDate } from "@/lib/dates";
 
 export default function Home() {
-  const me = useQuery(api.users.me);
+  const date = useLocalDate();
 
   return (
-    <div className="flex flex-1 flex-col">
+    <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
       <header className="flex items-center justify-between border-b px-4 py-3">
         <span className="font-heading text-lg font-semibold tracking-tight">FitCrew</span>
         <Show when="signed-out">
@@ -30,41 +30,21 @@ export default function Home() {
         </Show>
       </header>
 
-      <main className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+      <main className="flex flex-1 flex-col">
         <Show when="signed-out">
-          <h1 className="max-w-sm text-3xl font-semibold tracking-tight">
-            Ton coach sportif, et la crew qui va avec.
-          </h1>
-          <p className="max-w-md text-muted-foreground">
-            Programmes sur mesure, séances loguées en deux taps, et un classement pour se tirer la
-            bourre.
-          </p>
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+            <h1 className="max-w-sm text-3xl font-semibold tracking-tight">
+              Ton coach sportif, et la crew qui va avec.
+            </h1>
+            <p className="max-w-md text-muted-foreground">
+              Programmes sur mesure, séances loguées en deux taps, et un classement pour se tirer la
+              bourre.
+            </p>
+          </div>
         </Show>
 
         <Show when="signed-in">
-          <nav className="flex w-full max-w-sm flex-col gap-2">
-            <Button asChild size="lg" className="h-14 text-base">
-              <Link href="/seance">Séance du jour</Link>
-            </Button>
-            <Button asChild variant="secondary" size="lg" className="h-14 text-base">
-              <Link href="/coach">Parler au coach</Link>
-            </Button>
-            <Button asChild variant="ghost" size="lg" className="h-14 text-base">
-              <Link href="/progres">Ma progression</Link>
-            </Button>
-          </nav>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {me === undefined
-              ? "Connexion à Convex…"
-              : me === null
-                ? "Profil en cours de création…"
-                : `Salut ${me.name} 💪`}
-          </h1>
-          <p className="text-muted-foreground">
-            {me?.onboarding
-              ? "Ton programme arrive."
-              : "Prochaine étape : la séance avec le coach."}
-          </p>
+          {date ? <Today date={date} /> : <Skeleton className="m-4 h-44" />}
         </Show>
       </main>
     </div>

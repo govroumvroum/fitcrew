@@ -9,6 +9,7 @@
  */
 
 import type * as coach from "../coach.js";
+import type * as home from "../home.js";
 import type * as http from "../http.js";
 import type * as model from "../model.js";
 import type * as progress from "../progress.js";
@@ -24,6 +25,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   coach: typeof coach;
+  home: typeof home;
   http: typeof http;
   model: typeof model;
   progress: typeof progress;
