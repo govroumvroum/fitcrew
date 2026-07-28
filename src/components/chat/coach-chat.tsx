@@ -47,11 +47,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import { useLocalDate } from "@/lib/dates";
+import { useLocalDate, useLocalDayStart } from "@/lib/dates";
 
 export function CoachChat() {
   // undefined while loading OR while the profile row is still being created.
-  const coachThread = useQuery(api.coach.thread);
+  const dayStart = useLocalDayStart();
+  const coachThread = useQuery(api.coach.thread, dayStart ? { dayStart } : "skip");
   const threadId = coachThread?.threadId ?? undefined;
   const today = useLocalDate();
 

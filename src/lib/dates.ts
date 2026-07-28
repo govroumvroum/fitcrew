@@ -51,3 +51,15 @@ const subscribe = () => () => {};
 export function useLocalDate(): string | null {
   return useSyncExternalStore(subscribe, localDate, () => null);
 }
+
+/** Epoch ms of the user's local midnight. Stable all day, so it's a good query key. */
+function localDayStart() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** Companion to useLocalDate for anything comparing against a stored timestamp. */
+export function useLocalDayStart(): number | null {
+  return useSyncExternalStore(subscribe, localDayStart, () => null);
+}

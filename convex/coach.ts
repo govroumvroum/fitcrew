@@ -448,8 +448,11 @@ async function authorize(ctx: QueryCtx | ActionCtx, threadId: string, userId: Id
  * client just waits. `{ threadId: null }` means they've never talked to it.
  */
 export const thread = query({
-  args: {},
-  handler: async (ctx) => {
+  // Epoch ms of the caller's local midnight. A timestamp, not a date string:
+  // comparing `_creationTime` against a UTC-derived date would discard a thread
+  // started at 00:30 in Bordeaux, which is 22:30 UTC the day before.
+  args: { dayStart: v.number() },
+  handler: async (ctx, args) => {
     const user = await getCurrentUser(ctx);
     if (!user) return null;
     const threads = await ctx.runQuery(components.agent.threads.listThreadsByUserId, {
@@ -457,7 +460,16 @@ export const thread = query({
       order: "desc",
       paginationOpts: { cursor: null, numItems: 1 },
     });
-    return { threadId: threads.page[0]?._id ?? null };
+
+    const latest = threads.page[0];
+    if (!latest) return { threadId: null };
+
+    // One conversation per day. Continuity lives in the database — profile,
+    // program, PRs are rebuilt into the system prompt on every call — so
+    // yesterday's transcript is cost without value. Returning null makes the
+    // client open a fresh thread, and the coach greets you for the new day.
+    // ponytail: a chat spanning midnight splits in two. Nobody will notice.
+    return { threadId: latest._creationTime >= args.dayStart ? latest._id : null };
   },
 });
 
@@ -550,7 +562,14 @@ async function stream(
       // never enough (the AI SDK default).
       stopWhen: stepCountIs(8),
     },
-    { saveStreamDeltas: true },
+    {
+      saveStreamDeltas: true,
+      // The component default is 100 recent messages, re-sent on every turn.
+      // 20 is plenty here: the coach's actual state — profile, current program,
+      // PRs — lives in Convex and is rebuilt into the system prompt each call,
+      // so old transcript is chatter, not memory.
+      contextOptions: { recentMessages: 20 },
+    },
   );
   await result.consumeStream();
 }
