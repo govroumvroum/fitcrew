@@ -294,14 +294,15 @@ function CoachMessage({ message }: { message: UIMessage }) {
           // nothing lands in their profile until they confirm inside it.
           if (tool.type === "tool-extract_screenshot" && tool.state === "output-available") {
             const output = tool.output as { screenshotId: Id<"screenshots">; entries: Entry[] };
-            return output.entries.length > 0 ? (
+            // Empty extractions go through the card too: it already has the
+            // copy for "I couldn't read this" AND a discard button, which a bare
+            // sentence didn't — so the row and its uploaded file used to leak.
+            return (
               <ExtractedReview
                 key={i}
                 screenshotId={output.screenshotId}
                 entries={output.entries}
               />
-            ) : (
-              <span key={i}>Je n&apos;ai rien réussi à lire sur cette capture.</span>
             );
           }
 

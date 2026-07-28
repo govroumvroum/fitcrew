@@ -111,7 +111,8 @@ DATES
 TYPES
 - "workout" : séance de muscu avec des exercices (séries, répétitions, charge).
 - "cardio" : course, vélo, marche, rameur… (durée / distance / FC / calories). Recopie le libellé de l'activité affiché dans "kind" ("Course en extérieur", "Vélo"…), sans le traduire ni le reformuler.
-- "bodyweight" : une pesée (weight_kg).
+- "bodyweight" : une pesée, c'est-à-dire le poids RÉEL affiché (weight_kg).
+  Un écran de composition corporelle n'est une pesée que si le poids réel y figure. « Poids idéal » / « Ideal weight » est un objectif, « Muscle » / « Masse musculaire » et « Masse osseuse » sont des composantes : aucun des trois n'est weight_kg. Si le poids réel n'est pas affiché, ne renvoie aucune entrée pour cet écran.
 
 VOCABULAIRE (les UI sont en français OU en anglais, les deux se mélangent)
 - Durée / Duration / Temps / Time → duration_min
@@ -121,6 +122,7 @@ VOCABULAIRE (les UI sont en français OU en anglais, les deux se mélangent)
 - Poids / Weight / Masse → weight_kg
 - Séries / Sets / Reps / Répétitions / Charge / Load → exercises[].sets
 - Allure / Pace / Cadence / Pas / Steps / Sommeil / Sleep → à ignorer, pas de champ pour ça.
+- Score corporel / Body score / IMC / BMI / Masse grasse / Body fat / Eau / Water / Graisse viscérale / Protéines / Métabolisme de base / Basal metabolism / Âge corporel / Body age → à ignorer, pas de champ pour ça non plus.
 
 ${hint ? APP_HINTS[hint] : `L'app n'est pas connue à l'avance : identifie-la (barre d'état, typographie, couleurs, libellés) et remplis "source". Repères :\n${Object.values(APP_HINTS).join("\n")}`}`;
 }
