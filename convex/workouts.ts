@@ -59,7 +59,11 @@ export const today = query({
       : [];
 
     // One lookup per exercise (~8 max per day), each hitting the index.
-    const prefill: Record<string, { weight: number; reps: number }> = {};
+    //
+    // An ARRAY, not a map keyed by exercise name: Convex field names must be
+    // non-control ASCII, and every exercise here is French — "Développé couché"
+    // as a key throws at serialisation. Values are fine, keys are not.
+    const prefill: { name: string; weight: number; reps: number }[] = [];
     for (const exercise of day?.exercises ?? []) {
       const previous = await ctx.db
         .query("sets")
@@ -69,7 +73,9 @@ export const today = query({
         .order("desc")
         .filter((q) => q.eq(q.field("completed"), true))
         .first();
-      if (previous) prefill[exercise.name] = { weight: previous.weight, reps: previous.reps };
+      if (previous) {
+        prefill.push({ name: exercise.name, weight: previous.weight, reps: previous.reps });
+      }
     }
 
     return { workout, sets, day, dayIndex, prefill };

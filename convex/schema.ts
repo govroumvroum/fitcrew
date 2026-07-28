@@ -56,9 +56,10 @@ export default defineSchema({
     startedAt: v.number(),
     endedAt: v.optional(v.number()),
     notes: v.optional(v.string()),
-    // Keyed by exercise name — a record rather than a field on `sets` because
-    // the note belongs to the exercise in this session, not to one set.
-    exerciseNotes: v.optional(v.record(v.string(), v.string())),
+    // An array, not a record keyed by exercise name: Convex field names must be
+    // non-control ASCII and every exercise name here is French, so
+    // "Développé couché" as a key throws at serialisation.
+    exerciseNotes: v.optional(v.array(v.object({ exercise: v.string(), note: v.string() }))),
   }).index("by_user_and_date", ["userId", "date"]),
 
   // Own table, not an array on workouts: every set check-off is a write, and

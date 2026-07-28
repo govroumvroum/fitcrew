@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
+import Link from "next/link";
 import { CheckIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -72,14 +73,15 @@ export function Session({ date }: { date: string }) {
   const done = sets.filter((set) => set.completed);
 
   if (!workout) {
-    const seed = day.exercises.flatMap((exercise) =>
-      Array.from({ length: exercise.sets }, (_, index) => ({
+    const seed = day.exercises.flatMap((exercise) => {
+      const last = data.prefill.find((p) => p.name === exercise.name);
+      return Array.from({ length: exercise.sets }, (_, index) => ({
         exerciseName: exercise.name,
         index,
-        weight: data.prefill[exercise.name]?.weight ?? 0,
-        reps: data.prefill[exercise.name]?.reps ?? defaultReps(exercise.reps),
-      })),
-    );
+        weight: last?.weight ?? 0,
+        reps: last?.reps ?? defaultReps(exercise.reps),
+      }));
+    });
     return (
       <div className="space-y-6 p-4">
         <Header title={day.name} subtitle={`${day.exercises.length} exercices au programme`} />
@@ -124,6 +126,15 @@ export function Session({ date }: { date: string }) {
           />
         </div>
         {workout.notes ? <p className="text-sm text-muted-foreground">{workout.notes}</p> : null}
+        {/* A finished session is a dead end otherwise: nothing left to tap. */}
+        <div className="flex flex-col gap-2 pt-2">
+          <Button asChild size="lg" className="h-14 text-base">
+            <Link href="/progres">Voir ma progression</Link>
+          </Button>
+          <Button asChild variant="ghost" size="lg" className="h-12">
+            <Link href="/coach">Parler au coach</Link>
+          </Button>
+        </div>
       </div>
     );
   }
