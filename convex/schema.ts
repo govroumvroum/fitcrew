@@ -100,10 +100,20 @@ export default defineSchema({
     source: v.optional(v.string()),
   }).index("by_user_and_date", ["userId", "date"]),
 
+  // One row per measurement day, not per screenshot: scales split a single
+  // weigh-in across a weight screen and a body-composition screen, so two
+  // imports merge into one row keyed by date.
+  //
+  // Every field is optional because a composition screen carries fat/muscle and
+  // no weight at all. A row with nothing in it is never written.
   bodyweight: defineTable({
     userId: v.id("users"),
     date: v.string(),
-    weightKg: v.number(),
+    weightKg: v.optional(v.number()),
+    // Bioimpedance: ±3-5% in absolute terms, but consistent enough on one scale
+    // to read as a trend. Stored as measured, never averaged or corrected.
+    bodyFatPct: v.optional(v.number()),
+    muscleKg: v.optional(v.number()),
     source: v.optional(v.string()),
   }).index("by_user_and_date", ["userId", "date"]),
 

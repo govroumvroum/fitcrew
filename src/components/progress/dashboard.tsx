@@ -47,6 +47,21 @@ function fromDate(today: string, days: number | null) {
 /** `unknown` in: recharts hands its formatters a ReactNode, always a date string here. */
 const dayLabel = (date: unknown) => formatDay(String(date));
 
+/**
+ * Whichever of the three a scale actually reported. Every field is optional —
+ * a body-composition screen carries fat and muscle but no weight — so this
+ * prints what exists rather than "undefined kg".
+ */
+function measures(entry: { weightKg?: number; bodyFatPct?: number; muscleKg?: number }) {
+  return [
+    entry.weightKg !== undefined && `${entry.weightKg} kg`,
+    entry.bodyFatPct !== undefined && `${entry.bodyFatPct} % MG`,
+    entry.muscleKg !== undefined && `${entry.muscleKg} kg muscle`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export function Dashboard({ today }: { today: string }) {
   const [range, setRange] = useState<RangeKey>("3m");
   const [exercise, setExercise] = useState<string | null>(null);
@@ -257,11 +272,12 @@ export function Dashboard({ today }: { today: string }) {
       {data.weights.length > 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>Poids</CardTitle>
+            <CardTitle>Poids &amp; composition</CardTitle>
             <CardDescription>
-              {/* ponytail: latest value + list. A line chart when there are
-                  enough weigh-ins to make a trend mean anything. */}
-              Dernière pesée : {data.weights[0].weightKg} kg
+              {/* ponytail: latest values + list. A weight/masse grasse trend
+                  chart once there are enough weigh-ins for a line to mean
+                  anything — with one row it would be a dot. */}
+              Dernière mesure : {measures(data.weights[0]) || "rien de lisible"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -270,7 +286,7 @@ export function Dashboard({ today }: { today: string }) {
                 <li key={entry._id} className="flex items-baseline gap-2 py-2">
                   <span className="tabular-nums text-muted-foreground">{dayLabel(entry.date)}</span>
                   <span className="ml-auto font-heading font-semibold tabular-nums">
-                    {entry.weightKg} kg
+                    {measures(entry)}
                   </span>
                 </li>
               ))}

@@ -34,6 +34,8 @@ const NUM_FIELDS = [
   ["avg_hr", "FC moy. (bpm)"],
   ["calories", "Calories (kcal)"],
   ["weight_kg", "Poids (kg)"],
+  ["body_fat_pct", "Masse grasse (%)"],
+  ["muscle_kg", "Masse musculaire (kg)"],
 ] as const satisfies readonly (readonly [keyof Entry, string])[];
 
 type NumField = (typeof NUM_FIELDS)[number][0];

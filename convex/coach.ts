@@ -443,7 +443,17 @@ ${cardio
     (c) =>
       `- ${c.date} : ${c.kind}${c.durationMin ? ` ${c.durationMin} min` : ""}${c.distanceKm ? ` ${c.distanceKm} km` : ""}${c.avgHr ? ` FC ${c.avgHr}` : ""}`,
   )
-  .join("\n")}${weight ? `\n- Dernière pesée : ${weight.weightKg} kg (${weight.date})` : ""}
+  .join("\n")}${
+    weight
+      ? `\n- Dernière mesure (${weight.date}) : ${[
+          weight.weightKg !== undefined && `${weight.weightKg} kg`,
+          weight.bodyFatPct !== undefined && `${weight.bodyFatPct} % de masse grasse`,
+          weight.muscleKg !== undefined && `${weight.muscleKg} kg de muscle`,
+        ]
+          .filter(Boolean)
+          .join(", ")}\n  Une balance à impédance se trompe de 3 à 5 % dans l'absolu : commente la tendance, jamais le chiffre exact.`
+      : ""
+  }
 Tiens-en compte pour la fatigue et le volume jambes, mais n'en parle que si c'est pertinent.`
     : ""
 }

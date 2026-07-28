@@ -20,6 +20,8 @@ const blank = {
   avg_hr: null,
   calories: null,
   weight_kg: null,
+  body_fat_pct: null,
+  muscle_kg: null,
 };
 
 // A plain cardio row survives intact, and absent fields stay absent (not 0/null).
@@ -60,6 +62,27 @@ assert.equal(
 // A label with no numbers behind it is not an entry: `kind` must not rescue an
 // otherwise-empty row from being dropped.
 assert.equal(normalizeExtraction({ entries: [{ ...blank, kind: "Course" }] }, TODAY).length, 0);
+
+// A body-composition screen has no weight at all: fat and muscle alone must
+// survive, or the entry gets dropped as empty and the capture reads as garbage.
+const [composition] = normalizeExtraction(
+  { entries: [{ ...blank, type: "bodyweight", body_fat_pct: 20.1, muscle_kg: 55 }] },
+  TODAY,
+);
+assert.deepEqual(composition, {
+  source: "zepp",
+  type: "bodyweight",
+  date: TODAY,
+  body_fat_pct: 20.1,
+  muscle_kg: 55,
+});
+
+// An impossible body-fat reading drops that field and keeps the rest.
+const [misfat] = normalizeExtraction(
+  { entries: [{ ...blank, type: "bodyweight", body_fat_pct: 201, muscle_kg: 55 }] },
+  TODAY,
+);
+assert.deepEqual(Object.keys(misfat).sort(), ["date", "muscle_kg", "source", "type"]);
 
 // Missing or malformed date falls back to today rather than inventing one.
 assert.equal(normalizeExtraction({ entries: [{ ...blank, calories: 300 }] }, TODAY)[0].date, TODAY);

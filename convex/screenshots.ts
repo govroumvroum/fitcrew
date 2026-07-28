@@ -36,6 +36,8 @@ const entry = v.object({
   avg_hr: v.optional(v.number()),
   calories: v.optional(v.number()),
   weight_kg: v.optional(v.number()),
+  body_fat_pct: v.optional(v.number()),
+  muscle_kg: v.optional(v.number()),
 });
 
 export type Source = Infer<typeof source>;
@@ -69,6 +71,8 @@ const zEntry = z.object({
   avg_hr: z.number().nullable(),
   calories: z.number().nullable(),
   weight_kg: z.number().nullable(),
+  body_fat_pct: z.number().nullable(),
+  muscle_kg: z.number().nullable(),
 });
 
 const zExtraction = z.object({ entries: z.array(zEntry) });
@@ -111,8 +115,9 @@ DATES
 TYPES
 - "workout" : séance de muscu avec des exercices (séries, répétitions, charge).
 - "cardio" : course, vélo, marche, rameur… (durée / distance / FC / calories). Recopie le libellé de l'activité affiché dans "kind" ("Course en extérieur", "Vélo"…), sans le traduire ni le reformuler.
-- "bodyweight" : une pesée, c'est-à-dire le poids RÉEL affiché (weight_kg).
-  Un écran de composition corporelle n'est une pesée que si le poids réel y figure. « Poids idéal » / « Ideal weight » est un objectif, « Muscle » / « Masse musculaire » et « Masse osseuse » sont des composantes : aucun des trois n'est weight_kg. Si le poids réel n'est pas affiché, ne renvoie aucune entrée pour cet écran.
+- "bodyweight" : une mesure corporelle. Trois champs possibles, indépendants : weight_kg (le poids RÉEL affiché), body_fat_pct (« Masse grasse » / « Body fat », en %), muscle_kg (« Muscle » / « Masse musculaire », en kg).
+  Un écran de composition corporelle est une entrée "bodyweight" valide même sans poids : renvoie body_fat_pct et/ou muscle_kg, avec weight_kg à null.
+  PIÈGES, à ne JAMAIS mettre dans weight_kg : « Poids idéal » / « Ideal weight » (c'est un objectif calculé, pas une mesure), « Masse musculaire » (c'est muscle_kg), « Masse osseuse » / « Bone mass » (aucun champ).
 
 VOCABULAIRE (les UI sont en français OU en anglais, les deux se mélangent)
 - Durée / Duration / Temps / Time → duration_min
@@ -122,7 +127,9 @@ VOCABULAIRE (les UI sont en français OU en anglais, les deux se mélangent)
 - Poids / Weight / Masse → weight_kg
 - Séries / Sets / Reps / Répétitions / Charge / Load → exercises[].sets
 - Allure / Pace / Cadence / Pas / Steps / Sommeil / Sleep → à ignorer, pas de champ pour ça.
-- Score corporel / Body score / IMC / BMI / Masse grasse / Body fat / Eau / Water / Graisse viscérale / Protéines / Métabolisme de base / Basal metabolism / Âge corporel / Body age → à ignorer, pas de champ pour ça non plus.
+- Masse grasse / Body fat (%) → body_fat_pct
+- Muscle / Masse musculaire (kg) → muscle_kg
+- Score corporel / Body score / IMC / BMI / Eau / Water / Graisse viscérale / Visceral fat / Protéines / Métabolisme de base / Basal metabolism / Âge corporel / Body age / Masse osseuse / Bone mass / Poids idéal / Ideal weight → à ignorer, pas de champ pour ça.
 
 ${hint ? APP_HINTS[hint] : `L'app n'est pas connue à l'avance : identifie-la (barre d'état, typographie, couleurs, libellés) et remplis "source". Repères :\n${Object.values(APP_HINTS).join("\n")}`}`;
 }
@@ -140,6 +147,9 @@ const LIMITS = {
   avg_hr: 250,
   calories: 20000,
   weight_kg: 400,
+  // 70% body fat is beyond any real reading; a bigger number is a misparse.
+  body_fat_pct: 70,
+  muscle_kg: 100,
 } as const;
 
 function plausible(field: keyof typeof LIMITS, n: number | null): number | undefined {
@@ -171,10 +181,14 @@ export function normalizeExtraction(raw: unknown, today: string): Entry[] {
     const avg_hr = plausible("avg_hr", e.avg_hr);
     const calories = plausible("calories", e.calories);
     const weight_kg = plausible("weight_kg", e.weight_kg);
+    const body_fat_pct = plausible("body_fat_pct", e.body_fat_pct);
+    const muscle_kg = plausible("muscle_kg", e.muscle_kg);
 
     const empty =
       exercises.length === 0 &&
-      [duration_min, distance_km, avg_hr, calories, weight_kg].every((n) => n === undefined);
+      [duration_min, distance_km, avg_hr, calories, weight_kg, body_fat_pct, muscle_kg].every(
+        (n) => n === undefined,
+      );
     if (empty) return [];
 
     return [
@@ -191,6 +205,8 @@ export function normalizeExtraction(raw: unknown, today: string): Entry[] {
         ...(avg_hr !== undefined && { avg_hr }),
         ...(calories !== undefined && { calories }),
         ...(weight_kg !== undefined && { weight_kg }),
+        ...(body_fat_pct !== undefined && { body_fat_pct }),
+        ...(muscle_kg !== undefined && { muscle_kg }),
       },
     ];
   });
@@ -334,13 +350,33 @@ export const confirm = mutation({
         continue;
       }
       if (e.type === "bodyweight") {
-        if (e.weight_kg === undefined) continue; // nothing to store
-        await ctx.db.insert("bodyweight", {
-          userId: user._id,
-          date: e.date,
-          weightKg: e.weight_kg,
-          source: e.source,
-        });
+        // Only the fields actually read: patching a key to `undefined` REMOVES
+        // it in Convex, so spreading absent ones would erase what the other
+        // screenshot of the same weigh-in already stored.
+        const measured = {
+          ...(e.weight_kg !== undefined && { weightKg: e.weight_kg }),
+          ...(e.body_fat_pct !== undefined && { bodyFatPct: e.body_fat_pct }),
+          ...(e.muscle_kg !== undefined && { muscleKg: e.muscle_kg }),
+        };
+        if (Object.keys(measured).length === 0) continue; // nothing to store
+
+        // One row per day: a scale splits a single weigh-in across a weight
+        // screen and a composition screen, and importing both used to give two
+        // rows for one morning.
+        const existing = await ctx.db
+          .query("bodyweight")
+          .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", e.date))
+          .first();
+        if (existing) {
+          await ctx.db.patch("bodyweight", existing._id, { ...measured, source: e.source });
+        } else {
+          await ctx.db.insert("bodyweight", {
+            userId: user._id,
+            date: e.date,
+            ...measured,
+            source: e.source,
+          });
+        }
         others++;
         continue;
       }
