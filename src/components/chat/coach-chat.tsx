@@ -4,6 +4,7 @@ import { useUIMessages, type UIMessage } from "@convex-dev/agent/react";
 import type { ChatStatus } from "ai";
 import { useAction, useMutation } from "convex/react";
 import { ImagePlusIcon } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -142,7 +143,20 @@ export function CoachChat() {
         <Button asChild variant="ghost" size="sm">
           <Link href="/">Retour</Link>
         </Button>
-        <span className="font-heading text-base font-semibold tracking-tight">Coach</span>
+        <span className="flex items-center gap-2 font-heading text-base font-semibold tracking-tight">
+          {/* Once in the header, not per message: a repeated avatar down a phone
+              chat is noise. The source PNG has no alpha, so the white field
+              becomes the coin — hence ring rather than a border. */}
+          <Image
+            src="/coach.png"
+            alt=""
+            width={28}
+            height={28}
+            className="rounded-full ring-1 ring-white/10"
+            priority
+          />
+          Coach
+        </span>
         {/* "Nouvelle conversation" lives in the sidebar now — one button, one place. */}
         <SidebarTrigger className="size-11" aria-label="Conversations" />
       </header>
@@ -188,7 +202,28 @@ export function CoachChat() {
           matching, so the wrapper stayed the real child, the selector never
           matched, and everything collapsed onto one 32px row.
         */}
-        <PromptInput accept="image/*" maxFiles={4} onSubmit={submit}>
+        <PromptInput
+          accept="image/*"
+          multiple
+          maxFiles={4}
+          // 10 MB: a phone screenshot is 1-3 MB, a photo can be bigger.
+          maxFileSize={10 * 1024 * 1024}
+          // Drop anywhere on the page, not just on the composer — the composer
+          // is a small target and the thing you're dragging covers it.
+          globalDrop
+          onError={(error) =>
+            toast.error(
+              error.code === "max_files"
+                ? "4 images maximum."
+                : error.code === "max_file_size"
+                  ? "Image trop lourde (10 Mo max)."
+                  : "Images uniquement.",
+            )
+          }
+          onSubmit={submit}
+        >
+          {/* Paste needs no handler here: PromptInputTextarea already has its own
+              onPaste that attaches clipboard files. */}
           <PendingAttachments />
           <PromptInputTextarea
             placeholder="Écris au coach…"
