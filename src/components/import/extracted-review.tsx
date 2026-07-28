@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const SOURCE_LABEL: Record<Entry["source"], string> = {
   apple_health: "Apple Santé",
@@ -52,9 +53,12 @@ export function ExtractedReview({
 }) {
   const confirm = useMutation(api.screenshots.confirm);
   const discard = useMutation(api.screenshots.discard);
+  // The card lives in a permanent message stream, so its state has to come from
+  // the row, not from React: `null` = discarded (the row is deleted), `confirmed`
+  // = already imported. With local state only, a reload brought every form back.
+  const status = useQuery(api.screenshots.status, { screenshotId });
   const [entries, setEntries] = useState(initial);
   const [pending, setPending] = useState(false);
-  const [done, setDone] = useState<"saved" | "discarded" | null>(null);
 
   function patch(i: number, changes: Partial<Entry>) {
     setEntries((prev) => prev.map((e, j) => (j === i ? { ...e, ...changes } : e)));
@@ -79,7 +83,7 @@ export function ExtractedReview({
         await discard({ screenshotId });
         toast("Import annulé.");
       }
-      setDone(action);
+      // No local `done` flag: the `status` subscription reports the new state.
       onDone?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Ça a raté, réessaie.");
@@ -88,12 +92,17 @@ export function ExtractedReview({
     }
   }
 
-  if (done) {
+  if (status === undefined) return <Skeleton className="h-24 w-full" />;
+
+  // Row gone = discarded. Flag set = already committed. Either way the form is
+  // over, and it stays over across reloads.
+  if (status === null) {
     return (
-      <p className="text-sm text-muted-foreground">
-        {done === "saved" ? "Données ajoutées à ton profil. 💪" : "Rien n'a été enregistré."}
-      </p>
+      <p className="text-sm text-muted-foreground">Import annulé, rien n&apos;a été enregistré.</p>
     );
+  }
+  if (status.confirmed) {
+    return <p className="text-sm text-muted-foreground">Données ajoutées à ton profil. 💪</p>;
   }
 
   if (entries.length === 0) {
@@ -115,6 +124,18 @@ export function ExtractedReview({
       <p className="text-sm text-muted-foreground">
         Voilà ce que j'ai lu. Corrige ce qui est faux, puis valide — rien n'est enregistré avant.
       </p>
+
+      {/* The capture itself, so "is this right?" can be answered by looking.
+          Plain <img>: the URL is a signed Convex storage link, not a known host
+          next/image could be configured for. */}
+      {status.url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={status.url}
+          alt="La capture importée"
+          className="max-h-48 w-auto rounded-md outline outline-white/10"
+        />
+      )}
 
       {entries.map((entry, i) => (
         // Extractions have no stable id; the list only shrinks via the remove

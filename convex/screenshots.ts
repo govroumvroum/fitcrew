@@ -4,8 +4,8 @@ import { type Infer, v } from "convex/values";
 import { z } from "zod";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { action, internalMutation, mutation } from "./_generated/server";
-import { requireCurrentUser } from "./users";
+import { action, internalMutation, mutation, query } from "./_generated/server";
+import { getCurrentUser, requireCurrentUser } from "./users";
 
 /** One edit swaps the vision model everywhere. */
 export const VISION_MODEL = "openai/gpt-5.6-luna";
@@ -266,6 +266,30 @@ export const extract = action({
 });
 
 /** The only path from an extraction to the user's profile. Explicit, once. */
+/**
+ * Whether this capture is still awaiting review, and where to see it.
+ *
+ * The review card lives in the message stream, which is permanent — so its state
+ * has to come from here, not from React. Reloading used to bring every form
+ * back, including ones already imported or cancelled.
+ *
+ * `null` means the row is gone, i.e. it was discarded. `confirm` sets the flag,
+ * `discard` deletes the row, so those two cases are distinguishable.
+ */
+export const status = query({
+  args: { screenshotId: v.id("screenshots") },
+  handler: async (ctx, args) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return null;
+    const shot = await ctx.db.get("screenshots", args.screenshotId);
+    if (!shot || shot.userId !== user._id) return null;
+    return {
+      confirmed: shot.confirmed,
+      url: await ctx.storage.getUrl(shot.storageId),
+    };
+  },
+});
+
 export const confirm = mutation({
   args: { screenshotId: v.id("screenshots"), entries: v.array(entry) },
   handler: async (ctx, args) => {
