@@ -107,6 +107,29 @@ export default defineSchema({
     source: v.optional(v.string()),
   }).index("by_user_and_date", ["userId", "date"]),
 
+  // Reference data seeded once from exercisedb's free v1 dataset (~1500 rows).
+  // English names — the dataset has no translations.
+  exerciseDemos: defineTable({
+    externalId: v.string(),
+    name: v.string(), // english, lowercase, as delivered
+    slug: v.string(), // normalised for matching: lowercased, unaccented, punctuation stripped
+    gifUrl: v.string(),
+    bodyParts: v.array(v.string()),
+    targetMuscles: v.array(v.string()),
+    equipments: v.array(v.string()),
+  })
+    .index("by_slug", ["slug"])
+    .index("by_external_id", ["externalId"]),
+
+  // French name -> demo, resolved once per distinct name and cached forever.
+  // `demoId: null` is a real answer ("no match"), cached so we stop re-asking
+  // the model about an exercise the dataset simply doesn't have.
+  exerciseDemoMatches: defineTable({
+    exerciseName: v.string(), // the French name as the coach wrote it
+    englishGuess: v.optional(v.string()), // what the model translated it to
+    demoId: v.union(v.id("exerciseDemos"), v.null()),
+  }).index("by_exercise_name", ["exerciseName"]),
+
   screenshots: defineTable({
     userId: v.id("users"),
     storageId: v.id("_storage"),

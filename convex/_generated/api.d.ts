@@ -9,6 +9,7 @@
  */
 
 import type * as coach from "../coach.js";
+import type * as exerciseDemos from "../exerciseDemos.js";
 import type * as home from "../home.js";
 import type * as http from "../http.js";
 import type * as model from "../model.js";
@@ -25,6 +26,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   coach: typeof coach;
+  exerciseDemos: typeof exerciseDemos;
   home: typeof home;
   http: typeof http;
   model: typeof model;

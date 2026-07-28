@@ -5,7 +5,14 @@ import Link from "next/link";
 import { CheckIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
   Select,
@@ -18,6 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../../convex/_generated/api";
 import type { Doc } from "../../../convex/_generated/dataModel";
+import { ExerciseDemo, useExerciseDemos } from "./demo";
 import { defaultReps, workingValues } from "./prescription";
 import { REST_OPTIONS, RestTimerBar, useRestTimer } from "./rest-timer";
 
@@ -49,6 +57,9 @@ export function Session({ date }: { date: string }) {
   });
 
   const timer = useRestTimer();
+  // Unconditional (hook rules) and cheap: cached lookups, no GIF is fetched
+  // until a sheet is actually opened.
+  const demoUrlFor = useExerciseDemos(data?.day?.exercises.map((it) => it.name) ?? []);
   // Working weight/reps per exercise while the session runs; only written to a
   // set row when that set is checked off, so +/- taps cost nothing.
   const [edits, setEdits] = useState<Record<string, Values>>({});
@@ -174,6 +185,8 @@ export function Session({ date }: { date: string }) {
           const values = valuesFor(exercise.name, exercise.reps);
           const setValues = (next: Values) =>
             setEdits((prev) => ({ ...prev, [exercise.name]: next }));
+          // No match (or not resolved yet) → no affordance at all.
+          const demoUrl = demoUrlFor(exercise.name);
 
           return (
             <Card key={exercise.name}>
@@ -183,6 +196,11 @@ export function Session({ date }: { date: string }) {
                   {exercise.sets} × {exercise.reps} · repos {rest ?? exercise.restSeconds}s
                   {exercise.notes ? ` · ${exercise.notes}` : ""}
                 </CardDescription>
+                {demoUrl ? (
+                  <CardAction>
+                    <ExerciseDemo name={exercise.name} gifUrl={demoUrl} />
+                  </CardAction>
+                ) : null}
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex gap-2">
