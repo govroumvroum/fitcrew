@@ -144,9 +144,12 @@ export function bestPrs<T extends { exerciseName: string; type: PrType; value: n
 /**
  * Called from `workouts.finish`, so a PR read is a lookup and never a scan of
  * every set ever logged. Idempotent: re-finishing a session ties its own
- * records and a tie is not a record.
+ * records and a tie is not a record — hence an empty list the second time.
  */
-export async function recordPrs(ctx: MutationCtx, workout: Doc<"workouts">): Promise<void> {
+export async function recordPrs(
+  ctx: MutationCtx,
+  workout: Doc<"workouts">,
+): Promise<{ exerciseName: string; type: PrType; value: number }[]> {
   const sets = await ctx.db
     .query("sets")
     .withIndex("by_workout", (q) => q.eq("workoutId", workout._id))
@@ -163,6 +166,7 @@ export async function recordPrs(ctx: MutationCtx, workout: Doc<"workouts">): Pro
     bestPrs(history).map((pr) => [`${pr.exerciseName}|${pr.type}`, pr.value]),
   );
 
+  const broken: { exerciseName: string; type: PrType; value: number }[] = [];
   for (const candidate of prCandidates(sets)) {
     const previous = standing.get(`${candidate.exerciseName}|${candidate.type}`);
     if (previous !== undefined && candidate.value <= previous) continue;
@@ -174,7 +178,9 @@ export async function recordPrs(ctx: MutationCtx, workout: Doc<"workouts">): Pro
       date: workout.date,
       workoutId: workout._id,
     });
+    broken.push(candidate);
   }
+  return broken;
 }
 
 // ponytail: newest 150 sessions in range (~a year of training). Paginate or
@@ -200,6 +206,26 @@ export const overview = query({
         .order("desc")
         .take(MAX_WORKOUTS)
     ).reverse();
+
+    // Imported from screenshots, never from a logged session: no sets, so these
+    // sit outside `sessions` and the volume maths entirely.
+    // ponytail: written out twice rather than behind a generic helper — a
+    // parameterised table name loses the index types.
+    const cardio = await ctx.db
+      .query("cardio")
+      .withIndex("by_user_and_date", (q) =>
+        q.eq("userId", user._id).gte("date", args.from).lte("date", args.to),
+      )
+      .order("desc")
+      .take(100);
+
+    const weights = await ctx.db
+      .query("bodyweight")
+      .withIndex("by_user_and_date", (q) =>
+        q.eq("userId", user._id).gte("date", args.from).lte("date", args.to),
+      )
+      .order("desc")
+      .take(100);
 
     const prs = bestPrs(
       await ctx.db
@@ -264,6 +290,8 @@ export const overview = query({
         .map(([name, points]) => ({ name, points }))
         .sort((a, b) => b.points.length - a.points.length),
       prs,
+      cardio,
+      weights,
     };
   },
 });

@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import { TrophyIcon } from "lucide-react";
 import { useState } from "react";
 import { formatDay } from "@/lib/dates";
+import { PR_LABELS, TROPHY } from "@/lib/prs";
 import {
   Bar,
   BarChart,
@@ -45,12 +46,6 @@ function fromDate(today: string, days: number | null) {
 /** `unknown` in: recharts hands its formatters a ReactNode, always a date string here. */
 const dayLabel = (date: unknown) => formatDay(String(date));
 
-const PR_LABELS = {
-  max_weight: { text: "Charge max", unit: "kg" },
-  max_reps: { text: "Reps max", unit: "reps" },
-  max_volume: { text: "Volume max", unit: "kg" },
-} as const;
-
 export function Dashboard({ today }: { today: string }) {
   const [range, setRange] = useState<RangeKey>("3m");
   const [exercise, setExercise] = useState<string | null>(null);
@@ -66,8 +61,9 @@ export function Dashboard({ today }: { today: string }) {
   const selected =
     data.exercises.find((item) => item.name === exercise) ?? data.exercises[0] ?? null;
 
+  // No bottom padding below: /progres reserves --tab-bar for the tab bar.
   return (
-    <div className="space-y-4 p-4 pb-16">
+    <div className="space-y-4 p-4">
       <div>
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Ma progression</h1>
         <p className="text-sm text-muted-foreground">Les chiffres montent, ou pas. On verra.</p>
@@ -89,8 +85,12 @@ export function Dashboard({ today }: { today: string }) {
         <Stat label="Semaines d'affilée" value={data.streak} />
       </div>
 
+      {/* Only "nothing here" when there's genuinely nothing: an imported cardio
+          with no muscu session still renders its own card below. */}
       {data.sessions.length === 0 ? (
-        <Empty>Rien sur cette période. Va soulever quelque chose.</Empty>
+        data.cardio.length === 0 && data.weights.length === 0 ? (
+          <Empty>Rien sur cette période. Va soulever quelque chose.</Empty>
+        ) : null
       ) : (
         <>
           <Card>
@@ -221,6 +221,63 @@ export function Dashboard({ today }: { today: string }) {
         </>
       )}
 
+      {/* Imported cardio and weigh-ins. Their own cards, not merged into
+          "Dernières séances": they have no sets and no volume, so they'd read
+          as broken muscu rows. Hidden entirely when there's nothing. */}
+      {data.cardio.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Cardio</CardTitle>
+            <CardDescription>Importé de tes captures</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y text-sm">
+              {data.cardio.map((entry) => (
+                <li key={entry._id} className="flex items-baseline gap-2 py-2">
+                  <span className="tabular-nums text-muted-foreground">{dayLabel(entry.date)}</span>
+                  <span className="truncate">{entry.kind}</span>
+                  <span className="ml-auto shrink-0 text-muted-foreground tabular-nums">
+                    {[
+                      entry.durationMin && `${entry.durationMin} min`,
+                      entry.distanceKm && `${entry.distanceKm} km`,
+                      entry.avgHr && `${entry.avgHr} bpm`,
+                      entry.calories && `${entry.calories} kcal`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {data.weights.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Poids</CardTitle>
+            <CardDescription>
+              {/* ponytail: latest value + list. A line chart when there are
+                  enough weigh-ins to make a trend mean anything. */}
+              Dernière pesée : {data.weights[0].weightKg} kg
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y text-sm">
+              {data.weights.map((entry) => (
+                <li key={entry._id} className="flex items-baseline gap-2 py-2">
+                  <span className="tabular-nums text-muted-foreground">{dayLabel(entry.date)}</span>
+                  <span className="ml-auto font-heading font-semibold tabular-nums">
+                    {entry.weightKg} kg
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Records</CardTitle>
@@ -235,7 +292,7 @@ export function Dashboard({ today }: { today: string }) {
             <ul className="divide-y text-sm">
               {data.prs.map((pr) => (
                 <li key={`${pr.exerciseName}|${pr.type}`} className="flex items-center gap-2 py-2">
-                  <TrophyIcon className="size-4 shrink-0 text-[oklch(0.8_0.086_27.255)]" />
+                  <TrophyIcon className={TROPHY} />
                   <span className="truncate">{pr.exerciseName}</span>
                   <Badge variant="secondary" className="shrink-0">
                     {PR_LABELS[pr.type].text}

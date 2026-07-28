@@ -133,7 +133,29 @@ async function loadContext(ctx: QueryCtx) {
   return { user, program };
 }
 
-export const context = internalQuery({ args: {}, handler: loadContext });
+/**
+ * Adds what the user did outside the gym. Fixed counts rather than a date
+ * window: a query can't read the clock, and "the last few" is what the coach
+ * needs anyway. Not in `loadContext` — `exerciseContext` would pay for reads it
+ * never uses.
+ */
+export const context = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const base = await loadContext(ctx);
+    const cardio = await ctx.db
+      .query("cardio")
+      .withIndex("by_user_and_date", (q) => q.eq("userId", base.user._id))
+      .order("desc")
+      .take(5);
+    const weights = await ctx.db
+      .query("bodyweight")
+      .withIndex("by_user_and_date", (q) => q.eq("userId", base.user._id))
+      .order("desc")
+      .take(1);
+    return { ...base, cardio, weight: weights[0] ?? null };
+  },
+});
 
 /** Grounding for "pourquoi cet exercice ?" — the prescription plus what the user actually lifted. */
 export const exerciseContext = internalQuery({
@@ -361,7 +383,13 @@ const QUESTIONS = `1. Niveau (débutant / intermédiaire / avancé)
 6. Durée de séance préférée (30 min / 45 min / 1 h / 1 h+)
 7. Matériel dispo (salle complète, haltères, poids du corps…)`;
 
-function systemPrompt(user: Doc<"users">, program: Doc<"programs"> | null, today: string) {
+function systemPrompt(
+  user: Doc<"users">,
+  program: Doc<"programs"> | null,
+  today: string,
+  cardio: Doc<"cardio">[] = [],
+  weight: Doc<"bodyweight"> | null = null,
+) {
   const onboarding = user.onboarding;
 
   return `Tu es le coach sportif de ${user.name} dans l'app FitCrew. Tu parles français, tu tutoies, tu es bref : c'est une conversation sur un téléphone, pas un article de blog. 2-6 phrases par message, sauf quand tu présentes un programme.
@@ -405,6 +433,19 @@ ${program.days
 Progression : ${program.progressionRules}
 Deload : ${program.deloadEveryWeeks ? `toutes les ${program.deloadEveryWeeks} semaines` : "non défini"}`
     : "PROGRAMME ACTUEL : aucun."
+}
+
+${
+  cardio.length > 0 || weight
+    ? `HORS MUSCU (importé de ses captures — il ne te l'a pas raconté, ne fais pas semblant du contraire)
+${cardio
+  .map(
+    (c) =>
+      `- ${c.date} : ${c.kind}${c.durationMin ? ` ${c.durationMin} min` : ""}${c.distanceKm ? ` ${c.distanceKm} km` : ""}${c.avgHr ? ` FC ${c.avgHr}` : ""}`,
+  )
+  .join("\n")}${weight ? `\n- Dernière pesée : ${weight.weightKg} kg (${weight.date})` : ""}
+Tiens-en compte pour la fatigue et le volume jambes, mais n'en parle que si c'est pertinent.`
+    : ""
 }
 
 RÈGLES PROGRAMME (quand tu appelles generate_program)
@@ -611,7 +652,7 @@ async function stream(
     | { prompt: string; messages?: { role: "user"; content: string }[] }
     | { messages: { role: "user"; content: string }[] },
 ) {
-  const { user, program } = await ctx.runQuery(internal.coach.context, {});
+  const { user, program, cardio, weight } = await ctx.runQuery(internal.coach.context, {});
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
   if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);
@@ -621,7 +662,7 @@ async function stream(
     { userId: user._id, threadId },
     {
       ...promptArgs,
-      system: systemPrompt(user, program, today),
+      system: systemPrompt(user, program, today, cardio, weight),
       tools: coachTools(today),
       // A tool call must be followed by the coach's own words, so one step is
       // never enough (the AI SDK default).

@@ -14,6 +14,7 @@ const blank = {
   type: "cardio",
   date: null,
   exercises: null,
+  kind: null,
   duration_min: null,
   distance_km: null,
   avg_hr: null,
@@ -34,6 +35,31 @@ assert.deepEqual(cardio, {
   distance_km: 8.4,
   avg_hr: 151,
 });
+
+// `kind` is trimmed and bounded; blank-but-present is treated as absent, so
+// `confirm` falls back to its own label instead of storing "".
+assert.equal(
+  normalizeExtraction(
+    { entries: [{ ...blank, kind: "  Course en extérieur  ", duration_min: 30 }] },
+    TODAY,
+  )[0].kind,
+  "Course en extérieur",
+);
+assert.equal(
+  normalizeExtraction({ entries: [{ ...blank, kind: "   ", duration_min: 30 }] }, TODAY)[0].kind,
+  undefined,
+);
+assert.equal(
+  normalizeExtraction(
+    { entries: [{ ...blank, kind: "x".repeat(200), duration_min: 30 }] },
+    TODAY,
+  )[0].kind?.length,
+  60,
+);
+
+// A label with no numbers behind it is not an entry: `kind` must not rescue an
+// otherwise-empty row from being dropped.
+assert.equal(normalizeExtraction({ entries: [{ ...blank, kind: "Course" }] }, TODAY).length, 0);
 
 // Missing or malformed date falls back to today rather than inventing one.
 assert.equal(normalizeExtraction({ entries: [{ ...blank, calories: 300 }] }, TODAY)[0].date, TODAY);

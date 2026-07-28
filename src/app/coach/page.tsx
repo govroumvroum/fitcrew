@@ -6,8 +6,9 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function CoachPage() {
-  // h-dvh, not min-h: the message list scrolls inside a fixed viewport so the
-  // composer stays under the thumb. The sidebar has to be SidebarInset's sibling
+  // A fixed height, not min-h: the message list scrolls inside a fixed viewport
+  // so the composer stays under the thumb. The viewport stops short of the tab
+  // bar. The sidebar has to be SidebarInset's sibling
   // — its desktop gap is a `peer-` selector.
   //
   // Suspense: `?thread=` is read with useSearchParams (via nuqs), which a static
@@ -16,7 +17,7 @@ export default function CoachPage() {
   return (
     <Suspense fallback={<CoachSkeleton />}>
       <NuqsAdapter>
-        <SidebarProvider className="h-dvh min-h-dvh">
+        <SidebarProvider className="h-[calc(100dvh-var(--tab-bar))] min-h-0">
           <ThreadSidebar />
           <SidebarInset className="min-w-0 overflow-hidden">
             <Shell>
@@ -35,10 +36,10 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function CoachSkeleton() {
   return (
-    <main className="h-dvh">
+    <main className="h-[calc(100dvh-var(--tab-bar))]">
       <Shell>
+        {/* Mirrors the real header: title left, sidebar trigger right. */}
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <Skeleton className="h-8 w-16" />
           <span className="font-heading text-base font-semibold tracking-tight">Coach</span>
           <Skeleton className="size-11" />
         </div>

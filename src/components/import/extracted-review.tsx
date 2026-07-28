@@ -73,11 +73,10 @@ export function ExtractedReview({
     setPending(true);
     try {
       if (action === "saved") {
-        const { workouts } = await confirm({ screenshotId, entries });
+        const { workouts, others } = await confirm({ screenshotId, entries });
+        const added = workouts + others;
         toast.success(
-          workouts > 0
-            ? `C'est enregistré — ${workouts} séance(s) ajoutée(s).`
-            : "C'est enregistré.",
+          added > 0 ? `C'est enregistré — ${added} entrée(s) ajoutée(s).` : "C'est enregistré.",
         );
       } else {
         await discard({ screenshotId });
@@ -166,6 +165,19 @@ export function ExtractedReview({
                 onChange={(e) => patch(i, { date: e.target.value })}
               />
             </Field>
+
+            {/* Cardio only: the activity label the app showed. Editable because
+                it's the one cardio field that's OCR'd text, not a number. */}
+            {entry.type === "cardio" && (
+              <Field label="Activité" htmlFor={`kind-${i}`}>
+                <Input
+                  id={`kind-${i}`}
+                  value={entry.kind ?? ""}
+                  placeholder="Course, vélo…"
+                  onChange={(e) => patch(i, { kind: e.target.value })}
+                />
+              </Field>
+            )}
 
             {NUM_FIELDS.filter(([f]) => entry[f] !== undefined).map(([field, label]) => (
               <Field key={field} label={label} htmlFor={`${field}-${i}`}>

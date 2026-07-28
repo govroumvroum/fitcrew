@@ -30,6 +30,7 @@ const entry = v.object({
       }),
     ),
   ),
+  kind: v.optional(v.string()), // cardio only: "course", "vélo"… as the app labels it
   duration_min: v.optional(v.number()),
   distance_km: v.optional(v.number()),
   avg_hr: v.optional(v.number()),
@@ -59,6 +60,10 @@ const zEntry = z.object({
       }),
     )
     .nullable(),
+  kind: z
+    .string()
+    .nullable()
+    .describe('Type d\'activité cardio tel qu\'affiché : "Course", "Vélo"… null si type != cardio'),
   duration_min: z.number().nullable(),
   distance_km: z.number().nullable(),
   avg_hr: z.number().nullable(),
@@ -105,7 +110,7 @@ DATES
 
 TYPES
 - "workout" : séance de muscu avec des exercices (séries, répétitions, charge).
-- "cardio" : course, vélo, marche, rameur… (durée / distance / FC / calories).
+- "cardio" : course, vélo, marche, rameur… (durée / distance / FC / calories). Recopie le libellé de l'activité affiché dans "kind" ("Course en extérieur", "Vélo"…), sans le traduire ni le reformuler.
 - "bodyweight" : une pesée (weight_kg).
 
 VOCABULAIRE (les UI sont en français OU en anglais, les deux se mélangent)
@@ -158,6 +163,7 @@ export function normalizeExtraction(raw: unknown, today: string): Entry[] {
       }))
       .filter((ex) => ex.name !== "" && ex.sets.length > 0);
 
+    const kind = e.kind?.trim().slice(0, 60) || undefined;
     const duration_min = plausible("duration_min", e.duration_min);
     const distance_km = plausible("distance_km", e.distance_km);
     const avg_hr = plausible("avg_hr", e.avg_hr);
@@ -175,6 +181,9 @@ export function normalizeExtraction(raw: unknown, today: string): Entry[] {
         type: e.type,
         date: /^\d{4}-\d{2}-\d{2}$/.test(e.date ?? "") ? e.date! : today,
         ...(exercises.length > 0 && { exercises }),
+        // Not part of the `empty` test above: a label with no numbers behind it
+        // is not an entry worth keeping.
+        ...(kind !== undefined && { kind }),
         ...(duration_min !== undefined && { duration_min }),
         ...(distance_km !== undefined && { distance_km }),
         ...(avg_hr !== undefined && { avg_hr }),
@@ -305,8 +314,35 @@ export const confirm = mutation({
     });
 
     let workouts = 0;
+    let others = 0;
     for (const e of args.entries) {
-      if (e.type !== "workout" || !e.exercises?.length) continue;
+      if (e.type === "cardio") {
+        await ctx.db.insert("cardio", {
+          userId: user._id,
+          date: e.date,
+          // The table needs a label and the app doesn't always show one.
+          kind: e.kind ?? "Cardio",
+          ...(e.duration_min !== undefined && { durationMin: e.duration_min }),
+          ...(e.distance_km !== undefined && { distanceKm: e.distance_km }),
+          ...(e.avg_hr !== undefined && { avgHr: e.avg_hr }),
+          ...(e.calories !== undefined && { calories: e.calories }),
+          source: e.source,
+        });
+        others++;
+        continue;
+      }
+      if (e.type === "bodyweight") {
+        if (e.weight_kg === undefined) continue; // nothing to store
+        await ctx.db.insert("bodyweight", {
+          userId: user._id,
+          date: e.date,
+          weightKg: e.weight_kg,
+          source: e.source,
+        });
+        others++;
+        continue;
+      }
+      if (!e.exercises?.length) continue;
       const workoutId = await ctx.db.insert("workouts", {
         userId: user._id,
         date: e.date,
@@ -331,10 +367,7 @@ export const confirm = mutation({
       }
       workouts++;
     }
-    // ponytail: cardio and bodyweight entries stay on the screenshots row —
-    // the schema has no table for them yet. Add `cardio` / `bodyweight` tables
-    // and insert here.
-    return { workouts };
+    return { workouts, others };
   },
 });
 

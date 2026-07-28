@@ -5,7 +5,6 @@ import type { ChatStatus } from "ai";
 import { useAction, useMutation } from "convex/react";
 import { ImagePlusIcon } from "lucide-react";
 import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
@@ -140,9 +139,6 @@ export function CoachChat() {
   return (
     <>
       <header className="flex items-center justify-between border-b px-3 py-2">
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/">Retour</Link>
-        </Button>
         <span className="flex items-center gap-2 font-heading text-base font-semibold tracking-tight">
           {/* Once in the header, not per message: a repeated avatar down a phone
               chat is noise. The source PNG has no alpha, so the white field
@@ -194,7 +190,9 @@ export function CoachChat() {
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      {/* No safe-area pad here anymore: the shell stops at the tab bar, which
+          carries the inset itself. */}
+      <div className="p-2">
         {/*
           No PromptInputBody: it renders `display: contents`, and InputGroup only
           switches to a column via `has-[>[data-align=block-end]]` — a

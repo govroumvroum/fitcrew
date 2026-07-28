@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "convex/react";
-import { ChevronRightIcon, TrophyIcon } from "lucide-react";
+import { TrophyIcon } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,17 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatFull } from "@/lib/dates";
+import { PR_LABELS, TROPHY } from "@/lib/prs";
 import { api } from "../../../convex/_generated/api";
-
-// Same trophy treatment as /progres — red text on our background fails
-// contrast, so records use the lightened brand hue.
-const TROPHY = "size-4 shrink-0 text-[oklch(0.8_0.086_27.255)]";
-
-const PR_LABELS = {
-  max_weight: { text: "Charge max", unit: "kg" },
-  max_reps: { text: "Reps max", unit: "reps" },
-  max_volume: { text: "Volume max", unit: "kg" },
-} as const;
 
 export function Today({ date }: { date: string }) {
   const today = useQuery(api.workouts.today, { date });
@@ -48,7 +39,7 @@ export function Today({ date }: { date: string }) {
   );
 
   return (
-    <div className="space-y-4 p-4 pb-16">
+    <div className="space-y-4 p-4 pb-[var(--tab-bar)]">
       <p className="text-sm text-muted-foreground first-letter:uppercase">{formatFull(date)}</p>
 
       <Card>
@@ -120,11 +111,6 @@ export function Today({ date }: { date: string }) {
           </CardContent>
         </Card>
       ) : null}
-
-      <nav className="flex flex-col gap-1">
-        <SecondaryLink href="/coach">Parler au coach</SecondaryLink>
-        <SecondaryLink href="/progres">Ma progression</SecondaryLink>
-      </nav>
     </div>
   );
 }
@@ -133,17 +119,6 @@ function Cta({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Button asChild size="lg" className="h-14 w-full rounded-lg text-base">
       <Link href={href}>{children}</Link>
-    </Button>
-  );
-}
-
-function SecondaryLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Button asChild variant="ghost" className="h-12 justify-between px-3 text-base">
-      <Link href={href}>
-        {children}
-        <ChevronRightIcon className="size-4 text-muted-foreground" />
-      </Link>
     </Button>
   );
 }

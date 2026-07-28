@@ -2,8 +2,9 @@
 
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
-import { CheckIcon, MinusIcon, PlusIcon } from "lucide-react";
+import { CheckIcon, MinusIcon, PlusIcon, TrophyIcon } from "lucide-react";
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,6 +24,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { PR_LABELS, TROPHY } from "@/lib/prs";
+import { cn } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { ExerciseDemo, useExerciseDemos } from "./demo";
@@ -72,7 +75,14 @@ export function Session({ date }: { date: string }) {
 
   const { day, workout, sets } = data;
   if (!day) {
-    return <Empty>Pas encore de programme. Passe voir le coach pour en générer un.</Empty>;
+    return (
+      <Empty>
+        Pas encore de programme.
+        <Button asChild size="lg" className="mt-4 h-14 w-full text-base">
+          <Link href="/coach">Passe voir le coach</Link>
+        </Button>
+      </Empty>
+    );
   }
 
   const rowsFor = (name: string) =>
@@ -136,6 +146,34 @@ export function Session({ date }: { date: string }) {
             value={`${Math.round(done.reduce((sum, set) => sum + set.weight * set.reps, 0))} kg`}
           />
         </div>
+        {data.prs.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {data.prs.length > 1
+                  ? `${data.prs.length} records qui tombent`
+                  : "Un record qui tombe"}
+              </CardTitle>
+              <CardDescription>T&apos;as mis la barre plus haut. Littéralement.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul className="divide-y text-sm">
+                {data.prs.map((pr) => (
+                  <li key={pr._id} className="flex items-center gap-2 py-2">
+                    <TrophyIcon className={TROPHY} />
+                    <span className="truncate">{pr.exerciseName}</span>
+                    <Badge variant="secondary" className="shrink-0">
+                      {PR_LABELS[pr.type].text}
+                    </Badge>
+                    <span className="ml-auto shrink-0 font-heading font-semibold tabular-nums">
+                      {pr.value} {PR_LABELS[pr.type].unit}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        ) : null}
         {workout.notes ? <p className="text-sm text-muted-foreground">{workout.notes}</p> : null}
         {/* A finished session is a dead end otherwise: nothing left to tap. */}
         <div className="flex flex-col gap-2 pt-2">
@@ -179,7 +217,8 @@ export function Session({ date }: { date: string }) {
         </div>
       </div>
 
-      <div className="space-y-4 px-4 pb-40">
+      {/* 6rem clears the sticky action bar, --tab-bar clears the tab bar under it. */}
+      <div className="space-y-4 px-4 pb-[calc(6rem+var(--tab-bar))]">
         {day.exercises.map((exercise) => {
           const rows = rowsFor(exercise.name);
           const values = valuesFor(exercise.name, exercise.reps);
@@ -203,19 +242,22 @@ export function Session({ date }: { date: string }) {
                 ) : null}
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="flex gap-2">
-                  <Stepper
-                    label="kg"
-                    value={values.weight}
-                    step={2.5}
-                    onChange={(weight) => setValues({ ...values, weight })}
-                  />
-                  <Stepper
-                    label="reps"
-                    value={values.reps}
-                    step={1}
-                    onChange={(reps) => setValues({ ...values, reps })}
-                  />
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Prochaine série</p>
+                  <div className="flex gap-2">
+                    <Stepper
+                      label="kg"
+                      value={values.weight}
+                      step={2.5}
+                      onChange={(weight) => setValues({ ...values, weight })}
+                    />
+                    <Stepper
+                      label="reps"
+                      value={values.reps}
+                      step={1}
+                      onChange={(reps) => setValues({ ...values, reps })}
+                    />
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {rows.map((row) => (
@@ -230,7 +272,10 @@ export function Session({ date }: { date: string }) {
                           weight: completed ? values.weight : row.weight,
                           reps: completed ? values.reps : row.reps,
                         });
-                        if (completed) timer.start(rest ?? exercise.restSeconds);
+                        if (completed) {
+                          navigator.vibrate?.(15);
+                          timer.start(rest ?? exercise.restSeconds);
+                        }
                       }}
                     />
                   ))}
@@ -255,7 +300,9 @@ export function Session({ date }: { date: string }) {
         </details>
       </div>
 
-      <div className="sticky bottom-0 mt-auto space-y-3 border-t bg-background/95 p-4 backdrop-blur">
+      {/* Sticks above the tab bar, not under it: the page reserves --tab-bar at
+          its bottom, so the clamped position matches this offset exactly. */}
+      <div className="sticky bottom-[var(--tab-bar)] mt-auto space-y-3 border-t bg-background/95 p-4 backdrop-blur">
         {timer.total > 0 && timer.remaining > 0 ? <RestTimerBar timer={timer} /> : null}
         <Button
           variant="outline"
@@ -281,14 +328,14 @@ export function Session({ date }: { date: string }) {
 function Header({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      <h1 className="font-heading text-2xl font-semibold tracking-tight">{title}</h1>
       <p className="text-sm text-muted-foreground">{subtitle}</p>
     </div>
   );
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="p-6 text-center text-muted-foreground">{children}</p>;
+  return <div className="p-6 text-center text-muted-foreground">{children}</div>;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -341,7 +388,11 @@ function SetChip({ row, onToggle }: { row: Doc<"sets">; onToggle: () => void }) 
   return (
     <Button
       variant={row.completed ? "default" : "outline"}
-      className="h-12 min-w-16 flex-col gap-0 px-3"
+      className={cn(
+        "h-12 min-w-16 flex-col gap-0 px-3",
+        // Only the check-off dips: un-checking is a correction, not an achievement.
+        !row.completed && "transition-transform active:scale-[0.96]",
+      )}
       onClick={onToggle}
       aria-pressed={row.completed}
       aria-label={`Série ${row.index + 1}`}

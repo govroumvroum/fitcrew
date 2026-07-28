@@ -78,7 +78,22 @@ export const today = query({
       }
     }
 
-    return { workout, sets, day, dayIndex, prefill };
+    // The records this session broke. They come from the row and not from
+    // `finish`'s return value, because the finished screen renders again after a
+    // reload, when that value is long gone.
+    const prs =
+      workout?.endedAt === undefined
+        ? []
+        : (
+            await ctx.db
+              .query("prs")
+              .withIndex("by_user_and_date", (q) =>
+                q.eq("userId", user._id).eq("date", workout.date),
+              )
+              .take(50)
+          ).filter((pr) => pr.workoutId === workout._id);
+
+    return { workout, sets, day, dayIndex, prefill, prs };
   },
 });
 
@@ -175,7 +190,6 @@ export const finish = mutation({
     if (!workout || workout.userId !== user._id) throw new Error("Séance introuvable");
     await ctx.db.patch("workouts", workout._id, { endedAt: Date.now(), notes: args.notes });
     // Records are written here, once, so /progres only ever reads them.
-    await recordPrs(ctx, workout);
-    return null;
+    return await recordPrs(ctx, workout);
   },
 });

@@ -138,6 +138,12 @@
   --sidebar-ring: oklch(0.613 0.188 27.255);
 }
 
+/* Space a page must leave at the bottom for the fixed tab bar: pt-2 + the 44px
+   hit area, rounded up, plus the notch. Pages use pb-[var(--tab-bar)]. */
+:root {
+  --tab-bar: calc(4rem + env(safe-area-inset-bottom));
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

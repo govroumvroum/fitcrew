@@ -1,10 +1,11 @@
-import { ClerkProvider } from "@clerk/nextjs";
+import { ClerkProvider, Show } from "@clerk/nextjs";
 import { frFR } from "@clerk/localizations";
 import { shadcn } from "@clerk/ui/themes";
 import type { Metadata, Viewport } from "next";
 import { Archivo, Geist } from "next/font/google";
 import { ConvexClientProvider } from "@/components/convex-client-provider";
 import { StoreUser } from "@/components/store-user";
+import { TabBar } from "@/components/tab-bar";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -49,7 +50,12 @@ export default function RootLayout({
           <ConvexClientProvider>
             <StoreUser />
             {children}
-            <Toaster />
+            <Show when="signed-in">
+              <TabBar />
+            </Show>
+            {/* Lifted clear of the tab bar: toasts render bottom-anchored at a
+                higher z-index and would otherwise sit on top of it. */}
+            <Toaster offset={{ bottom: "calc(var(--tab-bar) + 0.5rem)" }} />
           </ConvexClientProvider>
         </ClerkProvider>
       </body>
