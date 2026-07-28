@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, mutation, query } from "./_generated/server";
-import { recordPrs } from "./progress";
+import { recordPrs, statsByExercise } from "./progress";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 /** A set row belongs to exactly one user; every set mutation routes through this. */
@@ -94,6 +94,99 @@ export const today = query({
           ).filter((pr) => pr.workoutId === workout._id);
 
     return { workout, sets, day, dayIndex, prefill, prs };
+  },
+});
+
+// ponytail: newest 30 séances, each with its sets. Paginate when someone wants
+// to scroll further back than that.
+const HISTORY_LIMIT = 30;
+
+/**
+ * Past séances, plus the names of the current program's days so the screen can
+ * show what comes after today. Separate from `today` because `today` is
+ * resubscribed on every set check-off and must not pay for this.
+ *
+ * `date` is an argument for the same reason as in `today`, and it bounds the
+ * list to strictly before it — today's séance is the one being started.
+ */
+export const history = query({
+  args: { date: v.string() },
+  handler: async (ctx, args) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return null;
+
+    const workouts = await ctx.db
+      .query("workouts")
+      .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).lt("date", args.date))
+      .order("desc")
+      .take(HISTORY_LIMIT);
+
+    // A séance's day name must come from the program THAT séance used: programs
+    // are versioned and regenerated, so an old dayIndex read against today's
+    // program silently renames the séance. Cached because a run of séances
+    // shares one program.
+    const cache = new Map<Id<"programs">, Doc<"programs"> | null>();
+    const programFor = async (id: Id<"programs">) => {
+      const hit = cache.get(id);
+      if (hit !== undefined) return hit;
+      const program = await ctx.db.get("programs", id);
+      cache.set(id, program);
+      return program;
+    };
+
+    // Oldest date in the list is enough of a floor; rows above it that belong to
+    // no listed séance just never match.
+    const prWorkouts = new Set(
+      (
+        await ctx.db
+          .query("prs")
+          .withIndex("by_user_and_date", (q) =>
+            q.eq("userId", user._id).gte("date", workouts.at(-1)?.date ?? args.date),
+          )
+          .take(200)
+      ).map((pr) => pr.workoutId),
+    );
+
+    const past = [];
+    for (const workout of workouts) {
+      const sets = await ctx.db
+        .query("sets")
+        .withIndex("by_workout", (q) => q.eq("workoutId", workout._id))
+        .take(200);
+
+      let volume = 0;
+      for (const stat of statsByExercise(sets).values()) volume += stat.volume;
+
+      let done = 0;
+      const byExercise = new Map<string, { weight: number; reps: number }[]>();
+      for (const set of sets) {
+        if (!set.completed) continue;
+        done += 1;
+        const rows = byExercise.get(set.exerciseName) ?? [];
+        rows.push({ weight: set.weight, reps: set.reps });
+        byExercise.set(set.exerciseName, rows);
+      }
+
+      const program = workout.programId ? await programFor(workout.programId) : null;
+      past.push({
+        id: workout._id,
+        date: workout.date,
+        // No program link at all: it came from a screenshot import, and there is
+        // no day to name rather than a day whose name we lost.
+        imported: workout.programId === undefined,
+        dayName:
+          (workout.dayIndex === undefined
+            ? undefined
+            : program?.days[workout.dayIndex]?.name) ?? null,
+        sets: done,
+        volume: Math.round(volume),
+        pr: prWorkouts.has(workout._id),
+        exercises: [...byExercise].map(([name, rows]) => ({ name, sets: rows })),
+      });
+    }
+
+    const current = user.currentProgramId ? await programFor(user.currentProgramId) : null;
+    return { dayNames: current?.days.map((day) => day.name) ?? [], past };
   },
 });
 

@@ -5,6 +5,7 @@ import { TrophyIcon } from "lucide-react";
 import { useState } from "react";
 import { formatDay } from "@/lib/dates";
 import { PR_LABELS, TROPHY } from "@/lib/prs";
+import { formatNumber } from "@/lib/utils";
 import {
   Bar,
   BarChart,
@@ -208,10 +209,10 @@ export function Dashboard({ today }: { today: string }) {
                     <li key={session.date} className="flex items-center gap-2 py-2">
                       <span className="tabular-nums">{dayLabel(session.date)}</span>
                       {session.pr ? (
-                        <TrophyIcon className="size-4 text-[oklch(0.8_0.086_27.255)]" />
+                        <TrophyIcon className={TROPHY} />
                       ) : null}
                       <span className="ml-auto text-muted-foreground tabular-nums">
-                        {session.sets} séries · {session.volume} kg
+                        {session.sets} séries · {formatNumber(session.volume)} kg
                       </span>
                     </li>
                   ))}

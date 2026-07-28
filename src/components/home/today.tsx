@@ -10,6 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatFull } from "@/lib/dates";
 import { PR_LABELS, TROPHY } from "@/lib/prs";
+import { formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 
 export function Today({ date }: { date: string }) {
@@ -49,7 +50,7 @@ export function Today({ date }: { date: string }) {
             {!day
               ? "Le coach t'en écrit un après quelques questions."
               : workout?.endedAt
-                ? `${done} série${done > 1 ? "s" : ""} · ${volume} kg déplacés`
+                ? `${done} série${done > 1 ? "s" : ""} · ${formatNumber(volume)} kg déplacés`
                 : `${day.exercises.length} exercice${day.exercises.length > 1 ? "s" : ""}`}
           </CardDescription>
         </CardHeader>
@@ -127,7 +128,7 @@ function Tile({ label, value, unit }: { label: string; value: number; unit?: str
   return (
     <div className="rounded-lg p-3 ring-1 ring-foreground/10">
       <div className="font-heading text-2xl font-semibold tabular-nums">
-        {value}
+        {formatNumber(value)}
         {unit ? <span className="text-sm text-muted-foreground"> {unit}</span> : null}
       </div>
       <div className="text-xs leading-tight text-muted-foreground">{label}</div>

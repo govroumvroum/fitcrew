@@ -39,6 +39,16 @@ export const formatDay = (date: string) => day.format(parse(date));
 /** "mardi 28 juillet" — for headings. */
 export const formatFull = (date: string) => full.format(parse(date));
 
+const short = new Intl.DateTimeFormat("fr-FR", {
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+
+/** "lun. 27 juil." — history rows, where the weekday says more than the year. */
+export const formatShort = (date: string) => short.format(parse(date));
+
 // The date doesn't change while mounted, so there's nothing to subscribe to.
 // ponytail: won't roll over at midnight mid-session. Subscribe to a timer if
 // someone actually trains through midnight.

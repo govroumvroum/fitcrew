@@ -24,8 +24,9 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { formatShort } from "@/lib/dates";
 import { PR_LABELS, TROPHY } from "@/lib/prs";
-import { cn } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { ExerciseDemo, useExerciseDemos } from "./demo";
@@ -104,29 +105,35 @@ export function Session({ date }: { date: string }) {
       }));
     });
     return (
-      <div className="space-y-6 p-4">
-        <Header title={day.name} subtitle={`${day.exercises.length} exercices au programme`} />
-        <ul className="space-y-1 text-sm text-muted-foreground">
-          {day.exercises.map((exercise) => (
-            <li key={exercise.name}>
-              {exercise.name} — {exercise.sets} × {exercise.reps}
-            </li>
-          ))}
-        </ul>
-        <Button
-          className="h-14 w-full text-base"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await start({ date, dayIndex: data.dayIndex, sets: seed });
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          C&apos;est parti
-        </Button>
+      <div className="space-y-8 p-4">
+        <div className="space-y-6">
+          <div className="space-y-1">
+            <SectionLabel>À venir</SectionLabel>
+            <Header title={day.name} subtitle={`${day.exercises.length} exercices au programme`} />
+          </div>
+          <ul className="space-y-1 text-sm text-muted-foreground">
+            {day.exercises.map((exercise) => (
+              <li key={exercise.name}>
+                {exercise.name} — {exercise.sets} × {exercise.reps}
+              </li>
+            ))}
+          </ul>
+          <Button
+            className="h-14 w-full text-base"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await start({ date, dayIndex: data.dayIndex, sets: seed });
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            C&apos;est parti
+          </Button>
+        </div>
+        <History date={date} dayIndex={data.dayIndex} />
       </div>
     );
   }
@@ -143,7 +150,7 @@ export function Session({ date }: { date: string }) {
           <Stat label="Séries" value={`${done.length}`} />
           <Stat
             label="Volume"
-            value={`${Math.round(done.reduce((sum, set) => sum + set.weight * set.reps, 0))} kg`}
+            value={`${formatNumber(done.reduce((sum, set) => sum + set.weight * set.reps, 0))} kg`}
           />
         </div>
         {data.prs.length > 0 ? (
@@ -322,6 +329,81 @@ export function Session({ date }: { date: string }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">{children}</p>
+  );
+}
+
+/**
+ * Its own subscription, mounted only before a séance starts: a live session
+ * resubscribes `today` on every check-off and must not drag the history along.
+ */
+function History({ date, dayIndex }: { date: string; dayIndex: number }) {
+  const data = useQuery(api.workouts.history, { date });
+  if (!data) return null;
+
+  // No dates, ever: program days rotate one per séance, whenever you train, so
+  // "next" is an order and not a calendar. Wraps past the last day.
+  const upcoming = Array.from({ length: Math.max(0, data.dayNames.length - 1) }, (_, offset) => {
+    return data.dayNames[(dayIndex + 1 + offset) % data.dayNames.length];
+  });
+
+  return (
+    <>
+      {upcoming.length > 0 ? (
+        <ul className="space-y-1 text-sm text-muted-foreground">
+          {upcoming.map((name) => (
+            <li key={name}>puis {name}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      {data.past.length > 0 ? (
+        <section className="space-y-2">
+          <SectionLabel>Déjà fait</SectionLabel>
+          <ul className="divide-y border-t">
+            {data.past.map((session) => (
+              <li key={session.id}>
+                {/* ponytail: native <details>, same reason as the notes field —
+                    one expandable row doesn't need a component. */}
+                <details>
+                  <summary className="cursor-pointer list-item py-3">
+                    <span className="flex items-center gap-2 text-sm">
+                      <span className="tabular-nums">{formatShort(session.date)}</span>
+                      <span className="min-w-0 truncate text-muted-foreground">
+                        {session.dayName ?? (session.imported ? "Importée" : "Séance")}
+                      </span>
+                      {session.pr ? <TrophyIcon className={TROPHY} /> : null}
+                    </span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {session.sets} séries · {formatNumber(session.volume)} kg
+                    </span>
+                  </summary>
+                  <ul className="pb-3 text-xs text-muted-foreground">
+                    {session.exercises.length === 0 ? (
+                      <li>Rien de coché ce jour-là.</li>
+                    ) : (
+                      session.exercises.map((exercise) => (
+                        <li key={exercise.name} className="flex gap-3 py-0.5">
+                          <span className="min-w-0 truncate">{exercise.name}</span>
+                          <span className="ml-auto shrink-0 tabular-nums">
+                            {exercise.sets.map((set) => `${set.weight}×${set.reps}`).join(" · ")}
+                          </span>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </details>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </>
   );
 }
 
