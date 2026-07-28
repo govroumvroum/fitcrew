@@ -26,6 +26,7 @@ import {
 } from "./_generated/server";
 import { languageModel } from "./model";
 import { programExercise } from "./schema";
+import { searchWeb } from "./search";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 // ---------------------------------------------------------------------------
@@ -361,6 +362,24 @@ function coachTools(today: string) {
         return { date: input.date, sets: logged };
       },
     }),
+
+    search_web: createTool({
+      description:
+        "Cherche sur le web (SearXNG) ce que tu ne peux pas savoir : recommandations actuelles, un complément ou un terme dont le user te parle, la technique d'un exercice précis. Jamais pour ce qui est déjà dans ton contexte.",
+      inputSchema: z.object({
+        query: z.string().describe("Requête courte, 2 à 6 mots, dans la langue du sujet"),
+      }),
+      execute: async (_ctx: ToolCtx, { query }) => {
+        try {
+          return { query, results: await searchWeb(query) };
+        } catch (error) {
+          // Returned, not thrown: a dead SearXNG must not abort the coach's turn.
+          const message = error instanceof Error ? error.message : String(error);
+          console.error("search_web", message);
+          return { query, results: [], error: message };
+        }
+      },
+    }),
   };
 }
 
@@ -444,16 +463,18 @@ ${cardio
       `- ${c.date} : ${c.kind}${c.durationMin ? ` ${c.durationMin} min` : ""}${c.distanceKm ? ` ${c.distanceKm} km` : ""}${c.avgHr ? ` FC ${c.avgHr}` : ""}`,
   )
   .join("\n")}${
-    weight
-      ? `\n- Dernière mesure (${weight.date}) : ${[
-          weight.weightKg !== undefined && `${weight.weightKg} kg`,
-          weight.bodyFatPct !== undefined && `${weight.bodyFatPct} % de masse grasse`,
-          weight.muscleKg !== undefined && `${weight.muscleKg} kg de muscle`,
-        ]
-          .filter(Boolean)
-          .join(", ")}\n  Une balance à impédance se trompe de 3 à 5 % dans l'absolu : commente la tendance, jamais le chiffre exact.`
-      : ""
-  }
+        weight
+          ? `\n- Dernière mesure (${weight.date}) : ${[
+              weight.weightKg !== undefined && `${weight.weightKg} kg`,
+              weight.bodyFatPct !== undefined && `${weight.bodyFatPct} % de masse grasse`,
+              weight.muscleKg !== undefined && `${weight.muscleKg} kg de muscle`,
+            ]
+              .filter(Boolean)
+              .join(
+                ", ",
+              )}\n  Une balance à impédance se trompe de 3 à 5 % dans l'absolu : commente la tendance, jamais le chiffre exact.`
+          : ""
+      }
 Tiens-en compte pour la fatigue et le volume jambes, mais n'en parle que si c'est pertinent.`
     : ""
 }
@@ -470,7 +491,10 @@ AUTRES OUTILS
 - \`explain_exercise\` avant d'expliquer un exercice de son programme : ça te donne son historique réel.
 - \`log_workout\` seulement pour une séance passée qu'il te raconte. Une séance en cours se loge dans l'écran Séance, pas ici.
 - \`extract_screenshot\` dès qu'une capture est jointe à son message. Si l'outil renvoie des entrées, dis-lui juste de vérifier et valider la fiche affichée — tu n'enregistres rien toi-même. Si il renvoie une liste vide, NE LUI PARLE PAS de fiche à valider : il n'y en a aucune à l'écran. Dis-lui ce que tu vois sur la capture et ce qui manque (une pesée a besoin du poids réel, pas du poids idéal ni de la masse musculaire), et propose-lui de te donner le chiffre directement.
-- Il veut changer la durée des séances ou le nombre de jours : régénère le programme avec \`generate_program\`.`;
+- Il veut changer la durée des séances ou le nombre de jours : régénère le programme avec \`generate_program\`.
+- \`search_web\` seulement pour ce que tu ne peux pas savoir : une recommandation à jour, un complément ou un terme dont il te parle, la technique d'un exercice précis. Jamais pour ce qui est déjà écrit au-dessus (son profil, son programme, ses records, son cardio) et jamais pour du conseil d'entraînement générique que tu connais déjà — une recherche inutile, c'est de l'attente et des tokens pour rien.
+- Quand tu t'appuies sur une recherche, cite tes sources dans ta réponse (le nom du site ou le lien) pour qu'il puisse vérifier. Si l'outil renvoie une erreur ou zéro résultat, dis-lui simplement que la recherche ne marche pas là et continue avec ce que tu sais.
+- TU N'ES PAS MÉDECIN. Douleur, blessure, symptôme, médicament : tu dis clairement que ça demande un professionnel (médecin, kiné) et tu ne présentes JAMAIS un résultat de recherche comme un diagnostic ou un protocole de soin. Tu peux adapter le programme pour ménager la zone, c'est tout.`;
 }
 
 // ---------------------------------------------------------------------------

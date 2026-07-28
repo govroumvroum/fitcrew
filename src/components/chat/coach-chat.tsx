@@ -38,10 +38,12 @@ import {
   LoggedCard,
   ProfileCard,
   ProgramCard,
+  SourcesCard,
   SwapCard,
   type LoggedInput,
   type ProfileInput,
   type ProgramInput,
+  type SearchOutput,
   type SwapInput,
 } from "@/components/chat/tool-cards";
 import { useCoachThread } from "@/components/chat/use-coach-thread";
@@ -335,6 +337,9 @@ function CoachMessage({ message }: { message: UIMessage }) {
                 />
               );
             }
+            // The one card that reads the output: the links are the result.
+            case "tool-search_web":
+              return <SourcesCard key={i} output={output as SearchOutput} isNew={streaming} />;
             case "tool-log_workout":
               return (
                 <LoggedCard

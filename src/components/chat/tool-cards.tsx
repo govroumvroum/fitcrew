@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRightIcon, CheckIcon, ChevronDownIcon, DumbbellIcon } from "lucide-react";
+import { ArrowRightIcon, CheckIcon, ChevronDownIcon, DumbbellIcon, SearchIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatFull } from "@/lib/dates";
 import { cn } from "@/lib/utils";
@@ -283,6 +283,44 @@ export function LoggedCard({
           Volume total <span className="tabular-nums">{Math.round(volume)}</span> kg
         </p>
       )}
+    </Surface>
+  );
+}
+
+export type SearchOutput = {
+  query: string;
+  results: { title: string; url: string; snippet: string }[];
+};
+
+/**
+ * Unlike `explain_exercise`, the prose is NOT the whole result here: it can't
+ * carry a clickable link. The point of this card is that a claim the coach makes
+ * from the web is checkable in one tap. Snippets stay out — the coach already
+ * paraphrased them.
+ */
+export function SourcesCard({ output, isNew }: { output: SearchOutput; isNew?: boolean }) {
+  if (output.results.length === 0) return null;
+
+  return (
+    <Surface isNew={isNew}>
+      <Header
+        icon={<SearchIcon className="size-4 text-muted-foreground" />}
+        title={`Sources — « ${output.query} »`}
+      />
+      <ul>
+        {output.results.map((result) => (
+          <li key={result.url} className="rounded-md px-2 py-1.5 odd:bg-muted/40">
+            <a
+              href={result.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-current"
+            >
+              {result.title}
+            </a>
+          </li>
+        ))}
+      </ul>
     </Surface>
   );
 }

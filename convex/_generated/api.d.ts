@@ -16,6 +16,7 @@ import type * as model from "../model.js";
 import type * as programs from "../programs.js";
 import type * as progress from "../progress.js";
 import type * as screenshots from "../screenshots.js";
+import type * as search from "../search.js";
 import type * as users from "../users.js";
 import type * as workouts from "../workouts.js";
 
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   programs: typeof programs;
   progress: typeof progress;
   screenshots: typeof screenshots;
+  search: typeof search;
   users: typeof users;
   workouts: typeof workouts;
 }>;
