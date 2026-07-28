@@ -59,12 +59,56 @@ export const stats = query({
       .order("desc")
       .take(3);
 
+    const cardio7d = await ctx.db
+      .query("cardio")
+      .withIndex("by_user_and_date", (q) =>
+        q.eq("userId", user._id).gte("date", since).lte("date", args.date),
+      )
+      .take(50);
+
+    // Whether to show a cardio tile at all. Someone who never does cardio
+    // shouldn't stare at a permanent 0; someone who does deserves to see a zero
+    // week, which is real information.
+    const doesCardio =
+      cardio7d.length > 0 ||
+      (await ctx.db
+        .query("cardio")
+        .withIndex("by_user_and_date", (q) => q.eq("userId", user._id))
+        .first()) !== null;
+
+    // Two, not one: the delta is the interesting half of a weigh-in.
+    const measures = await ctx.db
+      .query("bodyweight")
+      .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).lte("date", args.date))
+      .order("desc")
+      .take(2);
+    const [latest, previous] = measures;
+
     return {
       // Lets the client omit the tiles entirely rather than show a row of zeros.
-      hasHistory: workouts.length > 0,
+      hasHistory: workouts.length > 0 || doesCardio || measures.length > 0,
       streak: currentStreak(weeks),
       thisWeek: workouts.filter((workout) => workout.date >= week).length,
+      // A month is comfortably inside MAX_WORKOUTS, unlike an all-time count.
+      thisMonth: workouts.filter((workout) => workout.date >= args.date.slice(0, 7)).length,
       volume7d: Math.round(volume7d),
+      doesCardio,
+      cardio7d: {
+        sessions: cardio7d.length,
+        minutes: cardio7d.reduce((sum, entry) => sum + (entry.durationMin ?? 0), 0),
+      },
+      measure: latest
+        ? {
+            date: latest.date,
+            weightKg: latest.weightKg,
+            bodyFatPct: latest.bodyFatPct,
+            // Only against a previous row that measured the same thing.
+            deltaKg:
+              latest.weightKg !== undefined && previous?.weightKg !== undefined
+                ? Math.round((latest.weightKg - previous.weightKg) * 10) / 10
+                : undefined,
+          }
+        : null,
       prs: prs.map(({ exerciseName, type, value, date }) => ({
         exerciseName,
         type,

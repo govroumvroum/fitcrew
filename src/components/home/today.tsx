@@ -75,10 +75,32 @@ export function Today({ date }: { date: string }) {
       </Card>
 
       {stats.hasHistory ? (
+        // Cardio and weight tiles appear only for people who have that data:
+        // a permanent 0 tells you nothing, a zero week tells you something.
         <div className="grid grid-cols-3 gap-2">
           <Tile label="Semaines d'affilée" value={stats.streak} />
           <Tile label="Séances cette semaine" value={stats.thisWeek} />
+          <Tile label="Séances ce mois" value={stats.thisMonth} />
           <Tile label="Volume 7 jours" value={stats.volume7d} unit="kg" />
+          {stats.doesCardio && (
+            <Tile
+              label={`Cardio 7 jours${stats.cardio7d.sessions > 0 ? ` · ${stats.cardio7d.sessions}×` : ""}`}
+              value={stats.cardio7d.minutes}
+              unit="min"
+            />
+          )}
+          {stats.measure?.weightKg !== undefined && (
+            <Tile
+              label="Poids"
+              value={stats.measure.weightKg}
+              unit="kg"
+              digits={1}
+              delta={stats.measure.deltaKg}
+            />
+          )}
+          {stats.measure?.bodyFatPct !== undefined && (
+            <Tile label="Masse grasse" value={stats.measure.bodyFatPct} unit="%" digits={1} />
+          )}
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">
@@ -124,13 +146,34 @@ function Cta({ href, children }: { href: string; children: React.ReactNode }) {
   );
 }
 
-function Tile({ label, value, unit }: { label: string; value: number; unit?: string }) {
+function Tile({
+  label,
+  value,
+  unit,
+  delta,
+  digits = 0,
+}: {
+  label: string;
+  value: number;
+  unit?: string;
+  delta?: number;
+  digits?: number;
+}) {
   return (
     <div className="rounded-lg p-3 ring-1 ring-foreground/10">
       <div className="font-heading text-2xl font-semibold tabular-nums">
-        {formatNumber(value)}
+        {formatNumber(value, digits)}
         {unit ? <span className="text-sm text-muted-foreground"> {unit}</span> : null}
       </div>
+      {/* Deliberately uncoloured: whether losing weight is good depends on the
+          goal, and the app doesn't get to decide that. 0 is worth showing —
+          "unchanged" is an answer. */}
+      {delta !== undefined && (
+        <div className="text-xs tabular-nums text-muted-foreground">
+          {delta > 0 ? "+" : delta < 0 ? "−" : "="}
+          {delta !== 0 && formatNumber(Math.abs(delta), 1)}
+        </div>
+      )}
       <div className="text-xs leading-tight text-muted-foreground">{label}</div>
     </div>
   );

@@ -7,5 +7,15 @@ export function cn(...inputs: ClassValue[]) {
 
 // Thousands grouped the French way ("4 240"), because a bare 4240 kg is hard to
 // read at a glance. One formatter so every screen groups identically.
-const number = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 })
-export const formatNumber = (value: number) => number.format(value)
+//
+// `digits` matters: volumes are whole kilos, but a bodyweight rounded to the kilo
+// hides exactly the movement you weigh yourself to see (72,55 -> "73").
+const formatters = new Map<number, Intl.NumberFormat>()
+export function formatNumber(value: number, digits = 0) {
+  let formatter = formatters.get(digits)
+  if (!formatter) {
+    formatter = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: digits })
+    formatters.set(digits, formatter)
+  }
+  return formatter.format(value)
+}
