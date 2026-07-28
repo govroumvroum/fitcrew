@@ -42,3 +42,7 @@ next-env.d.ts
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+# service worker built by `serwist build`
+/public/sw.js
+/public/sw.js.map

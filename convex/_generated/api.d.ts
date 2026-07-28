@@ -8,8 +8,13 @@
  * @module
  */
 
+import type * as coach from "../coach.js";
 import type * as http from "../http.js";
+import type * as model from "../model.js";
+import type * as progress from "../progress.js";
+import type * as screenshots from "../screenshots.js";
 import type * as users from "../users.js";
+import type * as workouts from "../workouts.js";
 
 import type {
   ApiFromModules,
@@ -18,8 +23,13 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  coach: typeof coach;
   http: typeof http;
+  model: typeof model;
+  progress: typeof progress;
+  screenshots: typeof screenshots;
   users: typeof users;
+  workouts: typeof workouts;
 }>;
 
 /**

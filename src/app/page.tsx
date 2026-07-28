@@ -2,6 +2,7 @@
 
 import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { api } from "../../convex/_generated/api";
 
@@ -41,6 +42,17 @@ export default function Home() {
         </Show>
 
         <Show when="signed-in">
+          <nav className="flex w-full max-w-sm flex-col gap-2">
+            <Button asChild size="lg" className="h-14 text-base">
+              <Link href="/seance">Séance du jour</Link>
+            </Button>
+            <Button asChild variant="secondary" size="lg" className="h-14 text-base">
+              <Link href="/coach">Parler au coach</Link>
+            </Button>
+            <Button asChild variant="ghost" size="lg" className="h-14 text-base">
+              <Link href="/progres">Ma progression</Link>
+            </Button>
+          </nav>
           <h1 className="text-2xl font-semibold tracking-tight">
             {me === undefined
               ? "Connexion à Convex…"

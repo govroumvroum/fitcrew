@@ -56,6 +56,9 @@ export default defineSchema({
     startedAt: v.number(),
     endedAt: v.optional(v.number()),
     notes: v.optional(v.string()),
+    // Keyed by exercise name — a record rather than a field on `sets` because
+    // the note belongs to the exercise in this session, not to one set.
+    exerciseNotes: v.optional(v.record(v.string(), v.string())),
   }).index("by_user_and_date", ["userId", "date"]),
 
   // Own table, not an array on workouts: every set check-off is a write, and
@@ -82,6 +85,26 @@ export default defineSchema({
   })
     .index("by_user_and_exercise", ["userId", "exerciseName"])
     .index("by_user_and_date", ["userId", "date"]),
+
+  // Imported from fitness apps (screenshots) or logged directly. Separate from
+  // `workouts` because there are no sets — nothing to check off.
+  cardio: defineTable({
+    userId: v.id("users"),
+    date: v.string(),
+    kind: v.string(), // "course", "vélo", "marche", "boxe"… free text, user's words
+    durationMin: v.optional(v.number()),
+    distanceKm: v.optional(v.number()),
+    avgHr: v.optional(v.number()),
+    calories: v.optional(v.number()),
+    source: v.optional(v.string()),
+  }).index("by_user_and_date", ["userId", "date"]),
+
+  bodyweight: defineTable({
+    userId: v.id("users"),
+    date: v.string(),
+    weightKg: v.number(),
+    source: v.optional(v.string()),
+  }).index("by_user_and_date", ["userId", "date"]),
 
   screenshots: defineTable({
     userId: v.id("users"),
