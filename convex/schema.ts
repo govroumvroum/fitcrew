@@ -79,10 +79,20 @@ export default defineSchema({
   prs: defineTable({
     userId: v.id("users"),
     exerciseName: v.string(),
-    type: v.union(v.literal("max_weight"), v.literal("max_reps"), v.literal("max_volume")),
+    type: v.union(
+      v.literal("max_weight"),
+      v.literal("max_reps"),
+      v.literal("max_volume"),
+      v.literal("est_1rm"),
+    ),
     value: v.number(),
     date: v.string(),
     workoutId: v.id("workouts"),
+    // First-ever performance on this exercise+type: a standing best, but nothing
+    // was beaten. Needed as the baseline the next session compares against, and
+    // excluded from the celebration — a first session broke no records, and
+    // showering it with 13 trophies makes a real PR look like nothing.
+    baseline: v.optional(v.boolean()),
   })
     .index("by_user_and_exercise", ["userId", "exerciseName"])
     .index("by_user_and_date", ["userId", "date"]),

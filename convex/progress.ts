@@ -15,7 +15,13 @@ export type SetLite = {
   reps: number;
   completed: boolean;
 };
-export type PrType = "max_weight" | "max_reps" | "max_volume";
+export type PrType = "max_weight" | "max_reps" | "max_volume" | "est_1rm";
+
+/**
+ * Beyond this, Epley is fiction — it treats 30 reps as double your 1RM. A high-rep
+ * set is a conditioning set and has no business claiming a strength record.
+ */
+const EPLEY_MAX_REPS = 15;
 
 /** Epley. Rounded to the kilo: a 1RM estimate with decimals is false precision. */
 export function epley1rm(weight: number, reps: number): number {
@@ -28,6 +34,12 @@ export type ExerciseStat = {
   maxReps: number;
   volume: number;
   est1rm: number;
+  /**
+   * Best reps from an UNLOADED set only. Reps alone say nothing when there's
+   * weight on the bar — 50 reps at 1 kg would outrank 8 at 80 — but for pull-ups
+   * and dips, where weight is 0, reps are the whole story.
+   */
+  bodyweightReps: number;
 };
 
 /**
@@ -43,11 +55,15 @@ export function statsByExercise(sets: SetLite[]): Map<string, ExerciseStat> {
       maxReps: 0,
       volume: 0,
       est1rm: 0,
+      bodyweightReps: 0,
     };
     stat.maxWeight = Math.max(stat.maxWeight, set.weight);
     stat.maxReps = Math.max(stat.maxReps, set.reps);
     stat.volume += set.weight * set.reps;
-    stat.est1rm = Math.max(stat.est1rm, epley1rm(set.weight, set.reps));
+    if (set.reps <= EPLEY_MAX_REPS) {
+      stat.est1rm = Math.max(stat.est1rm, epley1rm(set.weight, set.reps));
+    }
+    if (set.weight === 0) stat.bodyweightReps = Math.max(stat.bodyweightReps, set.reps);
     out.set(set.exerciseName, stat);
   }
   return out;
@@ -64,10 +80,14 @@ export function prCandidates(
   for (const [exerciseName, stat] of statsByExercise(sets)) {
     const byType: [PrType, number][] = [
       ["max_weight", stat.maxWeight],
-      // ponytail: max reps in a single set, not "max reps at a given weight" —
-      // `prs` stores one number and no weight. Add a weight field if that
-      // distinction ever matters.
-      ["max_reps", stat.maxReps],
+      // Strength across rep ranges, so 8×80 outranks 12×70 and neither is
+      // threatened by 50×1. This is the record that actually means "stronger".
+      ["est_1rm", stat.est1rm],
+      // Unloaded sets only — see ExerciseStat.bodyweightReps. A loaded exercise
+      // never claims a reps record, because reps without weight rank nothing.
+      ["max_reps", stat.bodyweightReps],
+      // ponytail: inflatable by adding sets — it's a workload record, not a
+      // strength one. Weight it per set if that ever reads as cheating.
       ["max_volume", Math.round(stat.volume)],
     ];
     for (const [type, value] of byType) {
@@ -170,6 +190,7 @@ export async function recordPrs(
   for (const candidate of prCandidates(sets)) {
     const previous = standing.get(`${candidate.exerciseName}|${candidate.type}`);
     if (previous !== undefined && candidate.value <= previous) continue;
+    const baseline = previous === undefined;
     await ctx.db.insert("prs", {
       userId: workout.userId,
       exerciseName: candidate.exerciseName,
@@ -177,8 +198,9 @@ export async function recordPrs(
       value: candidate.value,
       date: workout.date,
       workoutId: workout._id,
+      ...(baseline && { baseline: true }),
     });
-    broken.push(candidate);
+    if (!baseline) broken.push(candidate);
   }
   return broken;
 }

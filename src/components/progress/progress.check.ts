@@ -38,12 +38,14 @@ assert.deepEqual(stats.get("Squat"), {
   maxReps: 5,
   volume: 100 * 5 + 110 * 3,
   est1rm: epley1rm(110, 3),
+  bodyweightReps: 0, // every Squat set carried load
 });
 assert.deepEqual(stats.get("Tractions"), {
   maxWeight: 0,
   maxReps: 12,
   volume: 0,
   est1rm: 0,
+  bodyweightReps: 12,
 });
 assert.equal(statsByExercise([]).size, 0);
 // An exercise with nothing completed doesn't appear at all.
@@ -54,14 +56,35 @@ const candidates = prCandidates(session);
 const valueOf = (name: string, type: PrType) =>
   candidates.find((c) => c.exerciseName === name && c.type === type)?.value;
 assert.equal(valueOf("Squat", "max_weight"), 110);
-assert.equal(valueOf("Squat", "max_reps"), 5);
 assert.equal(valueOf("Squat", "max_volume"), 830);
-// Bodyweight: reps only — no 0 kg record, no 0 volume record.
+assert.equal(valueOf("Squat", "est_1rm"), epley1rm(110, 3));
+// A LOADED exercise never claims a reps record: 5 reps at 110 kg is not "5 reps".
+assert.equal(valueOf("Squat", "max_reps"), undefined);
+// Bodyweight: reps only — no 0 kg record, no 0 volume record, no 1RM.
 assert.equal(valueOf("Tractions", "max_reps"), 12);
 assert.equal(valueOf("Tractions", "max_weight"), undefined);
 assert.equal(valueOf("Tractions", "max_volume"), undefined);
-// First-ever set is a PR: nothing standing, so every candidate is new.
-assert.equal(prCandidates([set("Curl", 20, 10)]).length, 3);
+assert.equal(valueOf("Tractions", "est_1rm"), undefined);
+
+// THE POINT OF ALL THIS: junk-volume reps must not outrank real strength.
+// 50 reps at 1 kg beats nothing that 8 reps at 80 kg set.
+const silly = prCandidates([set("Curl", 1, 50)]);
+const real = prCandidates([set("Curl", 80, 8)]);
+const pick = (rows: typeof silly, type: PrType) => rows.find((c) => c.type === type)?.value ?? 0;
+assert.equal(pick(silly, "max_reps"), 0); // loaded, so no reps record at all
+assert.ok(pick(silly, "est_1rm") < pick(real, "est_1rm"));
+assert.ok(pick(silly, "max_weight") < pick(real, "max_weight"));
+
+// Epley is nonsense past 15 reps, so a conditioning set claims no strength record.
+assert.equal(pick(prCandidates([set("Curl", 20, 40)]), "est_1rm"), 0);
+
+// First-ever loaded set: weight, 1RM and volume — but not reps.
+assert.deepEqual(
+  prCandidates([set("Curl", 20, 10)])
+    .map((c) => c.type)
+    .sort(),
+  ["est_1rm", "max_volume", "max_weight"],
+);
 assert.deepEqual(prCandidates([]), []);
 
 // --- standing records (ties are not records) ---------------------------------

@@ -53,11 +53,19 @@ export const stats = query({
       args.date,
     );
 
-    const prs = await ctx.db
-      .query("prs")
-      .withIndex("by_user_and_date", (q) => q.eq("userId", user._id))
-      .order("desc")
-      .take(3);
+    // Baselines excluded: a first-ever lift is a standing best, not news. They
+    // stay on /progres, where the list is explicitly "tous temps".
+    // ponytail: takes 30 to find 3 real records. A first session writes one
+    // baseline per exercise per type, so the newest rows are mostly baselines.
+    const prs = (
+      await ctx.db
+        .query("prs")
+        .withIndex("by_user_and_date", (q) => q.eq("userId", user._id))
+        .order("desc")
+        .take(30)
+    )
+      .filter((pr) => !pr.baseline)
+      .slice(0, 3);
 
     const cardio7d = await ctx.db
       .query("cardio")

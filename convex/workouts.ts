@@ -91,7 +91,7 @@ export const today = query({
                 q.eq("userId", user._id).eq("date", workout.date),
               )
               .take(50)
-          ).filter((pr) => pr.workoutId === workout._id);
+          ).filter((pr) => pr.workoutId === workout._id && !pr.baseline);
 
     return { workout, sets, day, dayIndex, prefill, prs };
   },
