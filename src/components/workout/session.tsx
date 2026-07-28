@@ -3,6 +3,7 @@
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { CheckIcon, MinusIcon, PlusIcon, TrophyIcon } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,8 @@ type Values = { weight: number; reps: number };
 
 const round = (n: number) => Math.round(n * 10) / 10;
 
+const SPRING = { type: "spring", duration: 0.3, bounce: 0 } as const;
+
 export function Session({ date }: { date: string }) {
   const data = useQuery(api.workouts.today, { date });
 
@@ -61,6 +64,7 @@ export function Session({ date }: { date: string }) {
   });
 
   const timer = useRestTimer();
+  const reduce = useReducedMotion();
   // Unconditional (hook rules) and cheap: cached lookups, no GIF is fetched
   // until a sheet is actually opened.
   const demoUrlFor = useExerciseDemos(data?.day?.exercises.map((it) => it.name) ?? []);
@@ -165,8 +169,18 @@ export function Session({ date }: { date: string }) {
             </CardHeader>
             <CardContent>
               <ul className="divide-y text-sm">
-                {data.prs.map((pr) => (
-                  <li key={pr._id} className="flex items-center gap-2 py-2">
+                {/* The one flourish in the app: records land one after another
+                    instead of the whole list appearing at once. Capped at 4
+                    steps so a big day doesn't crawl; the CTAs below are outside
+                    it and never wait. */}
+                {data.prs.map((pr, i) => (
+                  <motion.li
+                    key={pr._id}
+                    className="flex items-center gap-2 py-2"
+                    initial={{ opacity: 0, y: reduce ? 0 : 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ ...SPRING, delay: reduce ? 0 : Math.min(i, 3) * 0.1 }}
+                  >
                     <TrophyIcon className={TROPHY} />
                     <span className="truncate">{pr.exerciseName}</span>
                     <Badge variant="secondary" className="shrink-0">
@@ -175,7 +189,7 @@ export function Session({ date }: { date: string }) {
                     <span className="ml-auto shrink-0 font-heading font-semibold tabular-nums">
                       {pr.value} {PR_LABELS[pr.type].unit}
                     </span>
-                  </li>
+                  </motion.li>
                 ))}
               </ul>
             </CardContent>
@@ -316,7 +330,15 @@ export function Session({ date }: { date: string }) {
       {/* Sticks above the tab bar, not under it: the page reserves --tab-bar at
           its bottom, so the clamped position matches this offset exactly. */}
       <div className="sticky bottom-[var(--tab-bar)] mt-auto space-y-3 border-t bg-background/95 p-4 backdrop-blur">
-        {timer.total > 0 && timer.remaining > 0 ? <RestTimerBar timer={timer} /> : null}
+        {/* The slot keeps its height once the first rest has run, so the finish
+            button never slides out from under a thumb when rest ends mid-set.
+            Reserved from the first check-off rather than always, so a séance
+            doesn't open with an empty 4rem band above the button. */}
+        {timer.total > 0 ? (
+          <div className="min-h-16">
+            {timer.remaining > 0 ? <RestTimerBar timer={timer} /> : null}
+          </div>
+        ) : null}
         <Button
           variant="outline"
           className="h-14 w-full text-base"
@@ -340,7 +362,9 @@ export function Session({ date }: { date: string }) {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">{children}</p>
+    <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+      {children}
+    </p>
   );
 }
 
@@ -433,7 +457,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border p-3">
-      <div className="text-xl font-semibold tabular-nums">{value}</div>
+      <div className="font-heading text-xl font-semibold tabular-nums">{value}</div>
       <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   );
@@ -454,19 +478,19 @@ function Stepper({
     <div className="flex flex-1 items-center gap-1">
       <Button
         variant="outline"
-        className="size-12 shrink-0"
+        className="size-12 shrink-0 transition-transform active:scale-[0.96]"
         onClick={() => onChange(Math.max(0, round(value - step)))}
         aria-label={`Moins ${label}`}
       >
         <MinusIcon />
       </Button>
       <div className="flex-1 text-center">
-        <div className="text-xl font-semibold tabular-nums">{value}</div>
+        <div className="font-heading text-xl font-semibold tabular-nums">{value}</div>
         <div className="text-xs text-muted-foreground">{label}</div>
       </div>
       <Button
         variant="outline"
-        className="size-12 shrink-0"
+        className="size-12 shrink-0 transition-transform active:scale-[0.96]"
         onClick={() => onChange(round(value + step))}
         aria-label={`Plus ${label}`}
       >
@@ -490,7 +514,9 @@ function SetChip({ row, onToggle }: { row: Doc<"sets">; onToggle: () => void }) 
       aria-label={`Série ${row.index + 1}`}
     >
       <span className="flex items-center gap-1 text-sm font-semibold">
-        {row.completed ? <CheckIcon /> : null}
+        {/* Always in the flow: mounting the check on validation shoved the set
+            number 20px sideways, a hundred times a séance. */}
+        <CheckIcon className={row.completed ? undefined : "invisible"} />
         {row.index + 1}
       </span>
       <span className="text-[10px] opacity-80 tabular-nums">

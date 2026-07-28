@@ -13,6 +13,7 @@ import type * as exerciseDemos from "../exerciseDemos.js";
 import type * as home from "../home.js";
 import type * as http from "../http.js";
 import type * as model from "../model.js";
+import type * as programs from "../programs.js";
 import type * as progress from "../progress.js";
 import type * as screenshots from "../screenshots.js";
 import type * as users from "../users.js";
@@ -30,6 +31,7 @@ declare const fullApi: ApiFromModules<{
   home: typeof home;
   http: typeof http;
   model: typeof model;
+  programs: typeof programs;
   progress: typeof progress;
   screenshots: typeof screenshots;
   users: typeof users;

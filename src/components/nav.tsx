@@ -1,13 +1,22 @@
 "use client";
 
-import { ChartLineIcon, DumbbellIcon, HouseIcon, MessageCircleIcon } from "lucide-react";
+import {
+  ChartLineIcon,
+  ClipboardListIcon,
+  DumbbellIcon,
+  HouseIcon,
+  MessageCircleIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
+// Ordered as the app is used: today's séance, the plan behind it, the coach who
+// writes it, then what came of it.
 const TABS = [
   { href: "/", label: "Accueil", Icon: HouseIcon },
   { href: "/seance", label: "Séance", Icon: DumbbellIcon },
+  { href: "/programme", label: "Programme", Icon: ClipboardListIcon },
   { href: "/coach", label: "Coach", Icon: MessageCircleIcon },
   { href: "/progres", label: "Progrès", Icon: ChartLineIcon },
 ];
@@ -38,6 +47,7 @@ export function TabBar() {
               aria-current={active ? "page" : undefined}
               className={cn(
                 "flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]",
+                "transition-colors duration-200 ease-[cubic-bezier(0.2,0,0,1)]",
                 active ? ACTIVE : "text-muted-foreground",
               )}
             >
@@ -71,6 +81,7 @@ export function NavRail() {
             aria-current={active ? "page" : undefined}
             className={cn(
               "flex min-h-11 flex-col items-center justify-center gap-1 py-2 text-center text-[11px]",
+              "transition-colors duration-200 ease-[cubic-bezier(0.2,0,0,1)]",
               active ? ACTIVE : "text-muted-foreground hover:text-foreground",
             )}
           >

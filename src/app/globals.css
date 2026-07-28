@@ -176,6 +176,36 @@
   p {
     text-wrap: pretty;
   }
+  /* Card titles are <div>s in shadcn, so the h1–h3 rule above never reached
+     them — and they're the headings on every screen of this app. */
+  [data-slot="card-title"] {
+    text-wrap: balance;
+  }
+  /* The app's three disclosures are native <details> (séance history, séance
+     notes, program days) and they snapped open. Scoped to `details` on purpose:
+     `interpolate-size` inherits, and on :root it would hand every element
+     shipping `transition-all` — i.e. every shadcn Button — an animatable
+     `height: auto`. */
+  @supports (interpolate-size: allow-keywords) {
+    details {
+      interpolate-size: allow-keywords;
+    }
+    details::details-content {
+      block-size: 0;
+      overflow: clip;
+      transition:
+        block-size 200ms cubic-bezier(0.2, 0, 0, 1),
+        content-visibility 200ms allow-discrete;
+    }
+    details[open]::details-content {
+      block-size: auto;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      details::details-content {
+        transition-duration: 0s;
+      }
+    }
+  }
   /* iOS Safari zooms the page for inputs under 16px */
   input,
   textarea,

@@ -128,7 +128,13 @@ export function Dashboard({ today }: { today: string }) {
                       {...tooltip}
                       labelFormatter={(week) => `Semaine du ${dayLabel(week)}`}
                     />
-                    <Bar dataKey="volume" name="kg" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
+                    <Bar
+                      dataKey="volume"
+                      name="kg"
+                      fill="var(--chart-1)"
+                      radius={[3, 3, 0, 0]}
+                      {...series}
+                    />
                   </BarChart>
                 </Scroller>
               </CardContent>
@@ -154,6 +160,7 @@ export function Dashboard({ today }: { today: string }) {
                       name="séances"
                       fill="var(--chart-2)"
                       radius={[3, 3, 0, 0]}
+                      {...series}
                     />
                   </BarChart>
                 </Scroller>
@@ -194,6 +201,7 @@ export function Dashboard({ today }: { today: string }) {
                         stroke="var(--chart-1)"
                         strokeWidth={2}
                         dot={{ r: 2 }}
+                        {...series}
                       />
                       <Line
                         yAxisId="kg"
@@ -203,6 +211,7 @@ export function Dashboard({ today }: { today: string }) {
                         strokeWidth={2}
                         strokeDasharray="4 3"
                         dot={false}
+                        {...series}
                       />
                       <Line
                         yAxisId="vol"
@@ -211,6 +220,7 @@ export function Dashboard({ today }: { today: string }) {
                         stroke="var(--chart-3)"
                         strokeWidth={2}
                         dot={false}
+                        {...series}
                       />
                     </LineChart>
                   </Scroller>
@@ -234,9 +244,7 @@ export function Dashboard({ today }: { today: string }) {
                   .map((session) => (
                     <li key={session.date} className="flex items-center gap-2 py-2">
                       <span className="tabular-nums">{dayLabel(session.date)}</span>
-                      {session.pr ? (
-                        <TrophyIcon className={TROPHY} />
-                      ) : null}
+                      {session.pr ? <TrophyIcon className={TROPHY} /> : null}
                       <span className="ml-auto text-muted-foreground tabular-nums">
                         {session.sets} séries · {formatNumber(session.volume)} kg
                       </span>
@@ -376,6 +384,13 @@ const tooltip = {
   },
   labelStyle: { color: "var(--muted-foreground)" },
 } as const;
+
+/**
+ * recharts replays every series over 1500ms on each range change and on first
+ * paint, with no reduced-motion awareness — a second and a half of movement
+ * across a chart you're trying to read. The data appearing is the answer.
+ */
+const series = { isAnimationActive: false } as const;
 
 const Grid = () => <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />;
 

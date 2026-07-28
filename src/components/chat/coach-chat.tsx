@@ -318,10 +318,11 @@ function CoachMessage({ message }: { message: UIMessage }) {
                   key={i}
                   input={input as ProgramInput}
                   version={(output as { version?: number })?.version}
+                  isNew={streaming}
                 />
               );
             case "tool-save_onboarding":
-              return <ProfileCard key={i} input={input as ProfileInput} />;
+              return <ProfileCard key={i} input={input as ProfileInput} isNew={streaming} />;
             case "tool-swap_exercise": {
               const done = output as { version?: number; dayName?: string };
               return (
@@ -330,6 +331,7 @@ function CoachMessage({ message }: { message: UIMessage }) {
                   input={input as SwapInput}
                   dayName={done?.dayName}
                   version={done?.version}
+                  isNew={streaming}
                 />
               );
             }
@@ -339,6 +341,7 @@ function CoachMessage({ message }: { message: UIMessage }) {
                   key={i}
                   input={input as LoggedInput}
                   sets={(output as { sets?: number })?.sets}
+                  isNew={streaming}
                 />
               );
             default:

@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { PauseIcon, PlayIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,33 @@ export function useRestTimer(): Timer {
   return { remaining, total, running, start, toggle, stop };
 }
 
+const SPRING = { type: "spring", duration: 0.3, bounce: 0 } as const;
+
+/**
+ * The pause/reprendre glyph, animated in both directions. `initial={false}` so
+ * the bar mounting mid-séance doesn't play a swap that never happened.
+ */
+function ToggleIcon({ running }: { running: boolean }) {
+  const reduce = useReducedMotion();
+
+  return (
+    <span className="relative grid size-4 place-items-center">
+      <AnimatePresence initial={false}>
+        <motion.span
+          key={running ? "pause" : "play"}
+          className="absolute grid place-items-center"
+          initial={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
+          animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+          exit={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
+          transition={reduce ? { duration: 0 } : SPRING}
+        >
+          {running ? <PauseIcon /> : <PlayIcon />}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
 export function RestTimerBar({ timer }: { timer: Timer }) {
   const { remaining, total, running, toggle, stop } = timer;
   const minutes = Math.floor(remaining / 60);
@@ -92,16 +120,16 @@ export function RestTimerBar({ timer }: { timer: Timer }) {
           <Button
             variant="outline"
             size="icon-lg"
-            className="size-12"
+            className="size-12 transition-transform active:scale-[0.96]"
             onClick={toggle}
             aria-label={running ? "Mettre le repos en pause" : "Reprendre le repos"}
           >
-            {running ? <PauseIcon /> : <PlayIcon />}
+            <ToggleIcon running={running} />
           </Button>
           <Button
             variant="outline"
             size="icon-lg"
-            className="size-12"
+            className="size-12 transition-transform active:scale-[0.96]"
             onClick={stop}
             aria-label="Passer le repos"
           >

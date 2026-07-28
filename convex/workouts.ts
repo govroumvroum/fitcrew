@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, mutation, query } from "./_generated/server";
-import { recordPrs, statsByExercise } from "./progress";
+import { nextDayIndex, recordPrs, statsByExercise } from "./progress";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 /** A set row belongs to exactly one user; every set mutation routes through this. */
@@ -39,16 +39,7 @@ export const today = query({
       ? await ctx.db.get("programs", user.currentProgramId)
       : null;
 
-    // ponytail: program days cycle in order, one per session, no rest-day
-    // calendar. Add a schedule when someone wants fixed weekdays.
-    const dayCount = program?.days.length ?? 0;
-    const dayIndex = !dayCount
-      ? 0
-      : workout
-        ? (workout.dayIndex ?? 0)
-        : last?.dayIndex === undefined
-          ? 0
-          : (last.dayIndex + 1) % dayCount;
+    const dayIndex = nextDayIndex(program?.days.length ?? 0, last, args.date);
     const day = program?.days[dayIndex] ?? null;
 
     const sets = workout

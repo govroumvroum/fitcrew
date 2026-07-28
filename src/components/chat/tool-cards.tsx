@@ -3,6 +3,7 @@
 import { ArrowRightIcon, CheckIcon, ChevronDownIcon, DumbbellIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatFull } from "@/lib/dates";
+import { cn } from "@/lib/utils";
 
 /**
  * Tool-result cards.
@@ -64,9 +65,20 @@ export type LoggedInput = {
 
 const rest = (s: number) => (s >= 60 ? `${Math.round(s / 60)} min` : `${s} s`);
 
-function Surface({ children }: { children: React.ReactNode }) {
+/**
+ * `isNew` is the message still streaming: a card the coach just produced slides
+ * in, every card already in the thread does not. Without it, opening a thread —
+ * or paging in older ones — replayed the entrance on the whole history.
+ */
+function Surface({ isNew, children }: { isNew?: boolean; children: React.ReactNode }) {
   return (
-    <div className="w-full space-y-2 rounded-xl border bg-card p-3 duration-300 animate-in fade-in slide-in-from-bottom-1">
+    <div
+      className={cn(
+        "w-full space-y-2 rounded-xl border bg-card p-3",
+        isNew &&
+          "duration-300 ease-[cubic-bezier(0.2,0,0,1)] animate-in fade-in slide-in-from-bottom-1 motion-reduce:animate-none",
+      )}
+    >
       {children}
     </div>
   );
@@ -104,12 +116,14 @@ function ExerciseRow({ exercise }: { exercise: Exercise }) {
 export function ProgramCard({
   input,
   version,
+  isNew,
 }: {
   input: { name: string; days: Day[]; progressionRules: string; deloadEveryWeeks?: number | null };
   version?: number;
+  isNew?: boolean;
 }) {
   return (
-    <Surface>
+    <Surface isNew={isNew}>
       <Header
         icon={<DumbbellIcon className="size-4 text-muted-foreground" />}
         title={input.name}
@@ -147,7 +161,9 @@ export function ProgramCard({
 
 export function ProfileCard({
   input,
+  isNew,
 }: {
+  isNew?: boolean;
   input: {
     experience: keyof typeof EXPERIENCE;
     goals: string[];
@@ -160,7 +176,7 @@ export function ProfileCard({
   };
 }) {
   return (
-    <Surface>
+    <Surface isNew={isNew}>
       <Header
         icon={<CheckIcon className="size-4 text-muted-foreground" />}
         title="Profil enregistré"
@@ -209,13 +225,15 @@ export function SwapCard({
   input,
   dayName,
   version,
+  isNew,
 }: {
   input: { from: string; to: Exercise };
   dayName?: string;
   version?: number;
+  isNew?: boolean;
 }) {
   return (
-    <Surface>
+    <Surface isNew={isNew}>
       <Header title={dayName ?? "Exercice remplacé"} aside={version ? `v${version}` : undefined} />
       <div className="flex items-center gap-2 text-sm">
         <span className="min-w-0 flex-1 text-muted-foreground line-through">{input.from}</span>
@@ -233,9 +251,11 @@ export function SwapCard({
 export function LoggedCard({
   input,
   sets,
+  isNew,
 }: {
   input: { date: string; exercises: { name: string; sets: { weight: number; reps: number }[] }[] };
   sets?: number;
+  isNew?: boolean;
 }) {
   const volume = input.exercises.reduce(
     (total, exercise) => total + exercise.sets.reduce((sum, set) => sum + set.weight * set.reps, 0),
@@ -243,7 +263,7 @@ export function LoggedCard({
   );
 
   return (
-    <Surface>
+    <Surface isNew={isNew}>
       <Header title={formatFull(input.date)} aside={sets ? `${sets} séries` : undefined} />
       <ul className="space-y-1">
         {input.exercises.map((exercise) => (

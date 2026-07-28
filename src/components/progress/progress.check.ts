@@ -4,6 +4,7 @@ import {
   bestPrs,
   currentStreak,
   epley1rm,
+  nextDayIndex,
   prCandidates,
   statsByExercise,
   weeklyBuckets,
@@ -110,6 +111,20 @@ assert.equal(
   ])[0].date,
   "2026-01-01",
 );
+
+// --- program day rotation ----------------------------------------------------
+// No history: the very first séance starts at the top of the program.
+assert.equal(nextDayIndex(3, null, "2026-07-28"), 0);
+// An imported séance carries no dayIndex, so it hands over nothing.
+assert.equal(nextDayIndex(3, { date: "2026-07-27" }, "2026-07-28"), 0);
+assert.equal(nextDayIndex(3, { date: "2026-07-27", dayIndex: 0 }, "2026-07-28"), 1);
+// THE POINT: the last day wraps back to the first instead of falling off the end.
+assert.equal(nextDayIndex(3, { date: "2026-07-27", dayIndex: 2 }, "2026-07-28"), 0);
+assert.equal(nextDayIndex(1, { date: "2026-07-27", dayIndex: 0 }, "2026-07-28"), 0);
+// Today's séance already picked its day — no rotation while it's in progress.
+assert.equal(nextDayIndex(3, { date: "2026-07-28", dayIndex: 2 }, "2026-07-28"), 2);
+// No program days to rotate through.
+assert.equal(nextDayIndex(0, { date: "2026-07-27", dayIndex: 2 }, "2026-07-28"), 0);
 
 // --- weeks -------------------------------------------------------------------
 assert.equal(weekStart("2026-07-28"), "2026-07-27"); // Tuesday -> Monday

@@ -157,7 +157,11 @@ export function Today({ date }: { date: string }) {
 
 function Cta({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    <Button asChild size="lg" className="h-14 w-full rounded-lg text-base">
+    <Button
+      asChild
+      size="lg"
+      className="h-14 w-full rounded-lg text-base transition-transform active:scale-[0.96]"
+    >
       <Link href={href}>{children}</Link>
     </Button>
   );

@@ -97,6 +97,29 @@ export function prCandidates(
   return out;
 }
 
+/**
+ * Which program day comes next, from the user's newest séance alone.
+ *
+ * ponytail: program days cycle in order, one per séance, no rest-day calendar.
+ * Add a schedule when someone wants fixed weekdays.
+ *
+ * Today's séance already picked its day, so it answers for itself; otherwise the
+ * last one hands over to the following day and wraps past the last. Shared by
+ * `workouts.today` and `programs.current` so the two screens can't disagree.
+ */
+export function nextDayIndex(
+  dayCount: number,
+  last: { date: string; dayIndex?: number } | null,
+  date: string,
+): number {
+  if (!dayCount) return 0;
+  if (last?.date === date) return last.dayIndex ?? 0;
+  // No dayIndex at all: nothing has been followed yet (or the last séance was an
+  // import), so start at the top.
+  if (last?.dayIndex === undefined) return 0;
+  return (last.dayIndex + 1) % dayCount;
+}
+
 /** Monday of the week containing `date` (YYYY-MM-DD in, YYYY-MM-DD out). */
 export function weekStart(date: string): string {
   const time = Date.parse(`${date}T00:00:00Z`);
