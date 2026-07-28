@@ -34,19 +34,20 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { ExtractedReview } from "@/components/import/extracted-review";
-import { Badge } from "@/components/ui/badge";
+import {
+  LoggedCard,
+  ProfileCard,
+  ProgramCard,
+  SwapCard,
+  type LoggedInput,
+  type ProfileInput,
+  type ProgramInput,
+  type SwapInput,
+} from "@/components/chat/tool-cards";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { useLocalDate } from "@/lib/dates";
-
-/** What the user sees happened, per tool. Anything unlisted stays silent. */
-const TOOL_LABEL: Record<string, string> = {
-  "tool-save_onboarding": "Profil enregistré",
-  "tool-generate_program": "Programme enregistré",
-  "tool-swap_exercise": "Exercice remplacé",
-  "tool-log_workout": "Séance enregistrée",
-};
 
 export function CoachChat() {
   // undefined while loading OR while the profile row is still being created.
@@ -278,13 +279,46 @@ function CoachMessage({ message }: { message: UIMessage }) {
             );
           }
 
-          const label = TOOL_LABEL[tool.type];
-          if (!label || tool.state !== "output-available") return null;
-          return (
-            <Badge key={i} variant="secondary" className="self-start">
-              {label}
-            </Badge>
-          );
+          if (tool.state !== "output-available") return null;
+
+          // Cards read the tool's input, which carries the whole program/profile;
+          // the output only holds the resulting version number.
+          const { input, output } = tool as { input?: unknown; output?: unknown };
+          switch (tool.type) {
+            case "tool-generate_program":
+              return (
+                <ProgramCard
+                  key={i}
+                  input={input as ProgramInput}
+                  version={(output as { version?: number })?.version}
+                />
+              );
+            case "tool-save_onboarding":
+              return <ProfileCard key={i} input={input as ProfileInput} />;
+            case "tool-swap_exercise": {
+              const done = output as { version?: number; dayName?: string };
+              return (
+                <SwapCard
+                  key={i}
+                  input={input as SwapInput}
+                  dayName={done?.dayName}
+                  version={done?.version}
+                />
+              );
+            }
+            case "tool-log_workout":
+              return (
+                <LoggedCard
+                  key={i}
+                  input={input as LoggedInput}
+                  sets={(output as { sets?: number })?.sets}
+                />
+              );
+            default:
+              // explain_exercise returns raw history for the model to narrate —
+              // the prose above is the result, a card would just repeat it.
+              return null;
+          }
         })}
       </MessageContent>
     </Message>
