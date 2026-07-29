@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "convex/_generated/**",
+    "convex/README.md",
+    "AGENTS.md",
+    "src/components/ui/**",
+    "src/components/ai-elements/**",
+    ".claude/skills/**",
+    ".agents/skills/**"
+  ]
+}

@@ -11,6 +11,7 @@ change looks small enough to just do. "It's only a few lines" is how the context
 window gets spent on plumbing instead of on the conversation.
 
 Do it inline only when delegating genuinely costs more than it saves:
+
 - A one-line edit to a file already open in context.
 - A change that depends on a subtlety just worked out in conversation and would
   take longer to brief than to make.
@@ -18,6 +19,7 @@ Do it inline only when delegating genuinely costs more than it saves:
   `*.check.ts` self-checks) and reading data with `bunx convex data` / `convex run`.
 
 When you delegate:
+
 - Brief with the constraints and the traps, not just the goal — the reasoning
   behind a decision is the part a subagent can't rediscover.
 - Name the files it must NOT touch when several agents run at once, and never let
