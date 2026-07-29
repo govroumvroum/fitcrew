@@ -79,6 +79,8 @@ export function Challenges({ today }: { today: string }) {
                   <p className="text-xs text-muted-foreground">
                     {METRICS[challenge.metric].label}
                     {challenge.exerciseName ? ` · ${challenge.exerciseName}` : ""}
+                    {/* No createdBy = the Monday cron wrote it, there's no human author. */}
+                    {challenge.createdBy ? "" : " · proposé par le coach"}
                   </p>
                 </div>
                 <JoinButton challengeId={challenge._id} joined={challenge.joined} />

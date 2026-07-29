@@ -48,11 +48,19 @@ export function costUsdFrom(providerMetadata: unknown): number | undefined {
 // Functions
 // ---------------------------------------------------------------------------
 
-/** One row per LLM call. `userId` omitted = collective cost (the demo cache). */
+/**
+ * One row per LLM call. `userId` omitted = collective cost (the demo cache, and
+ * the Monday défi generation).
+ */
 export const record = internalMutation({
   args: {
     userId: v.optional(v.id("users")),
-    feature: v.union(v.literal("coach"), v.literal("screenshot"), v.literal("demos")),
+    feature: v.union(
+      v.literal("coach"),
+      v.literal("screenshot"),
+      v.literal("demos"),
+      v.literal("challenge"),
+    ),
     model: v.string(),
     inputTokens: v.number(),
     outputTokens: v.number(),

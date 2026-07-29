@@ -11,6 +11,7 @@
 import type * as aiUsage from "../aiUsage.js";
 import type * as coach from "../coach.js";
 import type * as crew from "../crew.js";
+import type * as crons from "../crons.js";
 import type * as exerciseDemos from "../exerciseDemos.js";
 import type * as home from "../home.js";
 import type * as http from "../http.js";
@@ -33,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   aiUsage: typeof aiUsage;
   coach: typeof coach;
   crew: typeof crew;
+  crons: typeof crons;
   exerciseDemos: typeof exerciseDemos;
   home: typeof home;
   http: typeof http;

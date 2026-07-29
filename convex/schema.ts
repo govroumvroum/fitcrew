@@ -23,6 +23,14 @@ export const programExercise = v.object({
   notes: v.optional(v.string()),
 });
 
+export const challengeMetric = v.union(
+  v.literal("sessions"),
+  v.literal("volume"),
+  v.literal("max_reps"),
+  v.literal("max_weight"),
+  v.literal("est_1rm"),
+);
+
 export default defineSchema({
   users: defineTable({
     tokenIdentifier: v.string(),
@@ -167,16 +175,12 @@ export default defineSchema({
   // (four people, so the array is bounded), and every score is recomputed at
   // read time from `workouts`/`sets`. An entry row would hold nothing.
   challenges: defineTable({
-    createdBy: v.id("users"),
+    // Absent means the coach generated it (the Monday cron): there is no human
+    // author, and naming one would be a lie in the UI.
+    createdBy: v.optional(v.id("users")),
     title: v.string(),
     weekStart: v.string(), // YYYY-MM-DD Monday, produced by weekStart()
-    metric: v.union(
-      v.literal("sessions"),
-      v.literal("volume"),
-      v.literal("max_reps"),
-      v.literal("max_weight"),
-      v.literal("est_1rm"),
-    ),
+    metric: challengeMetric,
     // Required for every metric except `sessions`: the fairness rule is that a
     // boxer and a bodybuilder compare on one named exercise, never globally.
     exerciseName: v.optional(v.string()),
@@ -187,10 +191,16 @@ export default defineSchema({
   // `usageHandler` and by hand at the two `generateObject` sites.
   //
   // `userId` is absent for `demos`: demo matching is a cache shared by everyone,
-  // and billing the first person who triggered it would be a wrong number.
+  // and billing the first person who triggered it would be a wrong number. Same
+  // for `challenge`: the Monday cron writes défis for the crew, on nobody's behalf.
   aiUsage: defineTable({
     userId: v.optional(v.id("users")),
-    feature: v.union(v.literal("coach"), v.literal("screenshot"), v.literal("demos")),
+    feature: v.union(
+      v.literal("coach"),
+      v.literal("screenshot"),
+      v.literal("demos"),
+      v.literal("challenge"),
+    ),
     model: v.string(),
     inputTokens: v.number(),
     outputTokens: v.number(),

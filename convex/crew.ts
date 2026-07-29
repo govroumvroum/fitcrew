@@ -1,7 +1,20 @@
+import { generateObject } from "ai";
 import { v } from "convex/values";
+import { z } from "zod";
+import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
-import { QueryCtx, mutation, query } from "./_generated/server";
+import {
+  QueryCtx,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
+import { costUsdFrom } from "./aiUsage";
+import { MODEL_ID, languageModel } from "./model";
 import { SetLite, currentStreak, statsByExercise, weekStart, weeklyBuckets } from "./progress";
+import { challengeMetric } from "./schema";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 // ---------------------------------------------------------------------------
@@ -181,29 +194,69 @@ export const feed = query({
 });
 
 /**
- * Every exercise the crew has ever logged, so the create form is a picker and
- * not a text field. Scoring matches `exerciseName` exactly — a typo would score
- * the whole challenge 0 and look like nobody trained.
+ * Every exercise the crew could be scored on, with the fairness counts.
  *
- * Read off `prs`, not `sets`: `recordPrs` writes a baseline row the first time
- * anyone touches an exercise, so this table already holds the distinct names and
- * it's a fraction of the size.
+ * Union of logged and prescribed: `workouts.start` copies
+ * `programs.days[].exercises[].name` verbatim into `sets.exerciseName`, so an
+ * exercise somebody has in their program scores correctly even with zero
+ * history — and a défi on what the whole crew is programmed to do beats one on
+ * whatever happened to get logged first.
+ *
+ * `inPrograms` / `logged` are the fairness signal the model needs: a défi only
+ * one person can do isn't a défi, which is the whole reason a boxer and a
+ * bodybuilder don't compete on développé couché.
+ */
+async function candidateExercises(ctx: QueryCtx) {
+  const counts = new Map<string, { inPrograms: number; logged: number }>();
+  const bump = (name: string, key: "inPrograms" | "logged") => {
+    const row = counts.get(name) ?? { inPrograms: 0, logged: 0 };
+    row[key]++;
+    counts.set(name, row);
+  };
+
+  for (const member of await crew(ctx)) {
+    const prs = await ctx.db
+      .query("prs")
+      .withIndex("by_user_and_exercise", (q) => q.eq("userId", member._id))
+      .take(1000);
+    for (const name of new Set(prs.map((pr) => pr.exerciseName))) bump(name, "logged");
+
+    // ponytail: the current program only, one document per member. Older
+    // versions hold exercises nobody trains this week; read `by_user_and_version`
+    // if "used to do it" ever becomes a signal worth having.
+    const program = member.currentProgramId
+      ? await ctx.db.get("programs", member.currentProgramId)
+      : null;
+    const prescribed = new Set(
+      (program?.days ?? []).flatMap((day) => day.exercises.map((exercise) => exercise.name)),
+    );
+    for (const name of prescribed) bump(name, "inPrograms");
+  }
+
+  // Most-shared first: the model reads the top of the list as the best défis.
+  return [...counts]
+    .map(([name, count]) => ({ name, ...count }))
+    .sort(
+      (a, b) =>
+        b.inPrograms - a.inPrograms || b.logged - a.logged || a.name.localeCompare(b.name, "fr"),
+    );
+}
+
+/**
+ * The create form's exercise picker. A picker and not a text field because
+ * scoring matches `exerciseName` exactly — a typo would score the whole défi 0
+ * and read as "nobody trained".
  */
 export const exerciseNames = query({
   args: {},
   handler: async (ctx) => {
     const user = await getCurrentUser(ctx);
     if (!user) return null;
-
-    const names = new Set<string>();
-    for (const member of await crew(ctx)) {
-      const prs = await ctx.db
-        .query("prs")
-        .withIndex("by_user_and_exercise", (q) => q.eq("userId", member._id))
-        .take(1000);
-      for (const pr of prs) names.add(pr.exerciseName);
-    }
-    return [...names].sort((a, b) => a.localeCompare(b, "fr"));
+    // Same candidate list the Monday cron generates from, so the form can create
+    // any défi the coach can and both agree on what scores. Sorted by name here
+    // — a picker reads alphabetically; the cron wants most-shared first.
+    const candidates = await candidateExercises(ctx);
+    return candidates.map((c) => c.name).sort((a, b) => a.localeCompare(b, "fr"));
   },
 });
 
@@ -255,13 +308,7 @@ export const create = mutation({
   args: {
     title: v.string(),
     weekStart: v.string(),
-    metric: v.union(
-      v.literal("sessions"),
-      v.literal("volume"),
-      v.literal("max_reps"),
-      v.literal("max_weight"),
-      v.literal("est_1rm"),
-    ),
+    metric: challengeMetric,
     exerciseName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -301,5 +348,213 @@ export const toggleJoin = mutation({
         : [...challenge.participants, user._id],
     });
     return !joined;
+  },
+});
+
+// ---------------------------------------------------------------------------
+// The Monday cron: the coach proposes the week's défis
+//
+// The failure mode this fixes is nobody remembering to open one. Nobody is
+// opted in — the défi lands with an empty standings list and each person taps
+// « Rejoindre ».
+// ---------------------------------------------------------------------------
+
+// ponytail: a month and a half of history is enough to stop the model looping,
+// and it's 6 equality reads on `by_week` — no new index, no scan. Widen the
+// number, not the mechanism, if the défis still feel repetitive.
+const RECENT_WEEKS = 6;
+
+/** Everything the prompt gets, and nothing else. Bounded by the crew's size. */
+export const weeklyContext = internalQuery({
+  args: { weekStart: v.string() },
+  handler: async (ctx, args) => {
+    const members = [];
+    for (const member of await crew(ctx)) {
+      const workouts = await ctx.db
+        .query("workouts")
+        .withIndex("by_user_and_date", (q) =>
+          q
+            .eq("userId", member._id)
+            .gte("date", shift(args.weekStart, -28))
+            .lte("date", shift(args.weekStart, -1)),
+        )
+        .take(100);
+      members.push({
+        name: member.name,
+        sessions: workouts.length,
+        // Onboarding is optional — somebody signed up and never finished it.
+        sport: member.onboarding?.sport,
+        goals: member.onboarding?.goals ?? [],
+        experience: member.onboarding?.experience,
+      });
+    }
+
+    const week = (start: string) =>
+      ctx.db
+        .query("challenges")
+        .withIndex("by_week", (q) => q.eq("weekStart", start))
+        .take(20);
+
+    // Labelled by age, not merged: repeating three weeks ago is forgivable,
+    // repeating last week isn't, and the model can only tell if we say which.
+    const recentWeeks = [];
+    for (let weeksAgo = 1; weeksAgo <= RECENT_WEEKS; weeksAgo++) {
+      const defis = (await week(shift(args.weekStart, -7 * weeksAgo))).map((challenge) => ({
+        title: challenge.title,
+        metric: challenge.metric,
+        exerciseName: challenge.exerciseName,
+      }));
+      if (defis.length) recentWeeks.push({ weeksAgo, defis });
+    }
+
+    return {
+      candidates: await candidateExercises(ctx),
+      members,
+      recentWeeks,
+      // Idempotency: read here so the action needs a single roundtrip.
+      alreadyGenerated: (await week(args.weekStart)).length > 0,
+    };
+  },
+});
+
+// Nullable, not optional: strict structured output can't express "absent".
+const zDefis = z.object({
+  defis: z
+    .array(
+      z.object({
+        title: z
+          .string()
+          .describe("Titre court et parlant, en français. Ex : « Le plus de tractions »"),
+        metric: z.enum(["sessions", "volume", "max_reps", "max_weight", "est_1rm"]),
+        exerciseName: z
+          .string()
+          .nullable()
+          .describe("Un nom copié EXACTEMENT depuis la liste fournie, ou null pour `sessions`"),
+      }),
+    )
+    .min(1)
+    .max(2),
+});
+
+export const generateWeekly = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    // An action may read the clock; a query may not. This is the only place the
+    // week is decided.
+    const monday = weekStart(new Date().toISOString().slice(0, 10));
+
+    const context = await ctx.runQuery(internal.crew.weeklyContext, { weekStart: monday });
+    // A cron retries, and this is also run by hand to test it.
+    if (context.alreadyGenerated) return null;
+
+    const { object, usage, providerMetadata } = await generateObject({
+      model: languageModel(),
+      providerOptions: { openrouter: { usage: { include: true } } },
+      schema: zDefis,
+      system:
+        "Tu es le coach de FitCrew, une app de muscu pour une bande de quatre potes. " +
+        "Tu proposes les défis de la semaine. Tu parles français, tu tutoies, tu es bref.\n\n" +
+        "Règles :\n" +
+        "- 1 ou 2 défis, pas plus. Dès que la liste d'exercices ci-dessous n'est pas vide, " +
+        "propose un défi sur un exercice, et ajoute un défi de régularité (`sessions`) si " +
+        "la crew a besoin d'un coup de pied. Un historique vide n'est pas une raison de " +
+        "s'abstenir : le programme suffit.\n" +
+        "- Choisis en priorité un exercice que le plus de monde a dans son programme : un " +
+        "défi que deux personnes sur quatre peuvent faire n'est pas un défi. La colonne " +
+        "« programmes » compte les membres qui l'ont dans leur programme actuel, « logué » " +
+        "ceux qui l'ont déjà chargé. Un exercice programmé sans historique est un défi " +
+        "valable. Si l'exercice est partagé par toute la crew, dis-le dans le titre.\n" +
+        "- Respecte le sport et les objectifs de chacun : ne mets pas un boxeur et un " +
+        "powerlifter en concurrence sur un exercice qui n'intéresse qu'un des deux.\n" +
+        "- `exerciseName` doit être copié EXACTEMENT depuis la liste des exercices " +
+        "ci-dessous. N'invente rien, ne reformule rien, ne traduis rien.\n" +
+        "- `sessions` est le seul metric sans exercice : mets `null`. Tous les autres en " +
+        "exigent un.\n" +
+        "- `max_reps` ne compte que les reps au poids du corps (tractions, pompes, dips).\n" +
+        "- Ne réutilise pas un metric ou un exercice des semaines récentes. Plus le défi est " +
+        "récent, plus le répéter est mauvais : la semaine dernière, jamais ; il y a six " +
+        "semaines, tolérable.\n" +
+        "- Si la liste d'exercices est vide, un seul défi `sessions` est la bonne réponse, " +
+        "pas un échec.\n" +
+        "- Les titres sont courts, concrets, sans emoji.\n\n" +
+        `EXERCICES POSSIBLES (programmes actuels + historique) :\n${
+          context.candidates
+            .map((c) => `${c.name} — programmes : ${c.inPrograms}, logué : ${c.logged}`)
+            .join("\n") || "(aucun)"
+        }\n\n` +
+        `LA CREW (séances sur les 4 dernières semaines) :\n${
+          context.members
+            .map(
+              (m) =>
+                `${m.name} : ${m.sessions} séances` +
+                `${m.sport ? `, sport : ${m.sport}` : ""}` +
+                `${m.experience ? `, niveau : ${m.experience}` : ""}` +
+                `${m.goals.length ? `, objectifs : ${m.goals.join(", ")}` : ""}`,
+            )
+            .join("\n") || "(personne)"
+        }\n\n` +
+        `DÉFIS RÉCENTS :\n${
+          context.recentWeeks
+            .map(
+              (w) =>
+                `Il y a ${w.weeksAgo} semaine${w.weeksAgo > 1 ? "s" : ""} : ` +
+                w.defis
+                  .map(
+                    (c) => `${c.title} (${c.metric}${c.exerciseName ? `, ${c.exerciseName}` : ""})`,
+                  )
+                  .join(" ; "),
+            )
+            .join("\n") || "(aucun)"
+        }`,
+      prompt: `Propose les défis de la semaine du ${monday}.`,
+    });
+
+    await ctx.runMutation(internal.aiUsage.record, {
+      feature: "challenge",
+      model: MODEL_ID,
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+      reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+      costUsd: costUsdFrom(providerMetadata),
+    });
+
+    // Scoring matches `exerciseName` byte for byte, so a hallucinated or merely
+    // reworded name scores the whole crew 0 and reads as "nobody trained".
+    // Dropping the défi is the honest failure; inserting it is the silent one.
+    const valid = new Set(context.candidates.map((candidate) => candidate.name));
+    const defis = object.defis.filter((defi) =>
+      defi.metric === "sessions" ? true : !!defi.exerciseName && valid.has(defi.exerciseName),
+    );
+    if (defis.length === 0) return null;
+
+    await ctx.runMutation(internal.crew.insertGenerated, {
+      weekStart: monday,
+      defis: defis.map((defi) => ({
+        title: defi.title,
+        metric: defi.metric,
+        ...(defi.metric === "sessions" ? {} : { exerciseName: defi.exerciseName ?? undefined }),
+      })),
+    });
+    return null;
+  },
+});
+
+/** Actions have no `ctx.db`. No `createdBy`, no participants — nobody is opted in. */
+export const insertGenerated = internalMutation({
+  args: {
+    weekStart: v.string(),
+    defis: v.array(
+      v.object({
+        title: v.string(),
+        metric: challengeMetric,
+        exerciseName: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    for (const defi of args.defis) {
+      await ctx.db.insert("challenges", { ...defi, weekStart: args.weekStart, participants: [] });
+    }
+    return null;
   },
 });
