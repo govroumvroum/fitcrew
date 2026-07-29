@@ -217,3 +217,16 @@
     color: oklch(0.99 0.004 27.255);
   }
 }
+
+/* Rest-timer bar. One compositor-driven animation over the whole rest duration,
+   seeked with a negative animation-delay, instead of re-rendering the bar every
+   frame. translateX rather than scaleX: the track is rounded-full and scaling
+   would squash the corners. */
+@keyframes rest-drain {
+  from {
+    transform: translateX(0%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
