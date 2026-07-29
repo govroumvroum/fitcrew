@@ -13,15 +13,20 @@ import {
 } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
 import { MODEL_ID, languageModel } from "./model";
-import { SetLite, currentStreak, statsByExercise, weekStart, weeklyBuckets } from "./progress";
+import {
+  SetLite,
+  currentStreak,
+  shift,
+  statsByExercise,
+  weekStart,
+  weeklyBuckets,
+} from "./progress";
 import { challengeMetric } from "./schema";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 // ---------------------------------------------------------------------------
 // Pure logic. No ctx, no clock — see src/components/crew/crew.check.ts.
 // ---------------------------------------------------------------------------
-
-const DAY = 86_400_000;
 
 export type ChallengeMetric = "sessions" | "volume" | "max_reps" | "max_weight" | "est_1rm";
 
@@ -55,10 +60,6 @@ export function scoreChallenge(
       return stat.est1rm;
   }
 }
-
-/** `days` from a YYYY-MM-DD key, still a YYYY-MM-DD key. UTC so DST can't shift it. */
-const shift = (date: string, days: number) =>
-  new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 
 // ---------------------------------------------------------------------------
 // Convex

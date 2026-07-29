@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { monday } from "@/lib/dates";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { ChallengeMetric } from "../../../convex/crew";
@@ -37,17 +38,6 @@ export const METRICS = {
   max_weight: { label: "Charge max", unit: "kg" },
   est_1rm: { label: "Force (1RM est.)", unit: "kg" },
 } as const satisfies Record<ChallengeMetric, { label: string; unit: string }>;
-
-/**
- * The Monday of `date`. Mirrors `weekStart` in convex/progress.ts — the mutation
- * rejects anything else — but importing that module would pull the Convex server
- * runtime into the browser bundle for four lines of UTC arithmetic.
- */
-function monday(date: string) {
-  const time = Date.parse(`${date}T00:00:00Z`);
-  const shift = (new Date(time).getUTCDay() + 6) % 7;
-  return new Date(time - shift * 86_400_000).toISOString().slice(0, 10);
-}
 
 export function Challenges({ today }: { today: string }) {
   const weekStart = monday(today);

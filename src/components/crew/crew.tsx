@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatShort } from "@/lib/dates";
+import { formatShort, fromDate } from "@/lib/dates";
 import { PR_LABELS, TROPHY } from "@/lib/prs";
 import { api } from "../../../convex/_generated/api";
 
@@ -22,12 +22,6 @@ const RANGES = {
 } as const;
 
 type RangeKey = keyof typeof RANGES;
-
-/** `days` back from `today`, or the epoch for "tout". */
-function fromDate(today: string, days: number | null) {
-  if (days === null) return "1970-01-01";
-  return new Date(Date.parse(`${today}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
-}
 
 export function Crew({ today }: { today: string }) {
   return (
@@ -47,7 +41,7 @@ export function Crew({ today }: { today: string }) {
 }
 
 /** Every crew query answers `null` until StoreUser has created the users row. */
-export function Profile() {
+function Profile() {
   return (
     <p className="py-4 text-center text-sm text-muted-foreground">Profil en cours de création…</p>
   );
