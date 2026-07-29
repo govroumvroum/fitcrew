@@ -27,6 +27,17 @@ When you delegate:
 - Verify the claims that matter yourself rather than relaying them. Subagents
   report honestly but not always completely.
 
+# Claim the issue before working on it
+
+When we start on an issue, assign it first:
+
+```sh
+gh issue edit <n> --add-assignee @me
+```
+
+`@me` is whoever's `gh` is authenticated — Basile. It's how the issue list shows
+what's in flight, so it belongs at the start of the work, not at the PR.
+
 <!-- convex-ai-start -->
 
 This project uses [Convex](https://convex.dev) as its backend.
