@@ -6,7 +6,10 @@ import { internalMutation, internalQuery } from "./_generated/server";
 // Pure logic. See aiUsage.check.ts.
 // ---------------------------------------------------------------------------
 
-type UsageRow = Pick<Doc<"aiUsage">, "inputTokens" | "outputTokens" | "reasoningTokens" | "costUsd">;
+type UsageRow = Pick<
+  Doc<"aiUsage">,
+  "inputTokens" | "outputTokens" | "reasoningTokens" | "costUsd"
+>;
 
 type Totals = {
   calls: number;

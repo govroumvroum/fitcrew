@@ -166,9 +166,8 @@ export const history = query({
         // no day to name rather than a day whose name we lost.
         imported: workout.programId === undefined,
         dayName:
-          (workout.dayIndex === undefined
-            ? undefined
-            : program?.days[workout.dayIndex]?.name) ?? null,
+          (workout.dayIndex === undefined ? undefined : program?.days[workout.dayIndex]?.name) ??
+          null,
         sets: done,
         volume: Math.round(volume),
         pr: prWorkouts.has(workout._id),
