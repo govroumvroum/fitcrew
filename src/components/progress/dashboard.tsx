@@ -78,8 +78,9 @@ export function Dashboard({ today }: { today: string }) {
     data.exercises.find((item) => item.name === exercise) ?? data.exercises[0] ?? null;
 
   // No bottom padding below: /progres reserves --tab-bar for the tab bar.
+  // ph-mask: weight, body fat and lean mass are masked in session replay.
   return (
-    <div className="space-y-4 p-4">
+    <div className="ph-mask space-y-4 p-4">
       <div>
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Ma progression</h1>
         <p className="text-sm text-muted-foreground">Les chiffres montent, ou pas. On verra.</p>

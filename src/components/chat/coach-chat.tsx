@@ -160,7 +160,9 @@ export function CoachChat() {
       </header>
 
       <Conversation>
-        <ConversationContent className="gap-4">
+        {/* ph-mask: what the user tells the coach, and what it answers, stays
+            out of session replay. */}
+        <ConversationContent className="ph-mask gap-4">
           {!threadId ? (
             <>
               <Skeleton className="h-16 w-4/5" />

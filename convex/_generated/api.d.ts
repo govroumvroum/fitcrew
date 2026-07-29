@@ -18,6 +18,7 @@ import type * as programs from "../programs.js";
 import type * as progress from "../progress.js";
 import type * as screenshots from "../screenshots.js";
 import type * as search from "../search.js";
+import type * as toolSchemas from "../toolSchemas.js";
 import type * as users from "../users.js";
 import type * as workouts from "../workouts.js";
 
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   progress: typeof progress;
   screenshots: typeof screenshots;
   search: typeof search;
+  toolSchemas: typeof toolSchemas;
   users: typeof users;
   workouts: typeof workouts;
 }>;
