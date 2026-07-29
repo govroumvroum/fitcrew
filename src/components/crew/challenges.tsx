@@ -30,7 +30,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { ChallengeMetric } from "../../../convex/crew";
 
-const METRICS = {
+export const METRICS = {
   sessions: { label: "Nombre de séances", unit: "séances" },
   volume: { label: "Volume", unit: "kg" },
   max_reps: { label: "Reps max", unit: "reps" },
@@ -116,7 +116,13 @@ export function Challenges({ today }: { today: string }) {
   );
 }
 
-function JoinButton({ challengeId, joined }: { challengeId: Id<"challenges">; joined: boolean }) {
+export function JoinButton({
+  challengeId,
+  joined,
+}: {
+  challengeId: Id<"challenges">;
+  joined: boolean;
+}) {
   const toggleJoin = useMutation(api.crew.toggleJoin);
   const [pending, setPending] = useState(false);
 

@@ -84,6 +84,15 @@ export const stats = query({
         .withIndex("by_user_and_date", (q) => q.eq("userId", user._id))
         .first()) !== null;
 
+    // Counts only, no scoring: the homepage renders a nudge, not a scoreboard.
+    // `crew.challenges` reads every participant's workouts and sets to build
+    // standings — dragging that onto every homepage visit is exactly what this
+    // avoids. One index read, and /crew owns the numbers.
+    const weekChallenges = await ctx.db
+      .query("challenges")
+      .withIndex("by_week", (q) => q.eq("weekStart", week))
+      .take(20);
+
     // Two, not one: the delta is the interesting half of a weigh-in.
     const measures = await ctx.db
       .query("bodyweight")
@@ -121,6 +130,17 @@ export const stats = query({
                 : undefined,
           }
         : null,
+      weekChallenges: weekChallenges.map((challenge) => ({
+        _id: challenge._id,
+        title: challenge.title,
+        metric: challenge.metric,
+        exerciseName: challenge.exerciseName,
+        participants: challenge.participants.length,
+        // No createdBy = the Monday cron wrote it, there's no human author.
+        byCoach: challenge.createdBy === undefined,
+      })),
+      // The only thing the nudge needs to decide whether to show itself.
+      joinedAny: weekChallenges.some((challenge) => challenge.participants.includes(user._id)),
       prs: prs.map(({ exerciseName, type, value, date }) => ({
         exerciseName,
         type,
