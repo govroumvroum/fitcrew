@@ -1,5 +1,6 @@
 "use client";
 
+import { Show } from "@clerk/nextjs";
 import {
   ChartLineIcon,
   ClipboardListIcon,
@@ -91,5 +92,29 @@ export function NavRail() {
         );
       })}
     </nav>
+  );
+}
+
+/**
+ * Both navs, shown only to a signed-in user.
+ *
+ * The `Show` has to live on this side of the client boundary. `Show` imported
+ * into a server component is Clerk's server flavour: it reads auth during the
+ * render, which opts the whole tree into dynamic rendering — with this wrapper
+ * inlined in the root layout, every route in the app built as ƒ, including
+ * `/~offline`, whose entire job is to be a static offline fallback. Here it
+ * resolves to the client flavour and reads the same state from context after
+ * hydration, so the pages stay ○ and get served off the CDN.
+ *
+ * The trade: signed-in users get their first paint without the navs, which fade
+ * in on hydration. No layout shift — the body reserves the tab bar's height and
+ * the rail's width either way.
+ */
+export function SignedInNav() {
+  return (
+    <Show when="signed-in">
+      <TabBar />
+      <NavRail />
+    </Show>
   );
 }
