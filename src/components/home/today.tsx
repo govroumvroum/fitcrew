@@ -5,7 +5,14 @@ import { TrophyIcon } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatFull } from "@/lib/dates";
@@ -150,6 +157,18 @@ export function Today({ date }: { date: string }) {
             </CardContent>
           </Card>
         ) : null}
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Ta crew</CardTitle>
+            <CardAction>
+              <Badge variant="secondary">Bientôt</Badge>
+            </CardAction>
+            <CardDescription>
+              Le classement entre potes arrive. En attendant, prends de l'avance.
+            </CardDescription>
+          </CardHeader>
+        </Card>
       </div>
     </div>
   );
