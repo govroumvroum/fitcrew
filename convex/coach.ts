@@ -24,6 +24,7 @@ import {
   type ActionCtx,
   type QueryCtx,
 } from "./_generated/server";
+import { costUsdFrom } from "./aiUsage";
 import { languageModel } from "./model";
 import { programExercise } from "./schema";
 import { searchWeb } from "./search";
@@ -460,6 +461,19 @@ function coach() {
     name: "Coach FitCrew",
     languageModel: languageModel(),
     instructions: "Tu es le coach sportif de l'app FitCrew. Tu réponds en français, en tutoyant.",
+    // The component already knows the userId of every call it makes, so this one
+    // hook covers the whole coach — all 8 steps of every turn, tools included.
+    usageHandler: async (ctx, { userId, usage, providerMetadata, model }) => {
+      await ctx.runMutation(internal.aiUsage.record, {
+        userId: userId as Id<"users"> | undefined,
+        feature: "coach",
+        model,
+        inputTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+        costUsd: costUsdFrom(providerMetadata),
+      });
+    },
   });
   return agent;
 }
@@ -653,6 +667,9 @@ async function stream(
       // A tool call must be followed by the coach's own words, so one step is
       // never enough (the AI SDK default).
       stopWhen: stepCountIs(8),
+      // `usage.include` makes OpenRouter return the real cost; `user` is its
+      // anti-abuse identifier, not analytics — the numbers come from usageHandler.
+      providerOptions: { openrouter: { user: user._id, usage: { include: true } } },
     },
     {
       saveStreamDeltas: true,

@@ -2,9 +2,10 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateObject } from "ai";
 import { type Infer, v } from "convex/values";
 import { z } from "zod";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { action, internalMutation, mutation, query } from "./_generated/server";
+import { costUsdFrom } from "./aiUsage";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 /** One edit swaps the vision model everywhere. */
@@ -255,6 +256,11 @@ export const extract = action({
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error("OPENROUTER_API_KEY manquant");
 
+    // `save` below would reject an anonymous caller anyway; here it's also who
+    // the vision call gets billed to.
+    const user = await ctx.runQuery(api.users.me, {});
+    if (!user) throw new Error("Non authentifié");
+
     const blob = await ctx.storage.get(args.storageId);
     if (!blob) throw new Error("Capture introuvable");
 
@@ -262,8 +268,13 @@ export const extract = action({
       ? args.today!
       : new Date().toISOString().slice(0, 10);
 
-    const { object } = await generateObject({
-      model: createOpenRouter({ apiKey }).chat(VISION_MODEL),
+    const { object, usage, providerMetadata } = await generateObject({
+      // `usage.include` asks OpenRouter for the real cost; `user` is its
+      // anti-abuse identifier, not the measurement.
+      model: createOpenRouter({ apiKey }).chat(VISION_MODEL, {
+        user: user._id,
+        usage: { include: true },
+      }),
       schema: zExtraction,
       temperature: 0,
       system: systemPrompt(today, args.source),
@@ -280,6 +291,16 @@ export const extract = action({
           ],
         },
       ],
+    });
+
+    await ctx.runMutation(internal.aiUsage.record, {
+      userId: user._id,
+      feature: "screenshot",
+      model: VISION_MODEL,
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+      reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+      costUsd: costUsdFrom(providerMetadata),
     });
 
     const entries = normalizeExtraction(object, today);
