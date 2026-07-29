@@ -3,7 +3,7 @@
 import { useQuery } from "convex/react";
 import { TrophyIcon } from "lucide-react";
 import { useState } from "react";
-import { formatDay } from "@/lib/dates";
+import { formatDay, fromDate } from "@/lib/dates";
 import { PR_LABELS, TROPHY } from "@/lib/prs";
 import { formatNumber } from "@/lib/utils";
 import {
@@ -37,12 +37,6 @@ const RANGES = {
 } as const;
 
 type RangeKey = keyof typeof RANGES;
-
-/** `days` back from `today`, or the epoch for "tout" — the query clamps it to the first session. */
-function fromDate(today: string, days: number | null) {
-  if (days === null) return "1970-01-01";
-  return new Date(Date.parse(`${today}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
-}
 
 /** `unknown` in: recharts hands its formatters a ReactNode, always a date string here. */
 const dayLabel = (date: unknown) => formatDay(String(date));

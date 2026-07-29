@@ -120,6 +120,10 @@ export function nextDayIndex(
   return (last.dayIndex + 1) % dayCount;
 }
 
+/** `days` from a YYYY-MM-DD key, still a YYYY-MM-DD key. UTC so DST can't shift it. */
+export const shift = (date: string, days: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
+
 /** Monday of the week containing `date` (YYYY-MM-DD in, YYYY-MM-DD out). */
 export function weekStart(date: string): string {
   const time = Date.parse(`${date}T00:00:00Z`);

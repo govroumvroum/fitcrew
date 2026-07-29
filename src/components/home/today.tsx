@@ -3,16 +3,10 @@
 import { useQuery } from "convex/react";
 import { TrophyIcon } from "lucide-react";
 import Link from "next/link";
+import { JoinButton, METRICS } from "@/components/crew/challenges";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatFull } from "@/lib/dates";
@@ -80,6 +74,39 @@ export function Today({ date }: { date: string }) {
           )}
         </CardContent>
       </Card>
+
+      {/* Only for someone who's in none of them, and only if there's something
+          to join: /crew already owns the empty state and the create button. */}
+      {!stats.joinedAny && stats.weekChallenges.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Les défis tournent sans toi</CardTitle>
+            <CardDescription>
+              Tu n&apos;es inscrit à aucun défi cette semaine. Il en reste, sers-toi.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {stats.weekChallenges.map((challenge) => (
+              <div key={challenge._id} className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-heading font-semibold">{challenge.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {METRICS[challenge.metric].label}
+                    {challenge.exerciseName ? ` · ${challenge.exerciseName}` : ""}
+                    {challenge.byCoach ? " · proposé par le coach" : ""}
+                    {" · "}
+                    {challenge.participants === 0
+                      ? "personne d'inscrit"
+                      : `${challenge.participants} inscrit${challenge.participants > 1 ? "s" : ""}`}
+                  </p>
+                </div>
+                {/* Every row here is one the user isn't in — that's the filter. */}
+                <JoinButton challengeId={challenge._id} joined={false} />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Everything under the hero pairs up at md+: tiles, régularité, records
           are all short blocks that read fine side by side. items-start so a tall
@@ -158,16 +185,19 @@ export function Today({ date }: { date: string }) {
           </Card>
         ) : null}
 
+        {/* Was a "Bientôt" placeholder until /crew shipped. */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Ta crew</CardTitle>
-            <CardAction>
-              <Badge variant="secondary">Bientôt</Badge>
-            </CardAction>
             <CardDescription>
-              Le classement entre potes arrive. En attendant, prends de l'avance.
+              Séances, semaines d&apos;affilée et records, côte à côte.
             </CardDescription>
           </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline" className="w-full">
+              <Link href="/crew">Voir le classement</Link>
+            </Button>
+          </CardContent>
         </Card>
       </div>
     </div>

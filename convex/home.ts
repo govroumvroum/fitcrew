@@ -1,13 +1,7 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
-import { currentStreak, statsByExercise, weekStart, weeklyBuckets } from "./progress";
+import { currentStreak, shift, statsByExercise, weekStart, weeklyBuckets } from "./progress";
 import { getCurrentUser } from "./users";
-
-const DAY = 86_400_000;
-
-/** `days` from a YYYY-MM-DD key, still a YYYY-MM-DD key. UTC so DST can't shift it. */
-const shift = (date: string, days: number) =>
-  new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 
 // ponytail: newest 100 sessions, headers only — enough streak history for ~a
 // year of training. Pre-aggregate per week if someone outgrows it.
@@ -84,6 +78,15 @@ export const stats = query({
         .withIndex("by_user_and_date", (q) => q.eq("userId", user._id))
         .first()) !== null;
 
+    // Counts only, no scoring: the homepage renders a nudge, not a scoreboard.
+    // `crew.challenges` reads every participant's workouts and sets to build
+    // standings — dragging that onto every homepage visit is exactly what this
+    // avoids. One index read, and /crew owns the numbers.
+    const weekChallenges = await ctx.db
+      .query("challenges")
+      .withIndex("by_week", (q) => q.eq("weekStart", week))
+      .take(20);
+
     // Two, not one: the delta is the interesting half of a weigh-in.
     const measures = await ctx.db
       .query("bodyweight")
@@ -121,6 +124,17 @@ export const stats = query({
                 : undefined,
           }
         : null,
+      weekChallenges: weekChallenges.map((challenge) => ({
+        _id: challenge._id,
+        title: challenge.title,
+        metric: challenge.metric,
+        exerciseName: challenge.exerciseName,
+        participants: challenge.participants.length,
+        // No createdBy = the Monday cron wrote it, there's no human author.
+        byCoach: challenge.createdBy === undefined,
+      })),
+      // The only thing the nudge needs to decide whether to show itself.
+      joinedAny: weekChallenges.some((challenge) => challenge.participants.includes(user._id)),
       prs: prs.map(({ exerciseName, type, value, date }) => ({
         exerciseName,
         type,

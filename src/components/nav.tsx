@@ -7,6 +7,7 @@ import {
   DumbbellIcon,
   HouseIcon,
   MessageCircleIcon,
+  TrophyIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -20,6 +21,7 @@ const TABS = [
   { href: "/programme", label: "Programme", Icon: ClipboardListIcon },
   { href: "/coach", label: "Coach", Icon: MessageCircleIcon },
   { href: "/progres", label: "Progrès", Icon: ChartLineIcon },
+  { href: "/crew", label: "Crew", Icon: TrophyIcon },
 ];
 
 const isActive = (pathname: string, href: string) =>
@@ -47,7 +49,7 @@ export function TabBar() {
               href={href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]",
+                "flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 text-[10px] whitespace-nowrap",
                 "transition-colors duration-200 ease-[cubic-bezier(0.2,0,0,1)]",
                 active ? ACTIVE : "text-muted-foreground",
               )}

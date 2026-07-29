@@ -73,3 +73,25 @@ function localDayStart() {
 export function useLocalDayStart(): number | null {
   return useSyncExternalStore(subscribe, localDayStart, () => null);
 }
+
+const DAY = 86_400_000;
+
+/**
+ * `days` back from `today`, or the epoch for "tout" — the queries clamp that to
+ * the first session. The range controls on /progres and /crew share it.
+ */
+export function fromDate(today: string, days: number | null) {
+  if (days === null) return "1970-01-01";
+  return new Date(Date.parse(`${today}T00:00:00Z`) - days * DAY).toISOString().slice(0, 10);
+}
+
+/**
+ * The Monday of `date`. Mirrors `weekStart` in convex/progress.ts — the défi
+ * mutation rejects anything else — but importing that module would pull the
+ * Convex server runtime into the browser bundle for four lines of UTC arithmetic.
+ */
+export function monday(date: string) {
+  const time = Date.parse(`${date}T00:00:00Z`);
+  const offset = (new Date(time).getUTCDay() + 6) % 7;
+  return new Date(time - offset * DAY).toISOString().slice(0, 10);
+}
