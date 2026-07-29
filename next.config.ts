@@ -1,3 +1,4 @@
+import { withPostHogConfig } from "@posthog/nextjs-config";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -28,4 +29,31 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+/**
+ * Uploads browser source maps so a prod exception arrives as real frames instead
+ * of `chunks/2fsbruq_q0h04.js` — which was all we had to go on for the /coach
+ * crash, leaving grep-by-error-message as the only way to find the line.
+ *
+ * Runs inside `next build` (Turbopack's `runAfterProductionCompile` hook), so it
+ * lands before `serwist build` and `productionBrowserSourceMaps` is switched on
+ * by the wrapper itself — neither needs setting here.
+ *
+ * `enabled` follows the same rule as `instrumentation-client.ts`: no key, no
+ * upload, so a local `bun run build` stays quiet instead of failing on auth.
+ * `deleteAfterUpload` is what keeps the maps off the CDN — without it the whole
+ * unminified source ships publicly.
+ */
+export default withPostHogConfig(nextConfig, {
+  // Typed as required, but only read when `enabled` — which is false without it.
+  personalApiKey: process.env.POSTHOG_API_KEY ?? "",
+  projectId: process.env.POSTHOG_PROJECT_ID,
+  // NOT the `/ingest` proxy above: that only fronts ingestion. Uploads go to the
+  // real EU API host, and the default is US.
+  host: "https://eu.posthog.com",
+  sourcemaps: {
+    enabled: !!process.env.POSTHOG_API_KEY,
+    releaseName: "fitcrew",
+    releaseVersion: process.env.VERCEL_GIT_COMMIT_SHA,
+    deleteAfterUpload: true,
+  },
+});

@@ -315,6 +315,11 @@ function CoachMessage({ message }: { message: UIMessage }) {
           // Cards read the tool's input, which carries the whole program/profile;
           // the output only holds the resulting version number.
           const { input, output } = tool as { input?: unknown; output?: unknown };
+          // `output-available` does not guarantee the input came back with it: a
+          // streamed part reassembled from deltas can land the output first, and
+          // every card below dereferences `input` through a cast that lies about
+          // it. Crashed /coach in prod on mobile. search_web reads the output.
+          if (!input && tool.type !== "tool-search_web") return null;
           switch (tool.type) {
             case "tool-generate_program":
               return (

@@ -46,6 +46,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@posthog/nextjs-config": "^1.9.68",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -61,6 +62,7 @@
     "unrs-resolver"
   ],
   "trustedDependencies": [
+    "@posthog/cli",
     "sharp",
     "unrs-resolver"
   ]
