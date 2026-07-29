@@ -1,6 +1,14 @@
 "use client";
 
 import { ArrowRightIcon, CheckIcon, ChevronDownIcon, DumbbellIcon, SearchIcon } from "lucide-react";
+import type { z } from "zod";
+import type {
+  zExercise,
+  zGenerateProgram,
+  zLogWorkout,
+  zSaveOnboarding,
+  zSwapExercise,
+} from "../../../convex/toolSchemas";
 import { Badge } from "@/components/ui/badge";
 import { formatFull } from "@/lib/dates";
 import { cn } from "@/lib/utils";
@@ -16,51 +24,23 @@ import { cn } from "@/lib/utils";
  * rounded-md — outer radius minus padding.
  */
 
-type Exercise = {
-  name: string;
-  sets: number;
-  reps: string;
-  restSeconds: number;
-  notes?: string | null;
-};
+type Exercise = z.infer<typeof zExercise>;
 
-type Day = { name: string; exercises: Exercise[] };
-const TONE = {
+export type ProgramInput = z.infer<typeof zGenerateProgram>;
+export type ProfileInput = z.infer<typeof zSaveOnboarding>;
+export type SwapInput = z.infer<typeof zSwapExercise>;
+export type LoggedInput = z.infer<typeof zLogWorkout>;
+
+const TONE: Record<ProfileInput["tone"], string> = {
   motivant: "Motivant",
   neutre: "Neutre",
   direct: "Direct, sans bullshit",
-} as const;
+};
 
-const EXPERIENCE = {
+const EXPERIENCE: Record<ProfileInput["experience"], string> = {
   debutant: "Débutant",
   intermediaire: "Intermédiaire",
   avance: "Avancé",
-} as const;
-
-/** Mirror the tool inputSchemas in convex/coach.ts — the model's output, already validated there. */
-export type ProgramInput = {
-  name: string;
-  days: Day[];
-  progressionRules: string;
-  deloadEveryWeeks?: number | null;
-};
-
-export type ProfileInput = {
-  experience: keyof typeof EXPERIENCE;
-  goals: string[];
-  sport?: string | null;
-  limitations?: string | null;
-  daysPerWeek: number;
-  sessionMinutes: number;
-  equipment: string[];
-  tone: keyof typeof TONE;
-};
-
-export type SwapInput = { from: string; to: Exercise };
-
-export type LoggedInput = {
-  date: string;
-  exercises: { name: string; sets: { weight: number; reps: number }[] }[];
 };
 
 const rest = (s: number) => (s >= 60 ? `${Math.round(s / 60)} min` : `${s} s`);
@@ -118,7 +98,7 @@ export function ProgramCard({
   version,
   isNew,
 }: {
-  input: { name: string; days: Day[]; progressionRules: string; deloadEveryWeeks?: number | null };
+  input: ProgramInput;
   version?: number;
   isNew?: boolean;
 }) {
@@ -159,22 +139,7 @@ export function ProgramCard({
   );
 }
 
-export function ProfileCard({
-  input,
-  isNew,
-}: {
-  isNew?: boolean;
-  input: {
-    experience: keyof typeof EXPERIENCE;
-    goals: string[];
-    sport?: string | null;
-    limitations?: string | null;
-    daysPerWeek: number;
-    sessionMinutes: number;
-    equipment: string[];
-    tone: keyof typeof TONE;
-  };
-}) {
+export function ProfileCard({ input, isNew }: { isNew?: boolean; input: ProfileInput }) {
   return (
     <Surface isNew={isNew}>
       <Header
@@ -227,7 +192,7 @@ export function SwapCard({
   version,
   isNew,
 }: {
-  input: { from: string; to: Exercise };
+  input: SwapInput;
   dayName?: string;
   version?: number;
   isNew?: boolean;
@@ -253,7 +218,7 @@ export function LoggedCard({
   sets,
   isNew,
 }: {
-  input: { date: string; exercises: { name: string; sets: { weight: number; reps: number }[] }[] };
+  input: LoggedInput;
   sets?: number;
   isNew?: boolean;
 }) {
