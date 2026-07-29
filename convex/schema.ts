@@ -162,6 +162,27 @@ export default defineSchema({
     confirmed: v.boolean(),
   }).index("by_user", ["userId"]),
 
+  // A weekly challenge someone opens for the crew. There is no
+  // `challengeEntries` table on purpose: opting in IS being in `participants`
+  // (four people, so the array is bounded), and every score is recomputed at
+  // read time from `workouts`/`sets`. An entry row would hold nothing.
+  challenges: defineTable({
+    createdBy: v.id("users"),
+    title: v.string(),
+    weekStart: v.string(), // YYYY-MM-DD Monday, produced by weekStart()
+    metric: v.union(
+      v.literal("sessions"),
+      v.literal("volume"),
+      v.literal("max_reps"),
+      v.literal("max_weight"),
+      v.literal("est_1rm"),
+    ),
+    // Required for every metric except `sessions`: the fairness rule is that a
+    // boxer and a bodybuilder compare on one named exercise, never globally.
+    exerciseName: v.optional(v.string()),
+    participants: v.array(v.id("users")),
+  }).index("by_week", ["weekStart"]),
+
   // One row per LLM call, so we know who spends what. Written by the coach's
   // `usageHandler` and by hand at the two `generateObject` sites.
   //
