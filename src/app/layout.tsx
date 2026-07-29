@@ -22,10 +22,15 @@ const archivo = Archivo({
 });
 
 export const metadata: Metadata = {
+  // Absolute base for og:image & friends — relative URLs break link previews.
+  metadataBase: new URL("https://fitcrew.basilevernouillet.com"),
   title: "FitCrew",
   description: "Coach sportif IA pour la crew.",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "FitCrew", statusBarStyle: "black-translucent" },
+  // og:image itself comes from src/app/opengraph-image.png (file convention).
+  openGraph: { type: "website", locale: "fr_FR", siteName: "FitCrew" },
+  twitter: { card: "summary_large_image" },
 };
 
 // Matches --background so the PWA shell doesn't flash white.
