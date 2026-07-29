@@ -11,7 +11,8 @@ import {
   internalQuery,
   query,
 } from "./_generated/server";
-import { languageModel } from "./model";
+import { costUsdFrom } from "./aiUsage";
+import { MODEL_ID, languageModel } from "./model";
 
 // ---------------------------------------------------------------------------
 // Pure logic. See exerciseDemos.check.ts.
@@ -288,8 +289,10 @@ export const resolve = action({
         // Simple, and it's one call per name for the app's lifetime. Pre-filter
         // by body part / equipment if the bill ever shows up.
         catalogue ??= await ctx.runQuery(internal.exerciseDemos.catalogue, {});
-        const { object } = await generateObject({
+        const { object, usage, providerMetadata } = await generateObject({
           model: languageModel(),
+          // No `user`: this cache serves everybody, so there's nobody to name.
+          providerOptions: { openrouter: { usage: { include: true } } },
           schema: zPick,
           temperature: 0,
           system:
@@ -310,6 +313,15 @@ export const resolve = action({
           prompt: name,
         });
         pick = object;
+        // No userId: the match is cached for everyone, so the bill is collective.
+        await ctx.runMutation(internal.aiUsage.record, {
+          feature: "demos",
+          model: MODEL_ID,
+          inputTokens: usage.inputTokens ?? 0,
+          outputTokens: usage.outputTokens ?? 0,
+          reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+          costUsd: costUsdFrom(providerMetadata),
+        });
       } catch {
         // Transient (rate limit, no key). Don't cache a failure as "no match" —
         // leaving it unresolved means the next page view retries.

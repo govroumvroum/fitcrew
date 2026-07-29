@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as aiUsage from "../aiUsage.js";
 import type * as coach from "../coach.js";
 import type * as exerciseDemos from "../exerciseDemos.js";
 import type * as home from "../home.js";
@@ -27,6 +28,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  aiUsage: typeof aiUsage;
   coach: typeof coach;
   exerciseDemos: typeof exerciseDemos;
   home: typeof home;

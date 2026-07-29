@@ -161,4 +161,23 @@ export default defineSchema({
     extracted: v.optional(v.any()),
     confirmed: v.boolean(),
   }).index("by_user", ["userId"]),
+
+  // One row per LLM call, so we know who spends what. Written by the coach's
+  // `usageHandler` and by hand at the two `generateObject` sites.
+  //
+  // `userId` is absent for `demos`: demo matching is a cache shared by everyone,
+  // and billing the first person who triggered it would be a wrong number.
+  aiUsage: defineTable({
+    userId: v.optional(v.id("users")),
+    feature: v.union(v.literal("coach"), v.literal("screenshot"), v.literal("demos")),
+    model: v.string(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    // Billed as output. Separate because it's invisible in the transcript.
+    reasoningTokens: v.optional(v.number()),
+    // OpenRouter's own figure when it returns one — never tokens x a hardcoded
+    // rate, which would rot at the next model change.
+    costUsd: v.optional(v.number()),
+    date: v.string(), // YYYY-MM-DD (UTC), so aggregating never scans _creationTime
+  }).index("by_user_and_date", ["userId", "date"]),
 });
