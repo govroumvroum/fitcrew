@@ -1,6 +1,13 @@
 "use client";
 
-import { ArrowRightIcon, CheckIcon, ChevronDownIcon, DumbbellIcon, SearchIcon } from "lucide-react";
+import {
+  ArrowLeftRightIcon,
+  ArrowRightIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  DumbbellIcon,
+  SearchIcon,
+} from "lucide-react";
 import type { z } from "zod";
 import type {
   zExercise,
@@ -195,6 +202,41 @@ export function Field({
       <dt className="eyebrow">{label}</dt>
       <dd className={numeric ? "tabular-nums" : undefined}>{value}</dd>
     </div>
+  );
+}
+
+/** The estimation disclaimer. Mandatory on every card that shows kcal or macros. */
+export function Estimated({ children }: { children?: React.ReactNode }) {
+  return (
+    <p className="border-t pt-2 text-[11px] text-muted-foreground">
+      {children ?? "Les calories et les macros sont des estimations, pas des mesures."}
+    </p>
+  );
+}
+
+/**
+ * One agent consulting the other — a marker, not a card.
+ *
+ * The consulted agent's answer is already in the prose right below this line,
+ * rewritten in the asking agent's own words: rendering the question AND the
+ * structured answer on top of that said everything twice. So all the UI owes the
+ * user is that the detour happened, in one line.
+ *
+ * Same line for both directions, so a Coach→Chef consult and a Chef→Coach one are
+ * visibly the same thing.
+ */
+export function ConsultLine({ label, isNew }: { label: string; isNew?: boolean }) {
+  return (
+    <p
+      className={cn(
+        "flex items-center gap-1.5 text-[11px] text-muted-foreground",
+        isNew &&
+          "duration-300 ease-[cubic-bezier(0.2,0,0,1)] animate-in fade-in motion-reduce:animate-none",
+      )}
+    >
+      <ArrowLeftRightIcon className="size-3.5 shrink-0" aria-hidden />
+      {label}
+    </p>
   );
 }
 

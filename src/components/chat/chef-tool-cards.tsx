@@ -7,7 +7,6 @@ import {
   CheckIcon,
   ChevronDownIcon,
   DatabaseIcon,
-  DumbbellIcon,
   NotebookPenIcon,
   RefreshCwIcon,
   ShoppingCartIcon,
@@ -25,10 +24,9 @@ import type {
   zSaveNutritionProfile,
   zUpdateInventory,
 } from "../../../convex/chefToolSchemas";
-import type { ConsultAnswer } from "../../../convex/consult";
 import type { FoodFact } from "../../../convex/foodFacts";
 import type { Macros } from "../../../convex/nutrition";
-import { Chips, Field, Header, Surface } from "@/components/chat/tool-cards";
+import { Chips, Estimated, Field, Header, Surface } from "@/components/chat/tool-cards";
 import { SLOT_LABELS, macroLine } from "@/components/nutrition/macros";
 import { formatFull } from "@/lib/dates";
 import { formatNumber } from "@/lib/utils";
@@ -95,15 +93,6 @@ const ACTIVITY: Record<NutritionProfileInput["activityLevel"], string> = {
   actif: "Actif",
   tres_actif: "Très actif",
 };
-
-/** The estimation disclaimer. Mandatory on every card that shows kcal or macros. */
-function Estimated({ children }: { children?: React.ReactNode }) {
-  return (
-    <p className="border-t pt-2 text-[11px] text-muted-foreground">
-      {children ?? "Les calories et les macros sont des estimations, pas des mesures."}
-    </p>
-  );
-}
 
 /** Dates in a tool's input are written by the model, and `Intl` THROWS on an
  *  unparseable one rather than returning a placeholder. Falls back to the raw
@@ -507,47 +496,3 @@ export function LookupFoodCard({ output, isNew }: { output: LookupFoodOutput; is
  * issues. Shows the question the Chef asked as well as the answer, so the user can
  * see what crossed between the two agents.
  */
-export function AskCoachCard({
-  question,
-  answer,
-  isNew,
-}: {
-  question: string;
-  answer?: ConsultAnswer;
-  isNew?: boolean;
-}) {
-  return (
-    <Surface isNew={isNew}>
-      <Header icon={icon(DumbbellIcon)} title="Le Chef a consulté le Coach" />
-      <p className="text-sm text-muted-foreground italic">« {question} »</p>
-      {answer ? (
-        <>
-          <p className="text-sm">{answer.recommendation}</p>
-          {answer.meals?.length ? (
-            <ul>
-              {answer.meals.map((meal) => (
-                <li
-                  key={`${meal.name}-${meal.timing}`}
-                  className="flex items-baseline gap-2 rounded-md px-2 py-1.5 odd:bg-muted/40"
-                >
-                  <span className="min-w-0 flex-1 text-sm">{meal.name}</span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{meal.timing}</span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-                    ≈ {formatNumber(meal.calories)} kcal
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {answer.constraints?.length ? (
-            <Chips label="Contraintes remontées" items={answer.constraints} />
-          ) : null}
-          <Estimated>
-            Réponse du Coach sur la base de ton programme : une estimation, comme tous les chiffres
-            ici.
-          </Estimated>
-        </>
-      ) : null}
-    </Surface>
-  );
-}

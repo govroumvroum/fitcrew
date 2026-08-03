@@ -6,6 +6,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import type { Entry } from "../../../convex/screenshots";
 import { AgentChat, type AgentConfig } from "@/components/chat/agent-chat";
 import {
+  ConsultLine,
   LoggedCard,
   ProfileCard,
   ProgramCard,
@@ -94,10 +95,13 @@ export const COACH: AgentConfig = {
             isNew={isNew}
           />
         );
+      // Same card as the Chef's side of the consult, on purpose: a collaboration
+      // the user can only see in one direction doesn't read as a collaboration.
+      case "tool-ask_chef":
+        return <ConsultLine label="Demande au Chef" isNew={isNew} />;
       default:
         // explain_exercise returns raw history for the model to narrate — the
-        // prose above is the result, a card would just repeat it. Same for
-        // ask_chef: the Coach quotes what the Chef answered in its own words.
+        // prose above is the result, a card would just repeat it.
         return null;
     }
   },

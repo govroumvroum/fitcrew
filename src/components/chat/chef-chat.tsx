@@ -3,12 +3,10 @@
 import { ChefHatIcon } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import type { ConsultAnswer } from "../../../convex/consult";
 import type { Macros } from "../../../convex/nutrition";
 import type { VisionIntent, VisionItem } from "../../../convex/vision";
 import { AgentChat, type AgentConfig } from "@/components/chat/agent-chat";
 import {
-  AskCoachCard,
   FoodLogCard,
   InventoryCard,
   LookupFoodCard,
@@ -32,6 +30,7 @@ import {
   type ReplaceMealInput,
   type ShoppingListOutput,
 } from "@/components/chat/chef-tool-cards";
+import { ConsultLine } from "@/components/chat/tool-cards";
 import { VisionReview } from "@/components/nutrition/vision-review";
 
 /** What `api.vision.analyze` hands back — the four photo tools all return it. */
@@ -153,13 +152,7 @@ export const CHEF: AgentConfig = {
       case "tool-lookup_food":
         return <LookupFoodCard output={output as LookupFoodOutput} isNew={isNew} />;
       case "tool-ask_coach":
-        return (
-          <AskCoachCard
-            question={(input as { question: string }).question}
-            answer={output as ConsultAnswer}
-            isNew={isNew}
-          />
-        );
+        return <ConsultLine label="Demande au Coach" isNew={isNew} />;
       default:
         // Every tool the Chef has today is covered above — none of them has a
         // prose-only result. This guards a tool added to `chef.ts` later: no card
