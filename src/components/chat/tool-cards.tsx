@@ -17,7 +17,7 @@ import type {
   zSwapExercise,
 } from "../../../convex/toolSchemas";
 import { Badge } from "@/components/ui/badge";
-import { formatFull } from "@/lib/dates";
+import { formatLoose } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
 /**
@@ -298,7 +298,7 @@ export function LoggedCard({
 
   return (
     <Surface isNew={isNew}>
-      <Header title={formatFull(input.date)} aside={sets ? `${sets} séries` : undefined} />
+      <Header title={formatLoose(input.date)} aside={sets ? `${sets} séries` : undefined} />
       <ul className="space-y-1">
         {input.exercises.map((exercise) => (
           <li

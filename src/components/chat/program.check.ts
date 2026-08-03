@@ -4,6 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { swapInDays, toDays } from "../../../convex/coach";
+import { formatLoose } from "@/lib/dates";
 
 const squat = { name: "Squat", sets: 4, reps: "8", restSeconds: 120, notes: null };
 const presse = { name: "Presse à cuisses", sets: 4, reps: "10", restSeconds: 90 };
@@ -27,3 +28,22 @@ assert.throws(() => swapInDays(days, 0, "Développé couché", presse), /introuv
 assert.throws(() => swapInDays(days, 3, "Squat", presse), /Jour 3/);
 
 console.log("coach program helpers ok");
+
+// ---------------------------------------------------------------------------
+// formatLoose: a date written by a model, not by us.
+// ---------------------------------------------------------------------------
+
+// The regression that failed a production build: "2026-13-40" matches the shape
+// `\d{4}-\d{2}-\d{2}`, so the old shape-only guard let it through and
+// `Intl.format` threw RangeError inside a card, taking the whole chat route down.
+assert.equal(formatLoose("2026-13-40"), "2026-13-40");
+// A date that doesn't exist but looks plausible: no 31st of February. Caught by
+// the round-trip, not by the NaN test, in case an engine rolls it into March.
+assert.equal(formatLoose("2026-02-31"), "2026-02-31");
+// Outright garbage, and empty, come back untouched rather than throwing.
+assert.equal(formatLoose("bientôt"), "bientôt");
+assert.equal(formatLoose(""), "");
+// A real date still formats — the guard must not cost us the happy path.
+assert.equal(formatLoose("2026-08-03"), "lundi 3 août");
+
+console.log("formatLoose ok");

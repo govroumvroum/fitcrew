@@ -28,7 +28,7 @@ import type { FoodFact } from "../../../convex/foodFacts";
 import type { Macros } from "../../../convex/nutrition";
 import { Chips, Estimated, Field, Header, Surface } from "@/components/chat/tool-cards";
 import { SLOT_LABELS, macroLine } from "@/components/nutrition/macros";
-import { formatFull } from "@/lib/dates";
+import { formatLoose } from "@/lib/dates";
 import { formatNumber } from "@/lib/utils";
 
 /**
@@ -93,13 +93,6 @@ const ACTIVITY: Record<NutritionProfileInput["activityLevel"], string> = {
   actif: "Actif",
   tres_actif: "Très actif",
 };
-
-/** Dates in a tool's input are written by the model, and `Intl` THROWS on an
- *  unparseable one rather than returning a placeholder. Falls back to the raw
- *  string: a card showing "2026-13-40" beats a card that takes the chat down. */
-function dateLabel(date: string): string {
-  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? formatFull(date) : date;
-}
 
 const icon = (Icon: typeof CheckIcon) => <Icon className="size-4 shrink-0 text-muted-foreground" />;
 
@@ -204,7 +197,7 @@ export function MealPlanCard({
         <details key={day.date} open={i === 0} className="group">
           <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-2 text-sm font-medium marker:hidden hover:bg-muted/60">
             <ChevronDownIcon className="chevron" />
-            <span className="min-w-0 flex-1 capitalize">{dateLabel(day.date)}</span>
+            <span className="min-w-0 flex-1 capitalize">{formatLoose(day.date)}</span>
             <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
               ≈ {formatNumber(dayCalories(day.meals))} kcal
             </span>
@@ -225,7 +218,7 @@ export function ReplaceMealCard({ input, isNew }: { input: ReplaceMealInput; isN
   return (
     <Surface isNew={isNew}>
       <Header icon={icon(UtensilsCrossedIcon)} title={`${SLOT_LABELS[input.slot]} remplacé`} />
-      <p className="text-[11px] text-muted-foreground capitalize">{dateLabel(input.date)}</p>
+      <p className="text-[11px] text-muted-foreground capitalize">{formatLoose(input.date)}</p>
       <ul>
         <MealBlock meal={input.meal} />
       </ul>
@@ -250,11 +243,11 @@ export function MoveMealCard({
           390 px line without truncating the part that matters. */}
       <div className="space-y-1 text-sm">
         <p className="text-muted-foreground line-through">
-          <span className="capitalize">{dateLabel(input.from.date)}</span> —{" "}
+          <span className="capitalize">{formatLoose(input.from.date)}</span> —{" "}
           {SLOT_LABELS[input.from.slot]}
         </p>
         <p className="font-medium">
-          <span className="capitalize">{dateLabel(input.to.date)}</span> —{" "}
+          <span className="capitalize">{formatLoose(input.to.date)}</span> —{" "}
           {SLOT_LABELS[input.to.slot]}
         </p>
       </div>
@@ -275,7 +268,7 @@ export function RegenerateDayCard({
     <Surface isNew={isNew}>
       <Header
         icon={icon(RefreshCwIcon)}
-        title={`Journée refaite — ${dateLabel(input.date)}`}
+        title={`Journée refaite — ${formatLoose(input.date)}`}
         aside={kept ? `${kept} gardé(s)` : undefined}
       />
       <ul>
@@ -331,7 +324,7 @@ export function FoodLogCard({ input, isNew }: { input: FoodLogInput; isNew?: boo
       <Header
         icon={icon(NotebookPenIcon)}
         title={SLOT_LABELS[input.slot]}
-        aside={dateLabel(input.date)}
+        aside={formatLoose(input.date)}
       />
       <p className="text-sm">
         {input.name}
@@ -356,7 +349,7 @@ export function PlannedMealLoggedCard({
       <Header
         icon={icon(CheckIcon)}
         title={`${SLOT_LABELS[input.slot]} prévu, mangé`}
-        aside={dateLabel(input.date)}
+        aside={formatLoose(input.date)}
       />
       <p className="text-[11px] text-muted-foreground">
         Recopié du plan dans ton journal, avec ses valeurs estimées.
