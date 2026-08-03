@@ -86,7 +86,7 @@ const done = (type: string, input: unknown, output?: unknown): ToolPart => ({
   output,
 });
 
-const COACH_FIXTURES: Record<string, Fixture[]> = {
+export const COACH_FIXTURES: Record<string, Fixture[]> = {
   "tool-save_onboarding": [
     {
       label: "Profil complet",
@@ -291,7 +291,7 @@ const COACH_FIXTURES: Record<string, Fixture[]> = {
   ],
 };
 
-const CHEF_FIXTURES: Record<string, Fixture[]> = {
+export const CHEF_FIXTURES: Record<string, Fixture[]> = {
   "tool-save_nutrition_profile": [
     {
       label: "Profil complet, cibles 2220 kcal",

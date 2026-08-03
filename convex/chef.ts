@@ -43,6 +43,7 @@ import { foodByBarcode, isBarcode, searchFood } from "./foodFacts";
 import { languageModel } from "./model";
 import type { Macros, PlannedMeal } from "./nutrition";
 import { shift, weekStart } from "./progress";
+import { KICKOFF, CHEF_ATTACHMENTS, isSentinel } from "./sentinels";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 // ---------------------------------------------------------------------------
@@ -553,7 +554,7 @@ export const listMessages = query({
     // Machine-generated turns are persisted as user messages; without this they
     // render as the user's own bubbles (see `KICKOFF`).
     const page = paginated.page.filter(
-      (message) => !(message.role === "user" && isSentinel(message.text)),
+      (message) => !(message.role === "user" && isSentinel(message.text, CHEF_ATTACHMENTS)),
     );
     return { ...paginated, page, streams };
   },
@@ -585,7 +586,7 @@ export const send = action({
             // whether this is a plate, a fridge, a label or a shopping bag. That
             // choice stays with the model — guessing the intent server-side from
             // a filename would be worse than asking.
-            content: `${ATTACHMENTS}, à analyser avec l'outil qui correspond à ce que le user décrit — analyze_plate, analyze_fridge, read_nutrition_label ou analyze_groceries : ${args.storageIds.join(", ")})`,
+            content: `${CHEF_ATTACHMENTS}, à analyser avec l'outil qui correspond à ce que le user décrit — analyze_plate, analyze_fridge, read_nutrition_label ou analyze_groceries : ${args.storageIds.join(", ")})`,
           },
         ],
       }),
@@ -594,26 +595,7 @@ export const send = action({
   },
 });
 
-/**
- * The two machine-written user turns: the chef's kickoff, and the marker that
- * tells it which photos are attached. Both ARE saved — the component treats the
- * last `messages` entry as the prompt, and `storageOptions.saveMessages: "none"`
- * would drop the reply with it. `listMessages` hides them instead. Hiding is
- * display-only: later turns still replay them to the model, which is why the
- * marker exists.
- *
- * Its own constant, not an import from `coach.ts`: the two agents' sentinels
- * happen to read alike today, and coupling them would make one prompt's wording
- * a breaking change for the other's message list.
- */
-export const KICKOFF = "(le user vient d'ouvrir la conversation)";
-/** Prefix, not the whole string: the storage ids are appended to it in `send`. */
-const ATTACHMENTS = "(photos jointes à ce message";
-
-function isSentinel(text: string) {
-  const trimmed = text.trim();
-  return trimmed === KICKOFF || trimmed.startsWith(ATTACHMENTS);
-}
+/** The kickoff turn. Why it is persisted and hidden: see `convex/sentinels.ts`. */
 
 export const greet = action({
   args: { threadId: v.string(), today: v.string() },
