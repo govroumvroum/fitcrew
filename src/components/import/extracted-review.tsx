@@ -162,7 +162,7 @@ export function ExtractedReview({
             <CardContent className="space-y-3 px-3">
               <div className="flex items-center gap-2">
                 <Badge variant="secondary">{TYPE_LABEL[entry.type]}</Badge>
-                <span className="truncate text-xs text-muted-foreground">
+                <span className="truncate text-sm text-muted-foreground">
                   {SOURCE_LABEL[entry.source]}
                 </span>
                 <Button
@@ -229,7 +229,7 @@ export function ExtractedReview({
                   />
                   {ex.sets.map((set, si) => (
                     <div key={si} className="flex items-center gap-2">
-                      <span className="w-8 shrink-0 text-xs text-muted-foreground">S{si + 1}</span>
+                      <span className="eyebrow w-8 shrink-0">S{si + 1}</span>
                       {(["weight", "reps"] as const).map((k) => (
                         <Input
                           key={k}
@@ -288,7 +288,7 @@ function Field({
 }) {
   return (
     <div className="grid grid-cols-[7.5rem_1fr] items-center gap-2">
-      <Label htmlFor={htmlFor} className="text-xs text-muted-foreground">
+      <Label htmlFor={htmlFor} className="text-sm text-muted-foreground">
         {label}
       </Label>
       {children}

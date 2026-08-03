@@ -10,8 +10,10 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-mono: ui-monospace, monospace;
-  /* Archivo: heavy grotesque, closest to the logo wordmark. Also carries the
-     big numbers (weights, rest timer) — tabular-nums handles the shifting. */
+  /* Big Shoulders Display: condensed signage cap, which is what the logo
+     wordmark actually is. Headings only — measured from the TTF, it has no
+     tabular figures (digit advances 511–961 at 2000/em, no `tnum` in GSUB), so
+     every number that aligns or ticks stays in the body face. */
   --font-heading: var(--font-display);
   --font-display: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -32,6 +34,7 @@
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
+  --color-accent-text: var(--accent-text);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
@@ -116,6 +119,10 @@
   --muted-foreground: oklch(0.78 0.018 267.52);
   --accent: oklch(0.31 0.062 267.52);
   --accent-foreground: oklch(0.975 0.005 267.52);
+  /* Readable red. --primary as text only reaches Lc -49 on --background, under
+     the 60 label floor; lightened to L 0.8 on the same hue it clears at -74.
+     Text only — --primary stays the commit colour on buttons. */
+  --accent-text: oklch(0.8 0.086 27.255);
   /* ponytail: hue-shifted off brand red so destroy != primary. Still both reds —
      pair with an outline treatment, or move warnings to amber if it confuses. */
   --destructive: oklch(0.55 0.207 8);
@@ -165,11 +172,14 @@
     /* fail visibly instead of rendering a faked bold/italic */
     font-synthesis: none;
   }
-  /* Headings come from the display face, tight and slightly negative-tracked. */
+  /* Headings come from the display face. Only -0.01em, not the -0.025em a
+     normal-width grotesque wants: condensed letters already sit close and the
+     counters close up if they're tracked in further. */
   h1,
   h2,
   h3 {
-    @apply font-heading tracking-tight;
+    @apply font-heading;
+    letter-spacing: -0.01em;
     line-height: 1.1;
     text-wrap: balance;
   }
@@ -215,6 +225,103 @@
   ::selection {
     background: oklch(0.613 0.228 27.255 / 35%);
     color: oklch(0.99 0.004 27.255);
+  }
+}
+
+/*
+ * Redesign primitives. The diagnosis they answer: every screen was a stack of
+ * identical <Card>s, so nothing had hierarchy. Each screen now gets ONE dominant
+ * surface (.slab), and structures the rest with hairlines and bands instead of a
+ * dozen rounded rectangles.
+ *
+ * Only things utilities do badly live here — a pseudo-element, a clamp(), a
+ * shared-hairline grid. `stack`/`row`/`rule`/`list`/`panel`/`chip` from the
+ * prototype are deliberately absent: they are flex/divide-y/bg-card-slash-55 at
+ * the call site.
+ */
+@layer components {
+  /* Uppercase micro-label. Earns a class for the 550: Instrument Sans is
+     variable, so the weight between medium and semibold is real, and there is no
+     utility for it. */
+  .eyebrow {
+    @apply text-[11px] text-muted-foreground uppercase;
+    font-weight: 550;
+    letter-spacing: 0.08em;
+  }
+
+  /* Disclosure chevron, on the four <details> across /programme, /coach and the
+     séance. It earns a class where `.note` did not: it is a motion contract
+     (start angle, open angle, easing, reduced-motion gate) that has to stay
+     identical for the affordance to read as one thing, and two of the four had
+     already drifted off `motion-reduce`. The <summary> around it deliberately
+     stays as utilities at the call site — its padding, hover and min-height
+     really do differ per screen, so a class there would be overridden the day
+     it landed. */
+  .chevron {
+    @apply size-4 shrink-0 -rotate-90 text-muted-foreground transition-transform duration-200 ease-[cubic-bezier(0.2,0,0,1)] group-open:rotate-0 motion-reduce:transition-none;
+  }
+
+  /* One per screen. Stays in the display face on purpose: an isolated numeral
+     never has to align, so Big Shoulders' unequal digit advances don't show — see
+     the @theme note. Never use it in a column; those are tabular-nums body face.
+     Sized ~15% above what a normal-width face would take: condensed reads
+     smaller at equal font-size. */
+  .hero-num {
+    @apply font-display;
+    font-weight: 800;
+    font-size: clamp(4rem, 19vw, 6.25rem);
+    line-height: 0.85;
+    letter-spacing: -0.005em;
+  }
+  .hero-num .unit {
+    @apply text-muted-foreground uppercase;
+    font-size: 0.28em;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    margin-left: 0.15em;
+    vertical-align: 0.9em;
+  }
+
+  /* The screen's one dominant surface. The shadow pair is why it's a class: an
+     inset top hairline so it catches light, and a long soft drop so it sits
+     above the page rather than being one more bordered rectangle. */
+  .slab {
+    @apply rounded-xl border bg-card p-[1.125rem];
+    box-shadow:
+      0 1px 0 oklch(1 0 0 / 6%) inset,
+      0 12px 32px -18px oklch(0 0 0 / 70%);
+  }
+
+  /* Stat band: one horizontal run of numbers split by hairlines, replacing the
+     3-across grid of identical bordered tiles. Column count comes from the call
+     site (`grid-cols-3`) — utilities outrank this layer, so it wins. */
+  .band {
+    @apply grid;
+  }
+  .band > * {
+    @apply min-w-0 border-l px-3 py-1 text-left;
+  }
+  .band > *:first-child {
+    @apply border-l-0 pl-0;
+  }
+  .band-value {
+    @apply tabular-nums whitespace-nowrap;
+    font-weight: 700;
+    font-size: clamp(1.25rem, 6vw, 1.6rem);
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+  }
+  /* The unit riding along inside a band value: kg, séances, %. */
+  .band-value small {
+    @apply text-muted-foreground;
+    font-size: 0.55em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .band-label {
+    @apply text-[11px] text-muted-foreground;
+    line-height: 1.3;
+    letter-spacing: 0.02em;
   }
 }
 

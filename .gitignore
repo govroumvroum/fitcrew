@@ -46,3 +46,9 @@ next-env.d.ts
 # service worker built by `serwist build`
 /public/sw.js
 /public/sw.js.map
+
+# dev-only crew seed: `bunx convex run seed:seedCrew` / `seed:clearCrew`.
+# Stays local so /crew can be judged with four members. Keep it out of the
+# commit and `convex/_generated/api.d.ts` must not reference it either, or the
+# build fails wherever this file is absent.
+/convex/seed.ts

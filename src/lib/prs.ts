@@ -8,5 +8,5 @@ export const PR_LABELS = {
   max_volume: { text: "Volume max", unit: "kg" },
 } as const;
 
-// Red text on our background fails contrast, so records use the lightened brand hue.
-export const TROPHY = "size-4 shrink-0 text-[oklch(0.8_0.086_27.255)]";
+// Red at --primary fails contrast on our background, so records use --accent-text.
+export const TROPHY = "size-4 shrink-0 text-accent-text";

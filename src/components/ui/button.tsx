@@ -4,12 +4,38 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Press feedback, on every control a thumb lands on. ease-out on purpose: a slow
+ * start withholds movement at exactly the frame the finger touches down. Only
+ * the timing is shared — the scale stays at the call site, because a 56px dock
+ * button and a 12px pager tick want different travel.
+ */
+const PRESS_TIMING =
+  "duration-[120ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
+
+/**
+ * The same feedback for the controls that aren't Buttons — the séance pager
+ * ticks and its "ce qui reste" rows are raw <button>s, so they can't inherit it
+ * from the base variant below.
+ */
+export const PRESS = `transition-transform ${PRESS_TIMING}`
+
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  // The property list is spelled out instead of `transition-all`: on `default`
+  // that animated the gradient (background-image) and the red glow (box-shadow)
+  // on the app's most-tapped button, which is paint on every hover. translate
+  // and scale are named because Tailwind v4 sets them as their own properties,
+  // not through `transform` — leave them out and the press dip stops animating.
+  `group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,transform,translate,scale] ${PRESS_TIMING} outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4`,
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
+        // The commit action, and the only saturated red on a screen — so it gets
+        // the weight: a top-lit gradient, an inset highlight, and a short red
+        // glow. Hover brightens (mixes in more white); `bg-primary/80` used to
+        // dim it, which read as "disabling" on the one button you want pressed.
+        default:
+          "border-[color-mix(in_oklab,var(--primary)_70%,black)] bg-[linear-gradient(to_bottom,color-mix(in_oklab,var(--primary)_88%,white),var(--primary))] font-semibold tracking-[0.02em] text-primary-foreground shadow-[0_1px_0_oklch(1_0_0/25%)_inset,0_10px_24px_-14px_color-mix(in_oklab,var(--primary)_90%,transparent)] hover:bg-[linear-gradient(to_bottom,color-mix(in_oklab,var(--primary)_78%,white),color-mix(in_oklab,var(--primary)_94%,white))]",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:

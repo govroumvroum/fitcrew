@@ -264,6 +264,38 @@ export const addSet = mutation({
   },
 });
 
+/**
+ * Backs out of a séance started by mistake: the row and its sets go away as if
+ * it never happened.
+ *
+ * Nothing to revert on the program rotation: `nextDayIndex` derives the next day
+ * from the newest séance row (neither `start` nor `finish` stores a counter), so
+ * deleting the row rewinds it for free.
+ */
+export const cancel = mutation({
+  args: { workoutId: v.id("workouts") },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const workout = await ctx.db.get("workouts", args.workoutId);
+    if (!workout || workout.userId !== user._id) throw new Error("Séance introuvable");
+    // A finished séance is history — and its PR rows would outlive the sets they
+    // came from. Deleting one is a different feature.
+    if (workout.endedAt !== undefined) throw new Error("Séance déjà terminée");
+
+    // Every set, not a bounded page: nothing caps how many a workout owns, and a
+    // leftover row still answers by_user_and_exercise — it would keep feeding
+    // prefill, history and PR candidates for a séance the user cancelled. The
+    // index range is one workout, so this is naturally small.
+    const sets = await ctx.db
+      .query("sets")
+      .withIndex("by_workout", (q) => q.eq("workoutId", workout._id))
+      .collect();
+    for (const set of sets) await ctx.db.delete("sets", set._id);
+    await ctx.db.delete("workouts", workout._id);
+    return null;
+  },
+});
+
 /** Closes the session. Unchecked sets stay as they are — they just weren't done. */
 export const finish = mutation({
   args: { workoutId: v.id("workouts"), notes: v.optional(v.string()) },

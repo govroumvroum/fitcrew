@@ -276,13 +276,21 @@ export const overview = query({
       .order("desc")
       .take(100);
 
-    const prs = bestPrs(
+    // Split here and not inside `bestPrs`: `recordPrs` needs baselines in its
+    // standing-records map, or a baselined exercise would look like it has no
+    // history and get re-baselined at the next attempt. `/` and `/crew` drop
+    // baselines the same way — a first attempt is a starting point, not a record.
+    const standing = bestPrs(
       await ctx.db
         .query("prs")
         .withIndex("by_user_and_date", (q) => q.eq("userId", user._id))
         .order("desc")
         .take(500),
     ).sort((a, b) => b.date.localeCompare(a.date));
+    const prs = standing.filter((pr) => !pr.baseline);
+    const baselines = standing.filter((pr) => pr.baseline);
+    // Records only: the trophy on a session dot must mean the same thing as the
+    // "Records battus" count above it.
     const prWorkouts = new Set(prs.map((pr) => pr.workoutId));
 
     const sessions: {
@@ -339,6 +347,7 @@ export const overview = query({
         .map(([name, points]) => ({ name, points }))
         .sort((a, b) => b.points.length - a.points.length),
       prs,
+      baselines,
       cardio,
       weights,
     };

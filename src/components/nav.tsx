@@ -27,9 +27,8 @@ const TABS = [
 const isActive = (pathname: string, href: string) =>
   href === "/" ? pathname === "/" : pathname.startsWith(href);
 
-// Same lightened brand hue as the trophies — plain red fails contrast on our
-// background.
-const ACTIVE = "font-semibold text-[oklch(0.8_0.086_27.255)]";
+// Same readable red as the trophies — --primary as text fails contrast here.
+const ACTIVE = "font-semibold text-accent-text";
 
 /**
  * Phone navigation. Reserve --tab-bar at the bottom of a page so the bar never
