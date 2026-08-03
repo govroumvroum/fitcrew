@@ -282,13 +282,14 @@ export const cancel = mutation({
     // came from. Deleting one is a different feature.
     if (workout.endedAt !== undefined) throw new Error("Séance déjà terminée");
 
-    // ponytail: 200 is far above any real séance (a long one logs ~40 sets), but
-    // past it the leftovers would point at a deleted workout — paginate if a
-    // program ever prescribes more.
+    // Every set, not a bounded page: nothing caps how many a workout owns, and a
+    // leftover row still answers by_user_and_exercise — it would keep feeding
+    // prefill, history and PR candidates for a séance the user cancelled. The
+    // index range is one workout, so this is naturally small.
     const sets = await ctx.db
       .query("sets")
       .withIndex("by_workout", (q) => q.eq("workoutId", workout._id))
-      .take(200);
+      .collect();
     for (const set of sets) await ctx.db.delete("sets", set._id);
     await ctx.db.delete("workouts", workout._id);
     return null;

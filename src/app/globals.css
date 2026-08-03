@@ -304,14 +304,6 @@
   .band > *:first-child {
     @apply border-l-0 pl-0;
   }
-  /* An interactive cell. ponytail: no focus style of its own — the base
-     outline-ring/50 already covers it. */
-  .band-cell {
-    @apply block cursor-pointer;
-  }
-  .band-cell:hover .band-value {
-    @apply text-accent-text;
-  }
   .band-value {
     @apply tabular-nums whitespace-nowrap;
     font-weight: 700;

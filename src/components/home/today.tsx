@@ -431,8 +431,11 @@ function StatBand({
     // move the shared hairline to the start of each line instead of column 1.
     <div className="band grid-cols-3 gap-y-3 [&>*:nth-child(3n+1)]:border-l-0 [&>*:nth-child(3n+1)]:pl-0">
       {cells.map((cell) => (
-        <Link key={cell.label} href="/progres" className="band-cell">
-          <div className="band-value">
+        // Inline rather than a `.band-cell` class: one call site, and the whole
+        // rule was two utilities plus a descendant hover. Focus needs nothing of
+        // its own, the base outline-ring/50 already covers it.
+        <Link key={cell.label} href="/progres" className="group/cell block cursor-pointer">
+          <div className="band-value group-hover/cell:text-accent-text">
             {formatNumber(cell.value, cell.digits ?? 0)}
             {cell.unit ? <small> {cell.unit}</small> : null}
           </div>
