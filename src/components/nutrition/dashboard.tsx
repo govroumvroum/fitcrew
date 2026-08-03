@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery } from "convex/react";
 import { ChevronDownIcon, ClockIcon, LockIcon, LockOpenIcon, PlusIcon } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,11 +82,25 @@ export function NutritionDashboard({ today }: { today: string }) {
               </>
             ) : (
               <>
-                <div>
-                  <p className="eyebrow">Le Chef</p>
-                  <h2 className="font-heading text-[1.375rem] leading-tight font-bold">
-                    Il te fait tes menus, tu ne cherches plus quoi manger.
-                  </h2>
+                {/* 40 px, not the chat header's 28: this slab is where someone
+                    meets Le Chef for the first time, so he gets to be seen.
+                    alt="" on purpose — his name is right there in the eyebrow, and
+                    a screen reader announcing it twice is noise. */}
+                <div className="flex items-start gap-3">
+                  <Image
+                    src="/chef.png"
+                    alt=""
+                    width={40}
+                    height={40}
+                    className="shrink-0 rounded-full ring-1 ring-white/10"
+                    priority
+                  />
+                  <div className="min-w-0">
+                    <p className="eyebrow">Le Chef</p>
+                    <h2 className="font-heading text-[1.375rem] leading-tight font-bold">
+                      Il te fait tes menus, tu ne cherches plus quoi manger.
+                    </h2>
+                  </div>
                 </div>
                 <p className="text-sm text-muted-foreground">
                   Dis-lui ton objectif, ton poids, ce que tu ne manges pas et le temps que tu as
