@@ -3,7 +3,7 @@
 import { useUIMessages, type UIMessage } from "@convex-dev/agent/react";
 import type { ChatStatus } from "ai";
 import { useAction, useMutation } from "convex/react";
-import { ImagePlusIcon } from "lucide-react";
+import { ImagePlusIcon, TriangleAlertIcon } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
@@ -53,6 +53,16 @@ import { useLocalDate } from "@/lib/dates";
  */
 export type ToolPart = { type: string; state: string; input?: unknown; output?: unknown };
 
+/**
+ * What a tool says about itself while it works.
+ *
+ * `pending` is the model still writing the arguments — it hasn't committed to the
+ * action yet, so the copy stays vague ("Je regarde ton menu…"). `running` is the
+ * tool executing, where naming the action is safe ("J'écris ta semaine…").
+ * `running` falls back to `pending` for tools too fast to be worth two strings.
+ */
+export type AgentToolLabel = { pending: string; running?: string; failed?: string };
+
 export type AgentConfig = {
   api: AgentApi;
   /** Header title. */
@@ -76,6 +86,11 @@ export type AgentConfig = {
    * its input exists. Skipping that guard crashed /coach in prod on mobile.
    */
   outputOnly: readonly string[];
+  /**
+   * Copy shown while a tool runs, per tool type (`tool-<name>`). A missing entry
+   * degrades to generic copy rather than to silence.
+   */
+  toolLabels: Record<string, AgentToolLabel>;
   /** `isNew` is the message still streaming; see `Surface` in the card files. */
   renderTool: (tool: ToolPart, isNew: boolean) => React.ReactNode;
 };
@@ -295,6 +310,43 @@ function PendingAttachments() {
   );
 }
 
+/**
+ * A tool in flight. Deliberately a line and not a card: it is replaced by the real
+ * card the moment the output lands, and a card swapping for another card makes the
+ * thread jump.
+ *
+ * Shimmer rather than a spinner — shadcn's `shimmer` utility, already imported via
+ * `shadcn/tailwind.css` in globals.css, and it turns itself off under
+ * prefers-reduced-motion. The text IS the affordance, so animating the text beats
+ * parking a spinner next to it.
+ *
+ * The two states get different copy because they are different waits: while the
+ * arguments stream in, the model is still deciding WHAT to do, and nothing is
+ * running yet; once they're complete, the tool itself is executing. Conflating
+ * them made `generate_meal_plan` claim it was writing the week before it had
+ * decided to.
+ *
+ * An unlabelled tool falls back to generic copy rather than rendering nothing — a
+ * tool added to the backend and forgotten here must still show something is up.
+ */
+function ToolRunning({ label, pending }: { label?: AgentToolLabel; pending: boolean }) {
+  const text = pending
+    ? (label?.pending ?? "Un instant…")
+    : (label?.running ?? label?.pending ?? "Un instant…");
+  return <p className="shimmer text-[11px] text-muted-foreground">{text}</p>;
+}
+
+/** A tool that threw. The agent usually explains it in prose too, but a silent
+ *  failure left the user staring at a turn where nothing visibly happened. */
+function ToolFailed({ label }: { label?: AgentToolLabel }) {
+  return (
+    <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden />
+      {label?.failed ?? "Une action n'a pas marché."}
+    </p>
+  );
+}
+
 function AgentMessage({ message, agent }: { message: UIMessage; agent: AgentConfig }) {
   const streaming = message.status === "streaming";
 
@@ -314,7 +366,25 @@ function AgentMessage({ message, agent }: { message: UIMessage; agent: AgentConf
           }
           if (!part.type.startsWith("tool-")) return null;
           const tool = part as ToolPart;
-          if (tool.state !== "output-available") return null;
+
+          // A tool has five states worth showing and we used to render only the
+          // last one, so a 90-second `generate_meal_plan` looked like the app had
+          // hung, and a tool that THREW left no trace in the thread at all.
+          switch (tool.state) {
+            case "input-streaming":
+              return <ToolRunning key={i} label={agent.toolLabels[tool.type]} pending />;
+            case "input-available":
+              return <ToolRunning key={i} label={agent.toolLabels[tool.type]} pending={false} />;
+            case "output-error":
+              return <ToolFailed key={i} label={agent.toolLabels[tool.type]} />;
+            case "output-available":
+              break;
+            // approval-* / output-denied: no tool here asks for approval, so these
+            // never occur. Rendering nothing beats inventing copy for them.
+            default:
+              return null;
+          }
+
           // See `outputOnly`: an input that hasn't landed yet would be
           // dereferenced through a cast that lies about it.
           if (!tool.input && !agent.outputOnly.includes(tool.type)) return null;

@@ -75,6 +75,86 @@ export const CHEF: AgentConfig = {
     "tool-suggest_recipes_from_ingredients",
     "tool-lookup_food",
   ],
+  toolLabels: {
+    "tool-save_nutrition_profile": {
+      pending: "Je récapitule…",
+      running: "J'enregistre ton profil…",
+      failed: "Le profil n'a pas pu être enregistré.",
+    },
+    // The long one: writing 21 meals takes a while, and this line is the only
+    // thing telling the user the app hasn't hung.
+    "tool-generate_meal_plan": {
+      pending: "Je réfléchis à ta semaine…",
+      running: "J'écris tes repas de la semaine…",
+      failed: "Le menu n'a pas pu être généré.",
+    },
+    "tool-replace_meal": {
+      pending: "Je cherche autre chose…",
+      running: "Je remplace ce repas…",
+      failed: "Le repas n'a pas pu être remplacé.",
+    },
+    "tool-move_meal": {
+      pending: "Je déplace ce repas…",
+      failed: "Le repas n'a pas pu être déplacé.",
+    },
+    "tool-regenerate_day": {
+      pending: "Je repense cette journée…",
+      running: "Je réécris la journée…",
+      failed: "La journée n'a pas pu être régénérée.",
+    },
+    "tool-shopping_list": {
+      pending: "Je rassemble tes ingrédients…",
+      running: "Je monte ta liste de courses…",
+    },
+    "tool-add_food_log_entry": {
+      pending: "Je note ça…",
+      running: "J'ajoute à ton journal…",
+      failed: "Ça n'a pas pu être ajouté au journal.",
+    },
+    "tool-log_planned_meal": {
+      pending: "Je note ce repas…",
+      running: "J'ajoute à ton journal…",
+      failed: "Ça n'a pas pu être ajouté au journal.",
+    },
+    "tool-update_inventory": {
+      pending: "Je regarde ton inventaire…",
+      running: "Je mets ton inventaire à jour…",
+      failed: "L'inventaire n'a pas pu être mis à jour.",
+    },
+    "tool-suggest_recipes_from_ingredients": {
+      pending: "Je regarde ce que tu as…",
+      running: "Je cherche des recettes…",
+      failed: "Je n'ai pas trouvé de recette.",
+    },
+    "tool-lookup_food": {
+      pending: "Je prépare ma recherche…",
+      running: "Je cherche dans Open Food Facts…",
+      failed: "Open Food Facts ne répond pas.",
+    },
+    // The four photo skills: "j'ouvre" while the model is still choosing which
+    // analysis to run, "je regarde" once it actually is.
+    "tool-analyze_plate": {
+      pending: "J'ouvre ta photo…",
+      running: "Je regarde ton assiette…",
+      failed: "Je n'ai pas réussi à analyser cette photo.",
+    },
+    "tool-analyze_fridge": {
+      pending: "J'ouvre ta photo…",
+      running: "Je regarde ton frigo…",
+      failed: "Je n'ai pas réussi à analyser cette photo.",
+    },
+    "tool-read_nutrition_label": {
+      pending: "J'ouvre ta photo…",
+      running: "Je lis l'étiquette…",
+      failed: "Je n'ai pas réussi à lire cette étiquette.",
+    },
+    "tool-analyze_groceries": {
+      pending: "J'ouvre ta photo…",
+      running: "Je regarde tes courses…",
+      failed: "Je n'ai pas réussi à analyser cette photo.",
+    },
+    "tool-ask_coach": { pending: "Je demande au Coach…", failed: "Le Coach n'a pas répondu." },
+  },
   renderTool: (tool, isNew) => {
     const { input, output } = tool;
 

@@ -48,6 +48,36 @@ export const COACH: AgentConfig = {
   // The screenshot review and the sources list are the two cards that read the
   // output rather than the input.
   outputOnly: ["tool-extract_screenshot", "tool-search_web"],
+  toolLabels: {
+    "tool-save_onboarding": { pending: "Je récapitule…", running: "J'enregistre ton profil…" },
+    "tool-generate_program": {
+      pending: "Je réfléchis à ton programme…",
+      running: "J'écris ton programme…",
+      failed: "Le programme n'a pas pu être enregistré.",
+    },
+    "tool-swap_exercise": {
+      pending: "Je cherche un remplaçant…",
+      running: "Je change l'exercice…",
+      failed: "L'exercice n'a pas pu être remplacé.",
+    },
+    "tool-explain_exercise": { pending: "Je regarde ton historique…" },
+    "tool-extract_screenshot": {
+      pending: "J'ouvre ta capture…",
+      running: "Je lis ta capture…",
+      failed: "Je n'ai pas réussi à lire cette capture.",
+    },
+    "tool-log_workout": {
+      pending: "Je note ta séance…",
+      running: "J'enregistre ta séance…",
+      failed: "La séance n'a pas pu être enregistrée.",
+    },
+    "tool-search_web": {
+      pending: "Je prépare ma recherche…",
+      running: "Je cherche sur le web…",
+      failed: "La recherche n'a rien donné.",
+    },
+    "tool-ask_chef": { pending: "Je demande au Chef…", failed: "Le Chef n'a pas répondu." },
+  },
   renderTool: (tool, isNew) => {
     // Cards read the tool's input, which carries the whole program/profile; the
     // output only holds the resulting version number.
