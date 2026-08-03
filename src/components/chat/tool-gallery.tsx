@@ -708,11 +708,11 @@ function Completed({
     );
   }
   const card = config.renderTool(tool, false);
-  if (!card) return <ToolLine Icon={label.icon} text={label.done} />;
+  if (!card) return <ToolLine Icon={label.icon} text={label.done} tone="done" />;
   if (config.needsValidation.includes(tool.type)) return <CardBoundary>{card}</CardBoundary>;
   return (
     <details className="group w-full">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] text-muted-foreground marker:hidden hover:text-foreground">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] text-success-text marker:hidden hover:brightness-110">
         <label.icon className="size-3.5 shrink-0" aria-hidden />
         <span className="min-w-0 flex-1">{label.done}</span>
         <ChevronDownIcon className="chevron size-3.5 shrink-0" aria-hidden />
@@ -757,7 +757,11 @@ function ToolBlock({
         <ToolLine Icon={label.icon} text={label.running ?? label.pending} shimmer />
       </State>
       <State name="failed — output-error">
-        <ToolLine Icon={label.icon} text={label.failed ?? "Une action n'a pas marché."} />
+        <ToolLine
+          Icon={label.icon}
+          text={label.failed ?? "Une action n'a pas marché."}
+          tone="failed"
+        />
       </State>
 
       {fixtures.length === 0 ? (

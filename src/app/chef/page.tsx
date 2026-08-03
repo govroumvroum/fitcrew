@@ -1,4 +1,4 @@
-import { ChefHatIcon } from "lucide-react";
+import Image from "next/image";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { Suspense } from "react";
 import { CHEF, ChefChat } from "@/components/chat/chef-chat";
@@ -53,12 +53,14 @@ function ChefSkeleton() {
             not a Skeleton — it never loads, so there is nothing to wait for. */}
         <div className="flex items-center justify-between border-b px-3 py-2">
           <span className="flex items-center gap-2 font-heading text-base font-semibold tracking-[-0.01em]">
-            <span
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted ring-1 ring-white/10"
-              aria-hidden
-            >
-              <ChefHatIcon className="size-4 text-muted-foreground" />
-            </span>
+            <Image
+              src="/chef.png"
+              alt=""
+              width={28}
+              height={28}
+              className="rounded-full ring-1 ring-white/10"
+              priority
+            />
             Le Chef
           </span>
           <Skeleton className="size-11" />

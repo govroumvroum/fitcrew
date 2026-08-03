@@ -357,7 +357,9 @@ const FALLBACK: AgentToolLabel = {
 function ToolDisclosure({ label, children }: { label: AgentToolLabel; children: React.ReactNode }) {
   return (
     <details className="group w-full">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] text-muted-foreground marker:hidden hover:text-foreground">
+      {/* The summary carries the same green as a card-less completed line, so
+          "it worked" looks the same whether or not there is a card behind it. */}
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] text-success-text marker:hidden hover:brightness-110">
         <label.icon className="size-3.5 shrink-0" aria-hidden />
         <span className="min-w-0 flex-1">{label.done}</span>
         <ChevronDownIcon className="chevron size-3.5 shrink-0" aria-hidden />
@@ -422,7 +424,7 @@ function AgentMessage({ message, agent }: { message: UIMessage; agent: AgentConf
           const card = agent.renderTool(tool, streaming);
           // No card for this tool (its result is the prose above). The line still
           // says it ran — that's cheaper than the user wondering.
-          if (!card) return <ToolLine key={i} Icon={label.icon} text={label.done} />;
+          if (!card) return <ToolLine key={i} Icon={label.icon} text={label.done} tone="done" />;
           // A card the user must act on stays open; everything else collapses.
           if (agent.needsValidation.includes(tool.type)) {
             return <Fragment key={i}>{card}</Fragment>;

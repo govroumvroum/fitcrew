@@ -35,6 +35,8 @@
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent-text: var(--accent-text);
+  --color-danger-text: var(--danger-text);
+  --color-success-text: var(--success-text);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
@@ -71,6 +73,9 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* Dark enough to clear the 4.5 floor on a white --card: 6.2:1 and 6.1:1. */
+  --danger-text: oklch(0.52 0.2 8);
+  --success-text: oklch(0.48 0.13 155);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -126,6 +131,12 @@
   /* ponytail: hue-shifted off brand red so destroy != primary. Still both reds —
      pair with an outline treatment, or move warnings to amber if it confuses. */
   --destructive: oklch(0.55 0.207 8);
+  /* Status as TEXT, same L as --accent-text so the three read as one system.
+     --destructive itself only reaches 3.3:1 on --card, under the 4.5 floor, which
+     is why it can't be used for a label — it's a fill colour, not a text colour.
+     Measured on --card: danger 8.9:1, success 9.7:1. */
+  --danger-text: oklch(0.8 0.13 8);
+  --success-text: oklch(0.8 0.11 155);
   --border: oklch(0.78 0.018 267.52 / 14%);
   --input: oklch(0.78 0.018 267.52 / 18%);
   --ring: oklch(0.613 0.188 27.255);

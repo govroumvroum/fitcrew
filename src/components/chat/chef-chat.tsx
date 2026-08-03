@@ -6,7 +6,6 @@ import {
   BoxIcon,
   CalendarDaysIcon,
   CheckIcon,
-  ChefHatIcon,
   DatabaseIcon,
   DumbbellIcon,
   NotebookPenIcon,
@@ -18,6 +17,7 @@ import {
   UtensilsCrossedIcon,
   UtensilsIcon,
 } from "lucide-react";
+import Image from "next/image";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { Macros } from "../../../convex/nutrition";
@@ -64,15 +64,18 @@ type AnalyzeOutput = {
 export const CHEF: AgentConfig = {
   api: api.chef,
   name: "Le Chef",
-  // No /chef.png to pair with the Coach's photo, so an icon in a coin of the same
-  // 28 px — the two headers have to line up when you switch tabs.
+  // Same treatment as the Coach's photo, down to the 28 px and the ring: the two
+  // headers have to line up when you switch tabs. The source PNG has no alpha, so
+  // the white field becomes the coin — hence ring rather than a border.
   coin: (
-    <span
-      className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted ring-1 ring-white/10"
-      aria-hidden
-    >
-      <ChefHatIcon className="size-4 text-muted-foreground" />
-    </span>
+    <Image
+      src="/chef.png"
+      alt=""
+      width={28}
+      height={28}
+      className="rounded-full ring-1 ring-white/10"
+      priority
+    />
   ),
   placeholder: "Écris au Chef…",
   attach: { label: "Joindre une photo", prompt: "Regarde cette photo." },

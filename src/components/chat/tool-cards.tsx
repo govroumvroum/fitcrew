@@ -1,6 +1,13 @@
 "use client";
 
-import { ArrowRightIcon, CheckIcon, ChevronDownIcon, DumbbellIcon, SearchIcon } from "lucide-react";
+import {
+  ArrowRightIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  DumbbellIcon,
+  SearchIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import type { z } from "zod";
 import type {
   zExercise,
@@ -255,11 +262,21 @@ export type ToolIcon = React.ComponentType<{ className?: string }>;
 export function ToolLine({
   Icon,
   text,
+  tone = "neutral",
   shimmer,
   isNew,
 }: {
   Icon: ToolIcon;
   text: string;
+  /**
+   * `done` and `failed` are colour-coded; in-flight states stay neutral, because
+   * a line that is still working has no outcome to report yet.
+   *
+   * Colour is never the only signal: failure also gets its own icon next to the
+   * tool's, so it survives a red-green colour deficiency and a greyscale
+   * screenshot.
+   */
+  tone?: "neutral" | "done" | "failed";
   /** In flight: the text animates. `shimmer` turns itself off under
    *  prefers-reduced-motion, so this needs no motion guard of its own. */
   shimmer?: boolean;
@@ -268,13 +285,17 @@ export function ToolLine({
   return (
     <p
       className={cn(
-        "flex items-center gap-1.5 text-[11px] text-muted-foreground",
+        "flex items-center gap-1.5 text-[11px]",
+        tone === "neutral" && "text-muted-foreground",
+        tone === "done" && "text-success-text",
+        tone === "failed" && "text-danger-text",
         shimmer && "shimmer",
         isNew &&
           "duration-300 ease-[cubic-bezier(0.2,0,0,1)] animate-in fade-in motion-reduce:animate-none",
       )}
     >
       <Icon className="size-3.5 shrink-0" aria-hidden />
+      {tone === "failed" && <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden />}
       {text}
     </p>
   );
