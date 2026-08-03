@@ -54,6 +54,18 @@ function check(name: string, config: AgentConfig, fixtures: Fixtures) {
     [],
     `${name}: needsValidation cite un tool inconnu — ${unknown.join(", ")}`,
   );
+
+  // Same for `outputOnly`, which had the same hole. Note the failure direction:
+  // a stale entry never matches, so nothing skips the input-existence guard in
+  // `AgentMessage` — the tool it was MEANT to cover simply loses its bypass, and
+  // its card silently fails to render on the turns where the output arrives
+  // before the input. A card that vanishes intermittently, not a crash.
+  const staleOutputOnly = config.outputOnly.filter((t) => !(t in config.toolLabels));
+  assert.deepEqual(
+    staleOutputOnly,
+    [],
+    `${name}: outputOnly cite un tool inconnu — ${staleOutputOnly.join(", ")}`,
+  );
 }
 
 check("Coach", COACH, COACH_FIXTURES as Fixtures);
