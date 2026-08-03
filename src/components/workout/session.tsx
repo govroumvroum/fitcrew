@@ -847,10 +847,14 @@ function SetChip({
       variant="outline"
       className={cn(
         "h-12 min-w-16 flex-col gap-0 px-3",
+        // A tint, not a fill. Measured in APCA over --card: a saturated chart-1
+        // ground can't carry both lines — near-black reached Lc 43 and near-white
+        // -60, and the 10px weight line at opacity-80 fell to -45, all under the
+        // 60 label floor. At /20 the two lines sit at -98 and -72. The check glyph
+        // keeps the hue, so "done" still reads chromatically.
         // pointer-fine:, not bare hover:: this is a touch-first PWA, and an
         // ungated hover state stays lit under the finger after every tap.
-        row.completed &&
-          "border-chart-1/70 bg-chart-1 text-background pointer-fine:hover:bg-chart-1/90",
+        row.completed && "border-chart-1/70 bg-chart-1/20 pointer-fine:hover:bg-chart-1/30",
         next && "border-accent-text",
         // Only the check-off dips: un-checking is a correction, not an achievement.
         !row.completed && "active:scale-[0.96]",
@@ -862,7 +866,7 @@ function SetChip({
       <span className="flex items-center gap-1 text-sm font-semibold">
         {/* Always in the flow: mounting the check on validation shoved the set
             number 20px sideways, a hundred times a séance. */}
-        <CheckIcon className={row.completed ? undefined : "invisible"} />
+        <CheckIcon className={row.completed ? "text-chart-1" : "invisible"} />
         {row.index + 1}
       </span>
       <span className="text-[10px] opacity-80 tabular-nums">
