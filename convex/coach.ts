@@ -316,6 +316,23 @@ function coachTools(today: string) {
       },
     }),
 
+    ask_chef: createTool({
+      description:
+        "Consulte « Le Chef », l'assistant nutrition, quand la réponse dépend VRAIMENT de l'alimentation (quoi manger autour d'une séance, si ses apports collent à son objectif). Jamais pour ce qui est déjà dans ton contexte. Il n'a aucun outil et ne peut pas te reconsulter : une question, une réponse.",
+      inputSchema: z.object({
+        question: z.string().describe("Une seule question, précise, sur la nutrition"),
+        context: z
+          .string()
+          .describe("Le strict nécessaire pour qu'il réponde. Pas l'historique de la conversation"),
+      }),
+      execute: async (ctx: ToolCtx, { question, context }) =>
+        await ctx.runAction(internal.consult.askChef, {
+          question,
+          context,
+          expectedFormat: "Recommandation courte, et des repas concrets si la question en demande.",
+        }),
+    }),
+
     search_web: createTool({
       description:
         "Cherche sur le web (SearXNG) ce que tu ne peux pas savoir : recommandations actuelles, un complément ou un terme dont le user te parle, la technique d'un exercice précis. Jamais pour ce qui est déjà dans ton contexte.",
@@ -445,6 +462,7 @@ AUTRES OUTILS
 - \`log_workout\` seulement pour une séance passée qu'il te raconte. Une séance en cours se loge dans l'écran Séance, pas ici.
 - \`extract_screenshot\` dès qu'une capture est jointe à son message. Si l'outil renvoie des entrées, dis-lui juste de vérifier et valider la fiche affichée — tu n'enregistres rien toi-même. Si il renvoie une liste vide, NE LUI PARLE PAS de fiche à valider : il n'y en a aucune à l'écran. Dis-lui ce que tu vois sur la capture et ce qui manque (une pesée a besoin du poids réel, pas du poids idéal ni de la masse musculaire), et propose-lui de te donner le chiffre directement.
 - Il veut changer la durée des séances ou le nombre de jours : régénère le programme avec \`generate_program\`.
+- \`ask_chef\` seulement quand la réponse dépend vraiment de son alimentation (quoi manger autour d'une séance, si ses apports servent son objectif). Une seule question, avec le minimum de contexte : le Chef ne voit pas votre conversation. Ce n'est pas ton domaine : tu relaies sa réponse, tu ne la corriges pas, et tu rappelles que ses chiffres sont des estimations. La nutrition d'une pathologie ne se règle ni avec lui ni avec toi : c'est un professionnel de santé.
 - \`search_web\` seulement pour ce que tu ne peux pas savoir : une recommandation à jour, un complément ou un terme dont il te parle, la technique d'un exercice précis. Jamais pour ce qui est déjà écrit au-dessus (son profil, son programme, ses records, son cardio) et jamais pour du conseil d'entraînement générique que tu connais déjà — une recherche inutile, c'est de l'attente et des tokens pour rien.
 - Quand tu t'appuies sur une recherche, cite tes sources dans ta réponse (le nom du site ou le lien) pour qu'il puisse vérifier. Si l'outil renvoie une erreur ou zéro résultat, dis-lui simplement que la recherche ne marche pas là et continue avec ce que tu sais.
 - TU N'ES PAS MÉDECIN. Douleur, blessure, symptôme, médicament : tu dis clairement que ça demande un professionnel (médecin, kiné) et tu ne présentes JAMAIS un résultat de recherche comme un diagnostic ou un protocole de soin. Tu peux adapter le programme pour ménager la zone, c'est tout.`;

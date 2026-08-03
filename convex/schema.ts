@@ -31,6 +31,87 @@ export const challengeMetric = v.union(
   v.literal("est_1rm"),
 );
 
+export const nutritionGoal = v.union(v.literal("perte"), v.literal("maintien"), v.literal("prise"));
+
+export const activityLevel = v.union(
+  v.literal("sedentaire"),
+  v.literal("leger"),
+  v.literal("modere"),
+  v.literal("actif"),
+  v.literal("tres_actif"),
+);
+
+export const mealSlot = v.union(
+  v.literal("petit_dejeuner"),
+  v.literal("dejeuner"),
+  v.literal("diner"),
+  v.literal("collation"),
+);
+
+export const macros = v.object({
+  calories: v.number(),
+  protein: v.number(),
+  carbs: v.number(),
+  fat: v.number(),
+});
+
+export const plannedMeal = v.object({
+  slot: mealSlot,
+  name: v.string(),
+  // An array, not a record keyed by the ingredient: a Convex field name must be
+  // non-control ASCII and every one of these names is French.
+  ingredients: v.array(v.object({ name: v.string(), quantity: v.string() })),
+  steps: v.array(v.string()),
+  prepMinutes: v.number(),
+  macros,
+  locked: v.optional(v.boolean()),
+  mealPrep: v.optional(v.string()), // "se prépare la veille", when relevant
+});
+
+export const planDay = v.object({ date: v.string(), meals: v.array(plannedMeal) });
+
+// Written once per generation and read whole, like `programs`: nesting days and
+// meals keeps a week one document. Bounded (7 days x ~4 meals).
+export const nutritionProfile = v.object({
+  userId: v.id("users"),
+  goal: nutritionGoal,
+  age: v.number(),
+  sex: v.union(v.literal("h"), v.literal("f")),
+  heightCm: v.number(),
+  weightKg: v.number(),
+  activityLevel,
+  diet: v.optional(v.string()), // "végétarien", "halal"… free text, user's words
+  allergies: v.array(v.string()),
+  excluded: v.array(v.string()),
+  mealsPerDay: v.number(),
+  budget: v.optional(v.string()), // "serré", "normal"… user's words
+  cookMinutes: v.optional(v.number()), // time available per meal
+  people: v.optional(v.number()),
+  // Stored, not recomputed on read: the Chef generates a week against these
+  // numbers and they must not silently drift under an existing plan when the
+  // user logs a new weight.
+  targets: macros,
+});
+
+export const visionIntent = v.union(
+  v.literal("plate"),
+  v.literal("fridge"),
+  v.literal("label"),
+  v.literal("groceries"),
+);
+
+// One union, two call sites: the table below and `aiUsage.record`'s args. They
+// must never drift, or a recorded call fails validation at write time.
+export const aiFeature = v.union(
+  v.literal("coach"),
+  v.literal("screenshot"),
+  v.literal("demos"),
+  v.literal("challenge"),
+  v.literal("chef"),
+  v.literal("vision"),
+  v.literal("consult"),
+);
+
 export default defineSchema({
   users: defineTable({
     tokenIdentifier: v.string(),
@@ -187,6 +268,51 @@ export default defineSchema({
     participants: v.array(v.id("users")),
   }).index("by_week", ["weekStart"]),
 
+  nutritionProfiles: defineTable(nutritionProfile).index("by_user", ["userId"]),
+
+  mealPlans: defineTable({
+    userId: v.id("users"),
+    weekStart: v.string(), // YYYY-MM-DD Monday, produced by monday()
+    days: v.array(planDay),
+  }).index("by_user_and_week", ["userId", "weekStart"]),
+
+  foodLog: defineTable({
+    userId: v.id("users"),
+    date: v.string(), // YYYY-MM-DD, local to the user
+    slot: mealSlot,
+    name: v.string(),
+    quantity: v.optional(v.string()),
+    macros,
+    source: v.union(v.literal("plan"), v.literal("manual"), v.literal("image")),
+  }).index("by_user_and_date", ["userId", "date"]),
+
+  // One row per day, upserted: a water counter is a single number per date.
+  hydration: defineTable({
+    userId: v.id("users"),
+    date: v.string(),
+    ml: v.number(),
+  }).index("by_user_and_date", ["userId", "date"]),
+
+  inventory: defineTable({
+    userId: v.id("users"),
+    name: v.string(), // as the user/model names it, trimmed
+    quantity: v.optional(v.string()),
+  }).index("by_user", ["userId"]),
+
+  // Unconfirmed image analyses, exactly like `screenshots`: a proposal the user
+  // edits and commits, or discards. Nothing is ever written to the log or the
+  // inventory straight from a photo.
+  visionAnalyses: defineTable({
+    userId: v.id("users"),
+    storageId: v.id("_storage"),
+    intent: visionIntent,
+    // Shape varies per intent and is only ever read back into the confirmation
+    // form; validated at the vision boundary instead.
+    items: v.any(),
+    warnings: v.array(v.string()),
+    confirmed: v.boolean(),
+  }).index("by_user", ["userId"]),
+
   // One row per LLM call, so we know who spends what. Written by the coach's
   // `usageHandler` and by hand at the two `generateObject` sites.
   //
@@ -195,12 +321,7 @@ export default defineSchema({
   // for `challenge`: the Monday cron writes défis for the crew, on nobody's behalf.
   aiUsage: defineTable({
     userId: v.optional(v.id("users")),
-    feature: v.union(
-      v.literal("coach"),
-      v.literal("screenshot"),
-      v.literal("demos"),
-      v.literal("challenge"),
-    ),
+    feature: aiFeature,
     model: v.string(),
     inputTokens: v.number(),
     outputTokens: v.number(),

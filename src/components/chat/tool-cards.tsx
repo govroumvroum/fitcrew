@@ -46,11 +46,15 @@ const EXPERIENCE: Record<ProfileInput["experience"], string> = {
 const rest = (s: number) => (s >= 60 ? `${Math.round(s / 60)} min` : `${s} s`);
 
 /**
- * `isNew` is the message still streaming: a card the coach just produced slides
+ * `isNew` is the message still streaming: a card the agent just produced slides
  * in, every card already in the thread does not. Without it, opening a thread —
  * or paging in older ones — replayed the entrance on the whole history.
+ *
+ * Exported, like `Header`/`Field`/`Chips` below: the Chef's cards in
+ * `chef-tool-cards.tsx` are the same surface with different contents, and a
+ * second copy of them drifts the moment one of the two gets a fix.
  */
-function Surface({ isNew, children }: { isNew?: boolean; children: React.ReactNode }) {
+export function Surface({ isNew, children }: { isNew?: boolean; children: React.ReactNode }) {
   return (
     <div
       className={cn(
@@ -64,13 +68,26 @@ function Surface({ isNew, children }: { isNew?: boolean; children: React.ReactNo
   );
 }
 
-function Header({ icon, title, aside }: { icon?: React.ReactNode; title: string; aside?: string }) {
+export function Header({
+  icon,
+  title,
+  aside,
+}: {
+  icon?: React.ReactNode;
+  title: string;
+  aside?: string;
+}) {
   return (
     <div className="flex items-center gap-2">
       {icon}
-      <span className="font-heading text-sm font-semibold tracking-[-0.01em]">{title}</span>
+      {/* min-w-0 flex-1 on the title, shrink-0 on the badge: a long title (a meal
+          name, an exercise name) otherwise pushes the badge off the card instead
+          of truncating itself. */}
+      <span className="min-w-0 flex-1 font-heading text-sm font-semibold tracking-[-0.01em]">
+        {title}
+      </span>
       {aside && (
-        <Badge variant="secondary" className="ml-auto tabular-nums">
+        <Badge variant="secondary" className="shrink-0 tabular-nums">
           {aside}
         </Badge>
       )}
@@ -162,7 +179,15 @@ export function ProfileCard({ input, isNew }: { isNew?: boolean; input: ProfileI
   );
 }
 
-function Field({ label, value, numeric }: { label: string; value: string; numeric?: boolean }) {
+export function Field({
+  label,
+  value,
+  numeric,
+}: {
+  label: string;
+  value: string;
+  numeric?: boolean;
+}) {
   return (
     <div className="rounded-md bg-muted/40 px-2 py-1.5">
       {/* .eyebrow: "Niveau", "Ton", "Séances" are micro-labels, which is exactly
@@ -173,7 +198,7 @@ function Field({ label, value, numeric }: { label: string; value: string; numeri
   );
 }
 
-function Chips({ label, items }: { label: string; items: string[] }) {
+export function Chips({ label, items }: { label: string; items: string[] }) {
   return (
     <div className="space-y-1">
       <span className="eyebrow">{label}</span>

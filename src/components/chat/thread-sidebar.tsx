@@ -4,8 +4,9 @@ import { useMutation, usePaginatedQuery } from "convex/react";
 import { MoreHorizontalIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
-import { useCoachThread } from "@/components/chat/use-coach-thread";
+import type { AgentConfig } from "@/components/chat/agent-chat";
+import { useAgentThread } from "@/components/chat/agent-thread";
+import { COACH } from "@/components/chat/coach-chat";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -60,15 +61,19 @@ function groupByDay(threads: Thread[], dayStart: number) {
   return groups;
 }
 
-export function ThreadSidebar() {
-  const { threadId: currentThreadId, dayStart, select: setSelected } = useCoachThread();
+/**
+ * One conversation list, either agent. `agent` defaults to the Coach so
+ * /coach/page.tsx keeps working unchanged; /chef passes its own config.
+ */
+export function ThreadSidebar({ agent = COACH }: { agent?: AgentConfig }) {
+  const { threadId: currentThreadId, dayStart, select: setSelected } = useAgentThread(agent.api);
   const { setOpenMobile } = useSidebar();
-  const newThread = useMutation(api.coach.newThread);
-  const deleteThread = useMutation(api.coach.deleteThread);
+  const newThread = useMutation(agent.api.newThread);
+  const deleteThread = useMutation(agent.api.deleteThread);
   const [renaming, setRenaming] = useState<Thread | null>(null);
 
   const { results, status, loadMore } = usePaginatedQuery(
-    api.coach.threads,
+    agent.api.threads,
     {},
     { initialNumItems: 25 },
   );
@@ -120,9 +125,7 @@ export function ThreadSidebar() {
 
         <SidebarContent>
           {groups.length === 0 && status !== "LoadingFirstPage" ? (
-            <p className="px-4 py-6 text-sm text-sidebar-foreground/70">
-              Pas encore de conversation. Écris au coach, elle apparaîtra ici.
-            </p>
+            <p className="px-4 py-6 text-sm text-sidebar-foreground/70">{agent.sidebarEmpty}</p>
           ) : (
             groups.map((group) => (
               <SidebarGroup key={group.label}>
@@ -173,13 +176,21 @@ export function ThreadSidebar() {
 
       {/* Outside <Sidebar>: on mobile that's a Sheet, and a dialog nested in it
           fights the sheet for focus and the overlay. */}
-      <RenameDialog thread={renaming} onClose={() => setRenaming(null)} />
+      <RenameDialog agent={agent} thread={renaming} onClose={() => setRenaming(null)} />
     </>
   );
 }
 
-function RenameDialog({ thread, onClose }: { thread: Thread | null; onClose: () => void }) {
-  const rename = useMutation(api.coach.renameThread);
+function RenameDialog({
+  agent,
+  thread,
+  onClose,
+}: {
+  agent: AgentConfig;
+  thread: Thread | null;
+  onClose: () => void;
+}) {
+  const rename = useMutation(agent.api.renameThread);
 
   return (
     <Dialog open={thread !== null} onOpenChange={(open) => !open && onClose()}>
