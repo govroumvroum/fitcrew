@@ -52,13 +52,17 @@ What changed and why, in the shape fouine can check against the diff (it calls o
 
 `fouine-review` is a GitHub App that reviews automatically on push. There are no CI checks on this repo — fouine is the gate. It re-reviews the same SHA if nothing was pushed, and it says so, so **key on the head SHA, not on review count**.
 
-Wait for it (background poll, ~30s interval, give up after 15 min and tell the author):
+Wait for it — run this in the background (a foreground `sleep` is blocked), 30 attempts of 30s, then give up and tell the author rather than hanging:
 
 ```sh
 SHA=$(git rev-parse HEAD)
-until gh pr view <n> --json reviews --jq \
-  "[.reviews[]|select(.author.login==\"fouine-review\" and .commit.oid==\"$SHA\")]|length" \
-  | grep -qv '^0$'; do sleep 30; done
+for _ in $(seq 1 30); do
+  n=$(gh pr view <n> --json reviews --jq \
+    "[.reviews[]|select(.author.login==\"fouine-review\" and .commit.oid==\"$SHA\")]|length")
+  [ "$n" != 0 ] && break
+  sleep 30
+done
+[ "$n" = 0 ] && echo "no fouine review on $SHA after 15 min"
 gh pr view <n> --json reviews --jq '.reviews[-1].body'
 gh api repos/govroumvroum/fitcrew/pulls/<n>/comments --jq '.[]|{id,path,line,body}'
 ```
