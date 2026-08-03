@@ -3,7 +3,7 @@
 import { useUIMessages, type UIMessage } from "@convex-dev/agent/react";
 import type { ChatStatus } from "ai";
 import { useAction, useMutation } from "convex/react";
-import { ImagePlusIcon, TriangleAlertIcon } from "lucide-react";
+import { ChevronDownIcon, ImagePlusIcon, WrenchIcon } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
@@ -32,6 +32,7 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { useAgentThread, type AgentApi } from "@/components/chat/agent-thread";
+import { ToolLine, type ToolIcon } from "@/components/chat/tool-cards";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -61,7 +62,16 @@ export type ToolPart = { type: string; state: string; input?: unknown; output?: 
  * tool executing, where naming the action is safe ("J'écris ta semaine…").
  * `running` falls back to `pending` for tools too fast to be worth two strings.
  */
-export type AgentToolLabel = { pending: string; running?: string; failed?: string };
+export type AgentToolLabel = {
+  /** Shown in EVERY state of this tool, so the row keeps one identity. */
+  icon: ToolIcon;
+  pending: string;
+  running?: string;
+  /** The collapsed one-line summary, past tense. Also the whole output for a tool
+   *  whose result is the agent's prose and which therefore has no card. */
+  done: string;
+  failed?: string;
+};
 
 export type AgentConfig = {
   api: AgentApi;
@@ -91,7 +101,14 @@ export type AgentConfig = {
    * degrades to generic copy rather than to silence.
    */
   toolLabels: Record<string, AgentToolLabel>;
-  /** `isNew` is the message still streaming; see `Surface` in the card files. */
+  /**
+   * Tool types whose card the user must ACT on, so it is never collapsed. Hiding a
+   * confirm button behind a click is how an unconfirmed analysis gets abandoned.
+   */
+  needsValidation: readonly string[];
+  /** `isNew` is the message still streaming; see `Surface` in the card files.
+   *  Returning null is meaningful: the shell then shows the tool's one-line
+   *  marker, which is what the consult tools want. */
   renderTool: (tool: ToolPart, isNew: boolean) => React.ReactNode;
 };
 
@@ -311,39 +328,42 @@ function PendingAttachments() {
 }
 
 /**
- * A tool in flight. Deliberately a line and not a card: it is replaced by the real
- * card the moment the output lands, and a card swapping for another card makes the
- * thread jump.
- *
- * Shimmer rather than a spinner — shadcn's `shimmer` utility, already imported via
- * `shadcn/tailwind.css` in globals.css, and it turns itself off under
- * prefers-reduced-motion. The text IS the affordance, so animating the text beats
- * parking a spinner next to it.
- *
- * The two states get different copy because they are different waits: while the
- * arguments stream in, the model is still deciding WHAT to do, and nothing is
- * running yet; once they're complete, the tool itself is executing. Conflating
- * them made `generate_meal_plan` claim it was writing the week before it had
- * decided to.
- *
- * An unlabelled tool falls back to generic copy rather than rendering nothing — a
- * tool added to the backend and forgotten here must still show something is up.
+ * Copy for a tool with no entry in `toolLabels`. A tool added to the backend and
+ * forgotten here still shows something rather than nothing.
  */
-function ToolRunning({ label, pending }: { label?: AgentToolLabel; pending: boolean }) {
-  const text = pending
-    ? (label?.pending ?? "Un instant…")
-    : (label?.running ?? label?.pending ?? "Un instant…");
-  return <p className="shimmer text-[11px] text-muted-foreground">{text}</p>;
-}
+const FALLBACK: AgentToolLabel = {
+  icon: WrenchIcon,
+  pending: "Un instant…",
+  done: "C'est fait.",
+  failed: "Une action n'a pas marché.",
+};
 
-/** A tool that threw. The agent usually explains it in prose too, but a silent
- *  failure left the user staring at a turn where nothing visibly happened. */
-function ToolFailed({ label }: { label?: AgentToolLabel }) {
+/**
+ * A finished tool, collapsed to its one-line summary and opened on click.
+ *
+ * A completed card is a receipt: useful to check, not useful to re-read every
+ * time you scroll past it. Seven of them expanded down a phone thread buried the
+ * agent's actual words, which are the part you came for. So the line is the
+ * default and the card is on demand.
+ *
+ * Native `<details>` — no state hook, and it survives re-render and thread paging
+ * for free, which a `useState` here would not. Same trick as the day disclosures
+ * inside `ProgramCard`.
+ *
+ * Cards that need the user to DO something are never collapsed: see
+ * `needsValidation`. Hiding a confirm button behind a click is how an unconfirmed
+ * analysis gets silently abandoned.
+ */
+function ToolDisclosure({ label, children }: { label: AgentToolLabel; children: React.ReactNode }) {
   return (
-    <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
-      <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden />
-      {label?.failed ?? "Une action n'a pas marché."}
-    </p>
+    <details className="group w-full">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] text-muted-foreground marker:hidden hover:text-foreground">
+        <label.icon className="size-3.5 shrink-0" aria-hidden />
+        <span className="min-w-0 flex-1">{label.done}</span>
+        <ChevronDownIcon className="chevron size-3.5 shrink-0" aria-hidden />
+      </summary>
+      <div className="mt-1.5">{children}</div>
+    </details>
   );
 }
 
@@ -366,17 +386,27 @@ function AgentMessage({ message, agent }: { message: UIMessage; agent: AgentConf
           }
           if (!part.type.startsWith("tool-")) return null;
           const tool = part as ToolPart;
+          const label = agent.toolLabels[tool.type] ?? FALLBACK;
 
           // A tool has five states worth showing and we used to render only the
           // last one, so a 90-second `generate_meal_plan` looked like the app had
           // hung, and a tool that THREW left no trace in the thread at all.
+          //
+          // Every state leads with the SAME icon — the tool's own — so the row
+          // keeps its identity while it progresses. It used to change icon per
+          // state, which read as three unrelated rows.
           switch (tool.state) {
             case "input-streaming":
-              return <ToolRunning key={i} label={agent.toolLabels[tool.type]} pending />;
+              // The model is still writing the arguments: it hasn't committed to
+              // the action, so the copy stays vague.
+              return <ToolLine key={i} Icon={label.icon} text={label.pending} shimmer />;
             case "input-available":
-              return <ToolRunning key={i} label={agent.toolLabels[tool.type]} pending={false} />;
+              // Arguments complete, the tool itself is executing: safe to name it.
+              return (
+                <ToolLine key={i} Icon={label.icon} text={label.running ?? label.pending} shimmer />
+              );
             case "output-error":
-              return <ToolFailed key={i} label={agent.toolLabels[tool.type]} />;
+              return <ToolLine key={i} Icon={label.icon} text={label.failed ?? FALLBACK.failed!} />;
             case "output-available":
               break;
             // approval-* / output-denied: no tool here asks for approval, so these
@@ -388,9 +418,20 @@ function AgentMessage({ message, agent }: { message: UIMessage; agent: AgentConf
           // See `outputOnly`: an input that hasn't landed yet would be
           // dereferenced through a cast that lies about it.
           if (!tool.input && !agent.outputOnly.includes(tool.type)) return null;
-          // Fragment only to carry the key: the cards are block-level already, so
-          // this generates no box of its own.
-          return <Fragment key={i}>{agent.renderTool(tool, streaming)}</Fragment>;
+
+          const card = agent.renderTool(tool, streaming);
+          // No card for this tool (its result is the prose above). The line still
+          // says it ran — that's cheaper than the user wondering.
+          if (!card) return <ToolLine key={i} Icon={label.icon} text={label.done} />;
+          // A card the user must act on stays open; everything else collapses.
+          if (agent.needsValidation.includes(tool.type)) {
+            return <Fragment key={i}>{card}</Fragment>;
+          }
+          return (
+            <ToolDisclosure key={i} label={label}>
+              {card}
+            </ToolDisclosure>
+          );
         })}
       </MessageContent>
     </Message>

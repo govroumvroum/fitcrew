@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  ArrowLeftRightIcon,
-  ArrowRightIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  DumbbellIcon,
-  SearchIcon,
-} from "lucide-react";
+import { ArrowRightIcon, CheckIcon, ChevronDownIcon, DumbbellIcon, SearchIcon } from "lucide-react";
 import type { z } from "zod";
 import type {
   zExercise,
@@ -242,17 +235,47 @@ export function Estimated({ children }: { children?: React.ReactNode }) {
  * Same line for both directions, so a Coach→Chef consult and a Chef→Coach one are
  * visibly the same thing.
  */
-export function ConsultLine({ label, isNew }: { label: string; isNew?: boolean }) {
+/** Any lucide icon. Typed structurally so this file doesn't depend on lucide's
+ *  own exported type name. */
+export type ToolIcon = React.ComponentType<{ className?: string }>;
+
+/**
+ * A tool as a single line, whatever state it is in.
+ *
+ * One component for all four states on purpose. Each state used to render its own
+ * markup with its own icon — none while pending or running, a warning triangle on
+ * failure, an arrow when a consult completed — so a row changed identity as it
+ * progressed instead of staying the same row doing something new. The icon is the
+ * tool's, and it does not change; only the text and whether it shimmers do.
+ *
+ * Used by the chat shell for pending / running / failed, by the consult tools for
+ * their completed state, and by /demo — which previously had to keep its own copy
+ * of two private components and drift from them.
+ */
+export function ToolLine({
+  Icon,
+  text,
+  shimmer,
+  isNew,
+}: {
+  Icon: ToolIcon;
+  text: string;
+  /** In flight: the text animates. `shimmer` turns itself off under
+   *  prefers-reduced-motion, so this needs no motion guard of its own. */
+  shimmer?: boolean;
+  isNew?: boolean;
+}) {
   return (
     <p
       className={cn(
         "flex items-center gap-1.5 text-[11px] text-muted-foreground",
+        shimmer && "shimmer",
         isNew &&
           "duration-300 ease-[cubic-bezier(0.2,0,0,1)] animate-in fade-in motion-reduce:animate-none",
       )}
     >
-      <ArrowLeftRightIcon className="size-3.5 shrink-0" aria-hidden />
-      {label}
+      <Icon className="size-3.5 shrink-0" aria-hidden />
+      {text}
     </p>
   );
 }

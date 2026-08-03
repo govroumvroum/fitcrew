@@ -1,6 +1,23 @@
 "use client";
 
-import { ChefHatIcon } from "lucide-react";
+import {
+  ArrowLeftRightIcon,
+  ArrowRightIcon,
+  BoxIcon,
+  CalendarDaysIcon,
+  CheckIcon,
+  ChefHatIcon,
+  DatabaseIcon,
+  DumbbellIcon,
+  NotebookPenIcon,
+  RefreshCwIcon,
+  RefrigeratorIcon,
+  ShoppingBasketIcon,
+  ShoppingCartIcon,
+  TagIcon,
+  UtensilsCrossedIcon,
+  UtensilsIcon,
+} from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { Macros } from "../../../convex/nutrition";
@@ -30,7 +47,6 @@ import {
   type ReplaceMealInput,
   type ShoppingListOutput,
 } from "@/components/chat/chef-tool-cards";
-import { ConsultLine } from "@/components/chat/tool-cards";
 import { VisionReview } from "@/components/nutrition/vision-review";
 
 /** What `api.vision.analyze` hands back — the four photo tools all return it. */
@@ -77,84 +93,130 @@ export const CHEF: AgentConfig = {
   ],
   toolLabels: {
     "tool-save_nutrition_profile": {
+      icon: CheckIcon,
       pending: "Je récapitule…",
       running: "J'enregistre ton profil…",
+      done: "Profil nutrition enregistré",
       failed: "Le profil n'a pas pu être enregistré.",
     },
     // The long one: writing 21 meals takes a while, and this line is the only
     // thing telling the user the app hasn't hung.
     "tool-generate_meal_plan": {
+      icon: CalendarDaysIcon,
       pending: "Je réfléchis à ta semaine…",
       running: "J'écris tes repas de la semaine…",
+      done: "Semaine générée",
       failed: "Le menu n'a pas pu être généré.",
     },
     "tool-replace_meal": {
+      icon: ArrowLeftRightIcon,
       pending: "Je cherche autre chose…",
       running: "Je remplace ce repas…",
+      done: "Repas remplacé",
       failed: "Le repas n'a pas pu être remplacé.",
     },
     "tool-move_meal": {
+      icon: ArrowRightIcon,
       pending: "Je déplace ce repas…",
+      done: "Repas déplacé",
       failed: "Le repas n'a pas pu être déplacé.",
     },
     "tool-regenerate_day": {
+      icon: RefreshCwIcon,
       pending: "Je repense cette journée…",
       running: "Je réécris la journée…",
+      done: "Journée refaite",
       failed: "La journée n'a pas pu être régénérée.",
     },
     "tool-shopping_list": {
+      icon: ShoppingCartIcon,
       pending: "Je rassemble tes ingrédients…",
       running: "Je monte ta liste de courses…",
+      done: "Liste de courses",
     },
     "tool-add_food_log_entry": {
+      icon: NotebookPenIcon,
       pending: "Je note ça…",
       running: "J'ajoute à ton journal…",
+      done: "Ajouté au journal",
       failed: "Ça n'a pas pu être ajouté au journal.",
     },
     "tool-log_planned_meal": {
+      icon: NotebookPenIcon,
       pending: "Je note ce repas…",
       running: "J'ajoute à ton journal…",
+      done: "Repas ajouté au journal",
       failed: "Ça n'a pas pu être ajouté au journal.",
     },
     "tool-update_inventory": {
+      icon: BoxIcon,
       pending: "Je regarde ton inventaire…",
       running: "Je mets ton inventaire à jour…",
+      done: "Inventaire à jour",
       failed: "L'inventaire n'a pas pu être mis à jour.",
     },
     "tool-suggest_recipes_from_ingredients": {
+      icon: UtensilsCrossedIcon,
       pending: "Je regarde ce que tu as…",
       running: "Je cherche des recettes…",
+      done: "Idées de recettes",
       failed: "Je n'ai pas trouvé de recette.",
     },
     "tool-lookup_food": {
+      icon: DatabaseIcon,
       pending: "Je prépare ma recherche…",
       running: "Je cherche dans Open Food Facts…",
+      done: "Valeurs Open Food Facts",
       failed: "Open Food Facts ne répond pas.",
     },
-    // The four photo skills: "j'ouvre" while the model is still choosing which
-    // analysis to run, "je regarde" once it actually is.
+    // The four photo skills each get their own icon: at a glance the row says
+    // WHAT was photographed, which is the only thing distinguishing them.
+    // "J'ouvre" while the model is still choosing the analysis, "je regarde" once
+    // it actually is.
     "tool-analyze_plate": {
+      icon: UtensilsIcon,
       pending: "J'ouvre ta photo…",
       running: "Je regarde ton assiette…",
+      done: "Assiette analysée",
       failed: "Je n'ai pas réussi à analyser cette photo.",
     },
     "tool-analyze_fridge": {
+      icon: RefrigeratorIcon,
       pending: "J'ouvre ta photo…",
       running: "Je regarde ton frigo…",
+      done: "Frigo analysé",
       failed: "Je n'ai pas réussi à analyser cette photo.",
     },
     "tool-read_nutrition_label": {
+      icon: TagIcon,
       pending: "J'ouvre ta photo…",
       running: "Je lis l'étiquette…",
+      done: "Étiquette lue",
       failed: "Je n'ai pas réussi à lire cette étiquette.",
     },
     "tool-analyze_groceries": {
+      icon: ShoppingBasketIcon,
       pending: "J'ouvre ta photo…",
       running: "Je regarde tes courses…",
+      done: "Courses analysées",
       failed: "Je n'ai pas réussi à analyser cette photo.",
     },
-    "tool-ask_coach": { pending: "Je demande au Coach…", failed: "Le Coach n'a pas répondu." },
+    // The Coach's own icon, not a generic arrow: the row says WHO was asked.
+    "tool-ask_coach": {
+      icon: DumbbellIcon,
+      pending: "Je demande au Coach…",
+      done: "Demande au Coach",
+      failed: "Le Coach n'a pas répondu.",
+    },
   },
+  // The four photo analyses: nothing reaches the journal or the inventory until
+  // the user has corrected and confirmed, so their card must never be collapsed.
+  needsValidation: [
+    "tool-analyze_plate",
+    "tool-analyze_fridge",
+    "tool-read_nutrition_label",
+    "tool-analyze_groceries",
+  ],
   renderTool: (tool, isNew) => {
     const { input, output } = tool;
 
@@ -231,8 +293,12 @@ export const CHEF: AgentConfig = {
         return <RecipesCard output={output as RecipesOutput} isNew={isNew} />;
       case "tool-lookup_food":
         return <LookupFoodCard output={output as LookupFoodOutput} isNew={isNew} />;
+      // No card: a consult's answer is already in the prose, rewritten by the
+      // agent that asked. Returning null makes the shell render the one-line
+      // marker from `toolLabels` — returning a line here would get wrapped in a
+      // disclosure whose summary is that same line.
       case "tool-ask_coach":
-        return <ConsultLine label="Demande au Coach" isNew={isNew} />;
+        return null;
       default:
         // Every tool the Chef has today is covered above — none of them has a
         // prose-only result. This guards a tool added to `chef.ts` later: no card

@@ -1,12 +1,13 @@
 "use client";
 
-import { TriangleAlertIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { Component, type ReactNode } from "react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { Entry } from "../../../convex/screenshots";
 import type { AgentConfig, AgentToolLabel, ToolPart } from "@/components/chat/agent-chat";
 import { CHEF } from "@/components/chat/chef-chat";
 import { COACH } from "@/components/chat/coach-chat";
+import { ToolLine } from "@/components/chat/tool-cards";
 
 /**
  * The design harness behind /demo: every chat tool card, both agents, all four
@@ -17,11 +18,8 @@ import { COACH } from "@/components/chat/coach-chat";
  * so a tool added to an agent shows up here on its own (with "pas de fixture"
  * until someone writes one). Nothing is re-listed by hand.
  *
- * `ToolRunning` / `ToolFailed` are private to `agent-chat.tsx`, so the three
- * non-completed states are re-implemented below. THAT DUPLICATION IS DELIBERATE
- * (the shell must not grow exports for a review page) AND IT MUST BE UPDATED
- * WITH `agent-chat.tsx`: if the shimmer line or the failure line changes there,
- * change `PendingLine` / `FailedLine` here too, or this gallery starts lying.
+ * All four states go through the same `ToolLine` and `renderTool` the chat uses,
+ * so there is nothing here to keep in sync by hand.
  */
 
 /** One completed-state fixture. `note` is printed under it, as-is. */
@@ -660,24 +658,6 @@ const CHEF_FIXTURES: Record<string, Fixture[]> = {
 /* Mirrors of `agent-chat.tsx`. Keep in sync — see the file header.           */
 /* -------------------------------------------------------------------------- */
 
-/** Mirror of `ToolRunning` in `agent-chat.tsx`. */
-function PendingLine({ label, pending }: { label?: AgentToolLabel; pending: boolean }) {
-  const text = pending
-    ? (label?.pending ?? "Un instant…")
-    : (label?.running ?? label?.pending ?? "Un instant…");
-  return <p className="shimmer text-[11px] text-muted-foreground">{text}</p>;
-}
-
-/** Mirror of `ToolFailed` in `agent-chat.tsx`. */
-function FailedLine({ label }: { label?: AgentToolLabel }) {
-  return (
-    <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
-      <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden />
-      {label?.failed ?? "Une action n'a pas marché."}
-    </p>
-  );
-}
-
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -705,8 +685,21 @@ class CardBoundary extends Component<{ children: ReactNode }, { error: string | 
   }
 }
 
-/** Same guard as `AgentMessage`, so the gallery hides what the real shell hides. */
-function Completed({ config, tool }: { config: AgentConfig; tool: ToolPart }) {
+/**
+ * Mirrors `AgentMessage`'s completed branch: the same input guard, the same
+ * "no card means render the one-line marker", and the same collapse rule. The
+ * gallery is only useful if it shows what the thread shows — including the
+ * disclosure, which is how most cards are actually first seen.
+ */
+function Completed({
+  config,
+  tool,
+  label,
+}: {
+  config: AgentConfig;
+  tool: ToolPart;
+  label: AgentToolLabel;
+}) {
   if (!tool.input && !config.outputOnly.includes(tool.type)) {
     return (
       <p className="text-[11px] text-muted-foreground">
@@ -715,14 +708,19 @@ function Completed({ config, tool }: { config: AgentConfig; tool: ToolPart }) {
     );
   }
   const card = config.renderTool(tool, false);
+  if (!card) return <ToolLine Icon={label.icon} text={label.done} />;
+  if (config.needsValidation.includes(tool.type)) return <CardBoundary>{card}</CardBoundary>;
   return (
-    <CardBoundary>
-      {card ?? (
-        <p className="text-[11px] text-muted-foreground">
-          Aucune carte : `renderTool` renvoie null.
-        </p>
-      )}
-    </CardBoundary>
+    <details className="group w-full">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] text-muted-foreground marker:hidden hover:text-foreground">
+        <label.icon className="size-3.5 shrink-0" aria-hidden />
+        <span className="min-w-0 flex-1">{label.done}</span>
+        <ChevronDownIcon className="chevron size-3.5 shrink-0" aria-hidden />
+      </summary>
+      <div className="mt-1.5">
+        <CardBoundary>{card}</CardBoundary>
+      </div>
+    </details>
   );
 }
 
@@ -753,13 +751,13 @@ function ToolBlock({
       </h3>
 
       <State name="pending — input-streaming">
-        <PendingLine label={label} pending />
+        <ToolLine Icon={label.icon} text={label.pending} shimmer />
       </State>
       <State name="running — input-available">
-        <PendingLine label={label} pending={false} />
+        <ToolLine Icon={label.icon} text={label.running ?? label.pending} shimmer />
       </State>
       <State name="failed — output-error">
-        <FailedLine label={label} />
+        <ToolLine Icon={label.icon} text={label.failed ?? "Une action n'a pas marché."} />
       </State>
 
       {fixtures.length === 0 ? (
@@ -771,7 +769,7 @@ function ToolBlock({
       ) : (
         fixtures.map((fixture) => (
           <State key={fixture.label} name={`completed — ${fixture.label}`}>
-            <Completed config={config} tool={fixture.tool} />
+            <Completed config={config} tool={fixture.tool} label={label} />
             {fixture.note ? (
               <p className="text-[11px] text-muted-foreground">{fixture.note}</p>
             ) : null}

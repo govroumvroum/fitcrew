@@ -1,12 +1,21 @@
 "use client";
 
+import {
+  ArrowLeftRightIcon,
+  CheckIcon,
+  DumbbellIcon,
+  ImageIcon,
+  InfoIcon,
+  NotebookPenIcon,
+  SearchIcon,
+  UtensilsCrossedIcon,
+} from "lucide-react";
 import Image from "next/image";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { Entry } from "../../../convex/screenshots";
 import { AgentChat, type AgentConfig } from "@/components/chat/agent-chat";
 import {
-  ConsultLine,
   LoggedCard,
   ProfileCard,
   ProgramCard,
@@ -49,35 +58,63 @@ export const COACH: AgentConfig = {
   // output rather than the input.
   outputOnly: ["tool-extract_screenshot", "tool-search_web"],
   toolLabels: {
-    "tool-save_onboarding": { pending: "Je récapitule…", running: "J'enregistre ton profil…" },
+    "tool-save_onboarding": {
+      icon: CheckIcon,
+      pending: "Je récapitule…",
+      running: "J'enregistre ton profil…",
+      done: "Profil enregistré",
+    },
     "tool-generate_program": {
+      icon: DumbbellIcon,
       pending: "Je réfléchis à ton programme…",
       running: "J'écris ton programme…",
+      done: "Programme écrit",
       failed: "Le programme n'a pas pu être enregistré.",
     },
     "tool-swap_exercise": {
+      icon: ArrowLeftRightIcon,
       pending: "Je cherche un remplaçant…",
       running: "Je change l'exercice…",
+      done: "Exercice remplacé",
       failed: "L'exercice n'a pas pu être remplacé.",
     },
-    "tool-explain_exercise": { pending: "Je regarde ton historique…" },
+    "tool-explain_exercise": {
+      icon: InfoIcon,
+      pending: "Je regarde ton historique…",
+      done: "J'ai regardé ton historique",
+    },
     "tool-extract_screenshot": {
+      icon: ImageIcon,
       pending: "J'ouvre ta capture…",
       running: "Je lis ta capture…",
+      done: "Capture lue",
       failed: "Je n'ai pas réussi à lire cette capture.",
     },
     "tool-log_workout": {
+      icon: NotebookPenIcon,
       pending: "Je note ta séance…",
       running: "J'enregistre ta séance…",
+      done: "Séance enregistrée",
       failed: "La séance n'a pas pu être enregistrée.",
     },
     "tool-search_web": {
+      icon: SearchIcon,
       pending: "Je prépare ma recherche…",
       running: "Je cherche sur le web…",
+      done: "Recherche web",
       failed: "La recherche n'a rien donné.",
     },
-    "tool-ask_chef": { pending: "Je demande au Chef…", failed: "Le Chef n'a pas répondu." },
+    // The Chef's own icon, not a generic arrow: the row says WHO was asked.
+    "tool-ask_chef": {
+      icon: UtensilsCrossedIcon,
+      pending: "Je demande au Chef…",
+      done: "Demande au Chef",
+      failed: "Le Chef n'a pas répondu.",
+    },
   },
+  // Only the screenshot review: nothing lands in the profile until the user
+  // confirms inside it, so it must not open behind a click.
+  needsValidation: ["tool-extract_screenshot"],
   renderTool: (tool, isNew) => {
     // Cards read the tool's input, which carries the whole program/profile; the
     // output only holds the resulting version number.
@@ -127,8 +164,12 @@ export const COACH: AgentConfig = {
         );
       // Same card as the Chef's side of the consult, on purpose: a collaboration
       // the user can only see in one direction doesn't read as a collaboration.
+      // No card: a consult's answer is already in the prose, rewritten by the
+      // agent that asked. Returning null makes the shell render the one-line
+      // marker from `toolLabels` — returning a line here would get wrapped in a
+      // disclosure whose summary is that same line.
       case "tool-ask_chef":
-        return <ConsultLine label="Demande au Chef" isNew={isNew} />;
+        return null;
       default:
         // explain_exercise returns raw history for the model to narrate — the
         // prose above is the result, a card would just repeat it.
