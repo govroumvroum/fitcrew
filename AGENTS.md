@@ -17,3 +17,9 @@ Convex agent skills for common tasks can be installed by running
 `npx convex ai-files install`.
 
 <!-- convex-ai-end -->
+
+# Pull requests
+
+`main` is protected: PR required, squash-only, no force-push. Read
+`.agents/skills/pr/SKILL.md` before opening a PR — it covers the screenshots a
+UI PR must carry and the `fouine-review` loop you're expected to drive to green.
