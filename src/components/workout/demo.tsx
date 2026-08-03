@@ -61,7 +61,7 @@ export function ExerciseDemo({ name, gifUrl }: { name: string; gifUrl: string })
         {reduce ? (
           <Button
             variant="outline"
-            className="size-11 shrink-0 [&_svg]:size-4"
+            className="size-11 shrink-0 active:scale-[0.96] [&_svg]:size-4"
             aria-label={`Voir la démo : ${name}`}
           >
             <PlayIcon />
@@ -72,7 +72,7 @@ export function ExerciseDemo({ name, gifUrl }: { name: string; gifUrl: string })
           // around a bordered thumbnail is just noise.
           <Button
             variant="ghost"
-            className="size-14 shrink-0 p-0"
+            className="size-14 shrink-0 p-0 active:scale-[0.96]"
             aria-label={`Voir la démo : ${name}`}
           >
             {/* Plain <img>, not next/image: hotlinked third-party GIF, and their
@@ -120,13 +120,15 @@ export function ExerciseDemo({ name, gifUrl }: { name: string; gifUrl: string })
             decoding="async"
           />
         </div>
-        <p className="text-xs text-muted-foreground">
+        {/* 11px, the scale's label step: 12px was a rung the type scale
+            (10/11/14/16) doesn't have. */}
+        <p className="text-[11px] text-muted-foreground">
           Démos :{" "}
           <a
             href="https://exercisedb.dev"
             target="_blank"
             rel="noreferrer"
-            className="underline underline-offset-2"
+            className="underline underline-offset-2 hover:text-foreground"
           >
             ExerciseDB
           </a>

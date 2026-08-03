@@ -82,7 +82,8 @@ export function CoachChat() {
     }
   }, [rollover, newThread]);
 
-  // Empty thread → the coach speaks first (no user message is saved for this).
+  // Empty thread → the coach speaks first (its priming turn is filtered out of
+  // `listMessages`, so an already-greeted thread still shows the reply here).
   useEffect(() => {
     if (!threadId || !today || greeted.current === threadId) return;
     if (status !== "Exhausted" || results.length > 0) return;
@@ -132,7 +133,9 @@ export function CoachChat() {
 
   const last = results.at(-1);
   const chatStatus: ChatStatus =
-    echo !== null || last?.role === "user"
+    // Nothing in the thread means the greeting is on its way: `listMessages`
+    // hides the priming turn, so there is no user message to wait behind.
+    echo !== null || last === undefined || last.role === "user"
       ? "submitted"
       : last?.status === "streaming" || last?.status === "pending"
         ? "streaming"
@@ -141,7 +144,7 @@ export function CoachChat() {
   return (
     <>
       <header className="flex items-center justify-between border-b px-3 py-2">
-        <span className="flex items-center gap-2 font-heading text-base font-semibold tracking-tight">
+        <span className="flex items-center gap-2 font-heading text-base font-semibold tracking-[-0.01em]">
           {/* Once in the header, not per message: a repeated avatar down a phone
               chat is noise. The source PNG has no alpha, so the white field
               becomes the coin — hence ring rather than a border. */}

@@ -68,7 +68,7 @@ function Header({ icon, title, aside }: { icon?: React.ReactNode; title: string;
   return (
     <div className="flex items-center gap-2">
       {icon}
-      <span className="font-heading text-sm font-semibold tracking-tight">{title}</span>
+      <span className="font-heading text-sm font-semibold tracking-[-0.01em]">{title}</span>
       {aside && (
         <Badge variant="secondary" className="ml-auto tabular-nums">
           {aside}
@@ -83,10 +83,10 @@ function ExerciseRow({ exercise }: { exercise: Exercise }) {
   return (
     <li className="flex items-baseline gap-2 rounded-md px-2 py-1.5 odd:bg-muted/40">
       <span className="min-w-0 flex-1 text-sm">{exercise.name}</span>
-      <span className="shrink-0 font-heading text-sm tabular-nums">
+      <span className="shrink-0 text-sm tabular-nums">
         {exercise.sets}×{exercise.reps}
       </span>
-      <span className="w-14 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+      <span className="w-14 shrink-0 text-right text-sm text-muted-foreground tabular-nums">
         {rest(exercise.restSeconds)}
       </span>
     </li>
@@ -115,9 +115,9 @@ export function ProgramCard({
       {input.days.map((day, i) => (
         <details key={day.name} open={i === 0} className="group">
           <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-2 text-sm font-medium marker:hidden hover:bg-muted/60">
-            <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-[cubic-bezier(0.2,0,0,1)] group-open:rotate-0 -rotate-90" />
+            <ChevronDownIcon className="chevron" />
             <span className="min-w-0 flex-1">{day.name}</span>
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+            <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
               {day.exercises.length} ex.
             </span>
           </summary>
@@ -129,9 +129,9 @@ export function ProgramCard({
         </details>
       ))}
 
-      <p className="border-t pt-2 text-xs text-muted-foreground">{input.progressionRules}</p>
+      <p className="border-t pt-2 text-sm text-muted-foreground">{input.progressionRules}</p>
       {input.deloadEveryWeeks ? (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Deload toutes les <span className="tabular-nums">{input.deloadEveryWeeks}</span> semaines.
         </p>
       ) : null}
@@ -156,7 +156,7 @@ export function ProfileCard({ input, isNew }: { isNew?: boolean; input: ProfileI
       <Chips label="Matériel" items={input.equipment} />
       {input.sport ? <Chips label="Sport" items={[input.sport]} /> : null}
       {input.limitations ? (
-        <p className="text-xs text-muted-foreground">À ménager : {input.limitations}</p>
+        <p className="text-sm text-muted-foreground">À ménager&#8239;: {input.limitations}</p>
       ) : null}
     </Surface>
   );
@@ -165,7 +165,9 @@ export function ProfileCard({ input, isNew }: { isNew?: boolean; input: ProfileI
 function Field({ label, value, numeric }: { label: string; value: string; numeric?: boolean }) {
   return (
     <div className="rounded-md bg-muted/40 px-2 py-1.5">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
+      {/* .eyebrow: "Niveau", "Ton", "Séances" are micro-labels, which is exactly
+          what the class is for — these were the last hand-rolled 12px in /coach. */}
+      <dt className="eyebrow">{label}</dt>
       <dd className={numeric ? "tabular-nums" : undefined}>{value}</dd>
     </div>
   );
@@ -174,7 +176,7 @@ function Field({ label, value, numeric }: { label: string; value: string; numeri
 function Chips({ label, items }: { label: string; items: string[] }) {
   return (
     <div className="space-y-1">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="eyebrow">{label}</span>
       <div className="flex flex-wrap gap-1">
         {items.map((item) => (
           <Badge key={item} variant="outline" className="font-normal">
@@ -208,7 +210,7 @@ export function SwapCard({
       <ul>
         <ExerciseRow exercise={input.to} />
       </ul>
-      {input.to.notes ? <p className="text-xs text-muted-foreground">{input.to.notes}</p> : null}
+      {input.to.notes ? <p className="text-sm text-muted-foreground">{input.to.notes}</p> : null}
     </Surface>
   );
 }
@@ -244,7 +246,7 @@ export function LoggedCard({
         ))}
       </ul>
       {volume > 0 && (
-        <p className="border-t pt-2 text-xs text-muted-foreground">
+        <p className="border-t pt-2 text-sm text-muted-foreground">
           Volume total <span className="tabular-nums">{Math.round(volume)}</span> kg
         </p>
       )}

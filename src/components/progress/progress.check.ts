@@ -111,6 +111,23 @@ assert.equal(
   ])[0].date,
   "2026-01-01",
 );
+// bestPrs must keep baseline rows — `recordPrs` compares against them, or a
+// baselined exercise looks like it has no history and gets re-baselined. The
+// `overview` query is what splits them, and only the winning row's flag decides:
+// a baseline that has since been beaten is no longer in the list at all.
+const withBaselines = bestPrs([
+  { ...pr("Squat", "max_weight", 100, "2026-01-01"), baseline: true },
+  { ...pr("Squat", "max_weight", 110, "2026-02-01"), baseline: false },
+  { ...pr("Tractions", "max_reps", 8, "2026-01-01"), baseline: true },
+]);
+assert.deepEqual(
+  withBaselines.filter((p) => !p.baseline).map((p) => p.exerciseName),
+  ["Squat"],
+);
+assert.deepEqual(
+  withBaselines.filter((p) => p.baseline).map((p) => p.exerciseName),
+  ["Tractions"],
+);
 
 // --- program day rotation ----------------------------------------------------
 // No history: the very first séance starts at the top of the program.

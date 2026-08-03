@@ -33,8 +33,14 @@ export default function CoachPage() {
 function Shell({ children }: { children: React.ReactNode }) {
   // Deliberately not as wide as the other routes: a chat line past ~70
   // characters is a chore to read, whatever the screen can fit.
+  // The visible "Coach" title is a span in the chat header, and the route had no
+  // h1 at all in either branch. Here rather than in either header: Shell wraps
+  // both the real chat and the skeleton, so one heading covers them.
   return (
-    <div className="mx-auto flex h-full w-full max-w-md flex-col md:max-w-2xl">{children}</div>
+    <div className="mx-auto flex h-full w-full max-w-md flex-col md:max-w-2xl">
+      <h1 className="sr-only">Coach</h1>
+      {children}
+    </div>
   );
 }
 
@@ -42,9 +48,13 @@ function CoachSkeleton() {
   return (
     <main className="h-[calc(100dvh-var(--tab-bar))]">
       <Shell>
-        {/* Mirrors the real header: title left, sidebar trigger right. */}
+        {/* Mirrors the real header down to the 28px avatar coin: without it the
+            title shifted sideways the moment the chat mounted. */}
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <span className="font-heading text-base font-semibold tracking-tight">Coach</span>
+          <span className="flex items-center gap-2 font-heading text-base font-semibold tracking-[-0.01em]">
+            <Skeleton className="size-7 rounded-full" />
+            Coach
+          </span>
           <Skeleton className="size-11" />
         </div>
         <div className="flex flex-col gap-4 p-4">

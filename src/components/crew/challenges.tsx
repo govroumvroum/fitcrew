@@ -4,9 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -44,65 +42,61 @@ export function Challenges({ today }: { today: string }) {
   const rows = useQuery(api.crew.challenges, { weekStart });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Défis de la semaine</CardTitle>
-        <CardDescription>
+    <section className="flex flex-col gap-2">
+      <div>
+        <p className="eyebrow">Défis de la semaine</p>
+        <p className="text-sm text-muted-foreground">
           On se met d&apos;accord sur un exercice, on compare. Lundi, ça repart à zéro.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {rows === undefined ? (
-          <Skeleton className="h-32" />
-        ) : rows === null ? (
-          <p className="py-2 text-sm text-muted-foreground">Profil en cours de création…</p>
-        ) : rows.length === 0 ? (
-          <p className="py-2 text-sm text-muted-foreground">
-            Aucun défi cette semaine. Lance-en un, les autres suivront.
-          </p>
-        ) : (
-          rows.map((challenge) => (
-            <div key={challenge._id} className="space-y-2 rounded-lg border p-3">
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-heading font-semibold">{challenge.title}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {METRICS[challenge.metric].label}
-                    {challenge.exerciseName ? ` · ${challenge.exerciseName}` : ""}
-                    {/* No createdBy = the Monday cron wrote it, there's no human author. */}
-                    {challenge.createdBy ? "" : " · proposé par le coach"}
-                  </p>
-                </div>
-                <JoinButton challengeId={challenge._id} joined={challenge.joined} />
-              </div>
+        </p>
+      </div>
 
-              {challenge.standings.length === 0 ? (
+      {rows === undefined ? (
+        <Skeleton className="h-32" />
+      ) : rows === null ? (
+        <p className="text-sm text-muted-foreground">Profil en cours de création…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Aucun défi cette semaine. Lance-en un, les autres suivront.
+        </p>
+      ) : (
+        <ul className="divide-y">
+          {rows.map((challenge) => (
+            <li key={challenge._id} className="flex items-start gap-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                {/* No size: 15px was off the 10/11/14/16 scale, and Today renders
+                    the same challenge title at the inherited 16px. */}
+                <p className="truncate font-heading font-semibold">{challenge.title}</p>
                 <p className="text-sm text-muted-foreground">
-                  Personne d&apos;inscrit. Rejoins le défi pour ouvrir le classement.
+                  {METRICS[challenge.metric].label}
+                  {challenge.exerciseName ? ` · ${challenge.exerciseName}` : ""}
+                  {/* No createdBy = the Monday cron wrote it, there's no human author. */}
+                  {challenge.createdBy ? "" : " · proposé par le coach"}
+                  {/* Same segment, same words as Today: one fact, one voice. Per
+                      row rather than once for the list, because a list where only
+                      some rows are empty left those rows saying nothing. */}
+                  {challenge.standings.length === 0 ? " · personne d'inscrit" : ""}
                 </p>
-              ) : (
-                <ul className="divide-y text-sm">
-                  {challenge.standings.map((row) => (
-                    <li key={row.userId} className="flex items-center gap-2 py-1.5">
-                      <Avatar size="sm">
-                        {row.avatarUrl ? <AvatarImage src={row.avatarUrl} alt="" /> : null}
-                        <AvatarFallback>{row.name.slice(0, 1).toUpperCase()}</AvatarFallback>
-                      </Avatar>
-                      <span className="truncate">{row.name}</span>
-                      <span className="ml-auto shrink-0 font-heading font-semibold tabular-nums">
-                        {row.score} {METRICS[challenge.metric].unit}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))
-        )}
+                {/* One inline line, not a sub-table: with four people a nested
+                    <ul> with its own hairlines and avatars is more structure than
+                    the data. First names only — full names would wrap the line at
+                    390px, and the crew knows who Basile is. */}
+                {challenge.standings.length > 0 ? (
+                  <p className="text-sm tabular-nums">
+                    {challenge.standings
+                      .map((row) => `${row.name.split(" ")[0]} ${row.score}`)
+                      .join(" · ")}
+                    <span className="text-muted-foreground"> {METRICS[challenge.metric].unit}</span>
+                  </p>
+                ) : null}
+              </div>
+              <JoinButton challengeId={challenge._id} joined={challenge.joined} />
+            </li>
+          ))}
+        </ul>
+      )}
 
-        <CreateDialog weekStart={weekStart} />
-      </CardContent>
-    </Card>
+      <CreateDialog weekStart={weekStart} />
+    </section>
   );
 }
 
@@ -117,9 +111,14 @@ export function JoinButton({
   const [pending, setPending] = useState(false);
 
   return (
+    // Not `default`: that variant's gradient and red glow are reserved for the
+    // one commit action of a screen, and /crew has none — two of them in one
+    // viewport made joining a défi look like validating a set. h-11 because
+    // size="sm" is 28px, under the touch target.
     <Button
-      variant={joined ? "outline" : "default"}
+      variant={joined ? "outline" : "secondary"}
       size="sm"
+      className="h-11"
       disabled={pending}
       onClick={async () => {
         setPending(true);
@@ -146,7 +145,9 @@ function CreateDialog({ weekStart }: { weekStart: string }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="w-full">
+        {/* h-11 like the other trailing outline buttons: the default h-9 is under
+            the 44px touch target on a phone. */}
+        <Button variant="outline" className="h-11 w-full">
           <PlusIcon aria-hidden />
           Nouveau défi
         </Button>
@@ -244,7 +245,7 @@ function CreateForm({ weekStart, onDone }: { weekStart: string; onDone: () => vo
             </SelectContent>
           </Select>
           {names?.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Aucun exercice logué par la crew. Fais une séance d&apos;abord, ou lance un défi sur
               le nombre de séances.
             </p>
@@ -253,8 +254,11 @@ function CreateForm({ weekStart, onDone }: { weekStart: string; onDone: () => vo
       ) : null}
 
       <DialogFooter>
+        {/* h-11 like every other button on this screen: the default h-8 is well
+            under the touch target, and this one is the commit action. */}
         <Button
           type="submit"
+          className="h-11"
           disabled={pending || !title.trim() || (needsExercise && !exerciseName)}
         >
           Lancer le défi

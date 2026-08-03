@@ -3,22 +3,22 @@
 import { useQuery } from "convex/react";
 import { TrophyIcon } from "lucide-react";
 import { useState } from "react";
-import { formatDay, fromDate } from "@/lib/dates";
+import { formatDay, formatShort, fromDate } from "@/lib/dates";
 import { PR_LABELS, TROPHY } from "@/lib/prs";
 import { formatNumber } from "@/lib/utils";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
-  Line,
-  LineChart,
+  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -26,13 +26,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "../../../convex/_generated/api";
 
 const RANGES = {
   "4s": { label: "4 semaines", days: 28 },
-  "3m": { label: "3 mois", days: 92 },
+  "12s": { label: "12 semaines", days: 84 },
   all: { label: "Tout", days: null },
 } as const;
 
@@ -40,6 +41,15 @@ type RangeKey = keyof typeof RANGES;
 
 /** `unknown` in: recharts hands its formatters a ReactNode, always a date string here. */
 const dayLabel = (date: unknown) => formatDay(String(date));
+
+/** Tonnes above 10 t, kilos below — "0,4 t" reads as nothing. */
+const tonnage = (kg: number) =>
+  kg >= 10000
+    ? { value: formatNumber(kg / 1000, 1), unit: "tonnes" }
+    : { value: formatNumber(kg), unit: "kg" };
+
+const kgTick = (v: number) =>
+  v >= 1000 ? `${formatNumber(v / 1000, v < 10000 ? 1 : 0)} t` : formatNumber(v);
 
 /**
  * Whichever of the three a scale actually reported. Every field is optional —
@@ -57,216 +67,403 @@ function measures(entry: { weightKg?: number; bodyFatPct?: number; muscleKg?: nu
 }
 
 export function Dashboard({ today }: { today: string }) {
-  const [range, setRange] = useState<RangeKey>("3m");
+  const [range, setRange] = useState<RangeKey>("12s");
   const [exercise, setExercise] = useState<string | null>(null);
 
-  const data = useQuery(api.progress.overview, {
-    from: fromDate(today, RANGES[range].days),
-    to: today,
-  });
+  const from = fromDate(today, RANGES[range].days);
+  const data = useQuery(api.progress.overview, { from, to: today });
 
   if (data === undefined) return <Skeleton className="m-4 h-64" />;
-  if (data === null) return <Empty>Profil en cours de création…</Empty>;
+  // The level-1 still has to exist on this branch — the visible heading below
+  // never renders. Same string and same markup as Today's null state.
+  if (data === null)
+    return (
+      <>
+        <h1 className="sr-only">Progrès</h1>
+        <p className="p-6 text-center text-muted-foreground">Profil en cours de création…</p>
+      </>
+    );
 
   const selected =
     data.exercises.find((item) => item.name === exercise) ?? data.exercises[0] ?? null;
 
+  // The standing records are all-time; the header says "sur la période", so the
+  // range has to actually filter them. "Tout" puts every one of them back.
+  // `overview` already keeps records and first attempts apart; both lists are
+  // all-time standing bests, so the range still has to filter them.
+  const prs = data.prs.filter((pr) => pr.date >= from);
+  const firsts = data.baselines.filter((pr) => pr.date >= from);
+  const hero = tonnage(data.totalVolume);
+
+  // Oldest first for a chart, and only rows where the scale reported a weight —
+  // a body-fat-only entry would draw a hole.
+  const bodyweight = [...data.weights]
+    .reverse()
+    .filter((entry): entry is typeof entry & { weightKg: number } => entry.weightKg !== undefined);
+
+  const hasCharts = data.sessions.length > 0 || bodyweight.length > 1;
+
   // No bottom padding below: /progres reserves --tab-bar for the tab bar.
   // ph-mask: weight, body fat and lean mass are masked in session replay.
   return (
-    <div className="ph-mask space-y-4 p-4">
-      <div>
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">Ma progression</h1>
-        <p className="text-sm text-muted-foreground">Les chiffres montent, ou pas. On verra.</p>
-      </div>
+    <div className="ph-mask flex flex-col gap-5 p-4">
+      <header className="flex flex-col gap-3">
+        <div>
+          <p className="eyebrow">Ma progression</p>
+          <h1 className="text-[clamp(1.4rem,6vw,1.9rem)] font-bold">
+            Les chiffres montent, ou pas.
+          </h1>
+        </div>
 
-      <Tabs value={range} onValueChange={(value) => setRange(value as RangeKey)}>
-        <TabsList className="w-full">
-          {Object.entries(RANGES).map(([key, { label }]) => (
-            <TabsTrigger key={key} value={key} className="flex-1">
-              {label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+        <Tabs value={range} onValueChange={(value) => setRange(value as RangeKey)}>
+          {/* Named: "4 semaines / 12 semaines / Tout" says nothing about what
+              it filters when it's read out on its own. Weeks on both windows,
+              same as /crew: the charts below bucket by week, so months would be
+              a second unit for the same thing. */}
+          <TabsList aria-label="Période" className="w-full">
+            {Object.entries(RANGES).map(([key, { label }]) => (
+              <TabsTrigger key={key} value={key} className="flex-1">
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </header>
 
-      <div className="grid grid-cols-3 gap-2 text-center">
-        <Stat label="Séances" value={data.sessions.length} />
-        <Stat label="Volume" value={Math.round(data.totalVolume / 1000)} unit="t" />
-        <Stat label="Semaines d'affilée" value={data.streak} />
-      </div>
+      {/* The screen's one slab: the period total is what the whole page is
+          about. */}
+      <section className="slab flex flex-wrap items-end gap-4">
+        <div>
+          <p className="eyebrow">Tonnage sur la période</p>
+          <div className="hero-num">
+            {hero.value}
+            <span className="unit">{hero.unit}</span>
+          </div>
+        </div>
+        {/* Two cells, not four: four under a numeral is the hero-metric template.
+            "Volume moyen / semaine" is gone because it's the mean of the bars
+            below, and on one week of data it printed the hero's own string; the
+            streak is Today's. */}
+        <div className="band ml-auto grid-cols-2">
+          <BandCell value={formatNumber(data.sessions.length)} label="Séances" />
+          <BandCell value={formatNumber(prs.length)} label="Records battus" />
+        </div>
+      </section>
 
-      {/* Only "nothing here" when there's genuinely nothing: an imported cardio
-          with no muscu session still renders its own card below. */}
-      {data.sessions.length === 0 ? (
-        data.cardio.length === 0 && data.weights.length === 0 ? (
-          <Empty>Rien sur cette période. Va soulever quelque chose.</Empty>
-        ) : null
-      ) : (
+      {hasCharts ? (
         <>
+          <Separator />
+
           {/* Charts pair up only at lg+: at md the column is still narrow enough
               that halving it would put every bar chart back into Scroller's
               horizontal scroll. */}
-          <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-            <Card>
-              <CardHeader>
-                <CardTitle>Volume par semaine</CardTitle>
-                <CardDescription>Kilos déplacés, séries validées uniquement</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Scroller count={data.weeks.length}>
-                  <BarChart data={data.weeks}>
-                    <Grid />
-                    <XAxis {...axis} dataKey="week" tickFormatter={dayLabel} />
-                    <YAxis {...axis} width={40} />
-                    <Tooltip
-                      {...tooltip}
-                      labelFormatter={(week) => `Semaine du ${dayLabel(week)}`}
-                    />
-                    <Bar
-                      dataKey="volume"
-                      name="kg"
-                      fill="var(--chart-1)"
-                      radius={[3, 3, 0, 0]}
-                      {...series}
-                    />
-                  </BarChart>
-                </Scroller>
-              </CardContent>
-            </Card>
+          <div className="flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-5">
+            {/* Two buckets minimum, same bar as the curves: one bucket draws a
+                single block filling the plot area, which is a rectangle and not a
+                chart. */}
+            {data.weeks.length >= 2 ? (
+              <>
+                <ChartSection
+                  title="Volume par semaine"
+                  hint="Kilos déplacés, séries validées uniquement"
+                  alt={`${data.weeks.length} semaines, de la plus ancienne à la plus récente : ${data.weeks
+                    .map((week) => `${dayLabel(week.week)} ${formatNumber(week.volume)} kg`)
+                    .join(", ")}`}
+                >
+                  <Scroller count={data.weeks.length}>
+                    <BarChart data={data.weeks}>
+                      <Grid />
+                      <XAxis
+                        {...axis}
+                        dataKey="week"
+                        tickFormatter={dayLabel}
+                        interval={thin(data.weeks.length, 6)}
+                      />
+                      <YAxis {...axis} width={40} tickCount={3} tickFormatter={kgTick} />
+                      <Tooltip
+                        {...tooltip}
+                        formatter={(value) => `${formatNumber(Number(value))} kg`}
+                        labelFormatter={(week) => `Semaine du ${dayLabel(week)}`}
+                      />
+                      <Bar
+                        dataKey="volume"
+                        name="Volume"
+                        fill="var(--chart-1)"
+                        radius={[3, 3, 0, 0]}
+                        {...bars}
+                      >
+                        {data.weeks.map((week, index) => (
+                          <Cell
+                            key={week.week}
+                            fillOpacity={index === data.weeks.length - 1 ? 0.4 : 1}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </Scroller>
+                </ChartSection>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Séances par semaine</CardTitle>
-                <CardDescription>La régularité, c&apos;est tout ce qui compte</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Scroller count={data.weeks.length} height="h-32">
-                  <BarChart data={data.weeks}>
-                    <Grid />
-                    <XAxis {...axis} dataKey="week" tickFormatter={dayLabel} />
-                    <YAxis {...axis} width={40} allowDecimals={false} />
-                    <Tooltip
-                      {...tooltip}
-                      labelFormatter={(week) => `Semaine du ${dayLabel(week)}`}
-                    />
-                    <Bar
-                      dataKey="sessions"
-                      name="séances"
-                      fill="var(--chart-2)"
-                      radius={[3, 3, 0, 0]}
-                      {...series}
-                    />
-                  </BarChart>
-                </Scroller>
-              </CardContent>
-            </Card>
+                <ChartSection
+                  title="Séances par semaine"
+                  hint="La régularité, c'est tout ce qui compte"
+                  alt={`${data.weeks.length} semaines, de la plus ancienne à la plus récente : ${data.weeks
+                    .map((week) => `${dayLabel(week.week)} ${week.sessions}`)
+                    .join(", ")}`}
+                >
+                  <Scroller count={data.weeks.length} height="h-32">
+                    <BarChart data={data.weeks}>
+                      <Grid />
+                      <XAxis
+                        {...axis}
+                        dataKey="week"
+                        tickFormatter={dayLabel}
+                        interval={thin(data.weeks.length, 6)}
+                      />
+                      <YAxis {...axis} width={40} tickCount={3} allowDecimals={false} />
+                      <Tooltip
+                        {...tooltip}
+                        formatter={(value) => `${value} séance${Number(value) > 1 ? "s" : ""}`}
+                        labelFormatter={(week) => `Semaine du ${dayLabel(week)}`}
+                      />
+                      <Bar
+                        dataKey="sessions"
+                        name="Séances"
+                        fill="var(--chart-2)"
+                        radius={[3, 3, 0, 0]}
+                        {...bars}
+                      >
+                        {data.weeks.map((week, index) => (
+                          <Cell
+                            key={week.week}
+                            fillOpacity={index === data.weeks.length - 1 ? 0.4 : 1}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </Scroller>
+                </ChartSection>
+              </>
+            ) : data.sessions.length > 0 ? (
+              <ChartSection title="Par semaine" hint="Volume et régularité, semaine par semaine">
+                <p className="py-6 text-sm text-muted-foreground">
+                  Pas encore assez de semaines pour tracer une courbe. Deux suffisent.
+                </p>
+              </ChartSection>
+            ) : null}
 
             {selected ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Par exercice</CardTitle>
-                  <CardDescription>Charge max, 1RM estimé et volume par séance</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <Select value={selected.name} onValueChange={setExercise}>
-                    <SelectTrigger className="h-12 w-full text-base sm:text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {data.exercises.map((item) => (
-                        <SelectItem key={item.name} value={item.name}>
-                          {item.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              <ChartSection
+                title="Par exercice"
+                hint="Charge max et 1RM estimé, séance par séance"
+                alt={`${selected.name}, une séance par point : ${selected.points
+                  .map((point) => `${dayLabel(point.date)} ${point.maxWeight} kg`)
+                  .join(", ")}`}
+              >
+                <Select value={selected.name} onValueChange={setExercise}>
+                  <SelectTrigger aria-label="Exercice" className="h-12 w-full text-base sm:text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {data.exercises.map((item) => (
+                      <SelectItem key={item.name} value={item.name}>
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
 
-                  <Scroller count={selected.points.length}>
-                    <LineChart data={selected.points}>
-                      <Grid />
-                      <XAxis {...axis} dataKey="date" tickFormatter={dayLabel} />
-                      <YAxis {...axis} yAxisId="kg" width={40} />
-                      <YAxis {...axis} yAxisId="vol" orientation="right" width={40} />
-                      <Tooltip {...tooltip} labelFormatter={dayLabel} />
-                      <Line
-                        yAxisId="kg"
-                        dataKey="maxWeight"
-                        name="charge (kg)"
-                        stroke="var(--chart-1)"
-                        strokeWidth={2}
-                        dot={{ r: 2 }}
-                        {...series}
-                      />
-                      <Line
-                        yAxisId="kg"
-                        dataKey="est1rm"
-                        name="1RM est. (kg)"
-                        stroke="var(--chart-2)"
-                        strokeWidth={2}
-                        strokeDasharray="4 3"
-                        dot={false}
-                        {...series}
-                      />
-                      <Line
-                        yAxisId="vol"
-                        dataKey="volume"
-                        name="volume (kg)"
-                        stroke="var(--chart-3)"
-                        strokeWidth={2}
-                        dot={false}
-                        {...series}
-                      />
-                    </LineChart>
-                  </Scroller>
-                  <p className="text-xs text-muted-foreground">
-                    Un point par séance : les semaines sans cet exercice n&apos;en ont pas.
+                {selected.points.length < 2 ? (
+                  <p className="py-6 text-sm text-muted-foreground">
+                    Pas encore assez de séances sur {selected.name} pour tracer une courbe. Deux
+                    suffisent.
                   </p>
-                </CardContent>
-              </Card>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-3.5 text-sm text-muted-foreground">
+                      <Key color="var(--chart-1)">Charge max (kg)</Key>
+                      <Key color="var(--chart-3)">1RM estimé (kg)</Key>
+                    </div>
+                    <Scroller count={selected.points.length}>
+                      <AreaChart data={selected.points}>
+                        <Grid />
+                        <XAxis
+                          {...axis}
+                          dataKey="date"
+                          tickFormatter={dayLabel}
+                          interval={thin(selected.points.length, 5)}
+                        />
+                        <YAxis {...axis} width={40} tickCount={3} domain={valueWindow} />
+                        <Tooltip
+                          {...tooltip}
+                          formatter={(value) => `${formatNumber(Number(value), 1)} kg`}
+                          labelFormatter={dayLabel}
+                        />
+                        <Area dataKey="maxWeight" name="Charge max" {...fill("var(--chart-1)")} />
+                        <Area dataKey="est1rm" name="1RM estimé" {...fill("var(--chart-3)")} />
+                      </AreaChart>
+                    </Scroller>
+                    <p className="text-sm text-muted-foreground">{delta(selected.points)}</p>
+                  </>
+                )}
+              </ChartSection>
+            ) : null}
+
+            {/* The ponytail note this replaces said a trend chart would be a dot:
+                true with one weigh-in, which is why it waits for two. From two up
+                the line is the whole point — the list of numbers it used to be
+                never showed whether they were going anywhere. */}
+            {bodyweight.length > 1 ? (
+              <ChartSection
+                title="Poids de corps"
+                hint={`Relevé sur la balance, jamais lissé ni corrigé. Dernière mesure : ${
+                  measures(data.weights[0]) || "rien de lisible"
+                }`}
+                alt={`${bodyweight.length} pesées, de la plus ancienne à la plus récente : ${bodyweight
+                  .map((entry) => `${dayLabel(entry.date)} ${entry.weightKg} kg`)
+                  .join(", ")}`}
+              >
+                <Scroller count={bodyweight.length}>
+                  <AreaChart data={bodyweight}>
+                    <Grid />
+                    <XAxis
+                      {...axis}
+                      dataKey="date"
+                      tickFormatter={dayLabel}
+                      interval={thin(bodyweight.length, 5)}
+                    />
+                    <YAxis {...axis} width={40} tickCount={3} domain={valueWindow} />
+                    <Tooltip
+                      {...tooltip}
+                      formatter={(value) => `${formatNumber(Number(value), 1)} kg`}
+                      labelFormatter={dayLabel}
+                    />
+                    <Area dataKey="weightKg" name="Poids" {...fill("var(--chart-1)")} />
+                  </AreaChart>
+                </Scroller>
+                {/* Rule 5: no colour on this delta. Down is good or bad depending
+                    on a goal the app was never told. */}
+                <p className="text-sm text-muted-foreground">
+                  {signed(bodyweight.at(-1)!.weightKg - bodyweight[0].weightKg)} kg sur la période,
+                  en {bodyweight.length} pesées.
+                </p>
+              </ChartSection>
+            ) : data.weights.length > 0 ? (
+              <ChartSection
+                title="Poids de corps"
+                hint={`Dernière mesure : ${measures(data.weights[0]) || "rien de lisible"}`}
+              >
+                <p className="text-sm text-muted-foreground">
+                  Pas encore assez de pesées pour tracer une courbe. Deux suffisent.
+                </p>
+              </ChartSection>
             ) : null}
           </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Dernières séances</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="divide-y text-sm">
-                {[...data.sessions]
-                  .reverse()
-                  .slice(0, 8)
-                  .map((session) => (
-                    <li key={session.date} className="flex items-center gap-2 py-2">
-                      <span className="tabular-nums">{dayLabel(session.date)}</span>
-                      {session.pr ? <TrophyIcon className={TROPHY} /> : null}
-                      <span className="ml-auto text-muted-foreground tabular-nums">
-                        {session.sets} séries · {formatNumber(session.volume)} kg
-                      </span>
-                    </li>
-                  ))}
-              </ul>
-            </CardContent>
-          </Card>
         </>
-      )}
+      ) : null}
 
-      {/* Imported cardio and weigh-ins. Their own cards, not merged into
-          "Dernières séances": they have no sets and no volume, so they'd read
-          as broken muscu rows. Hidden entirely when there's nothing. */}
-      {data.cardio.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Cardio</CardTitle>
-            <CardDescription>Importé de tes captures</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y text-sm">
+      <Separator />
+
+      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-5">
+        <section className="flex flex-col gap-2">
+          <h2 className="text-[1.05rem] font-bold">Records sur la période</h2>
+          <ul className="divide-y">
+            {prs.length === 0 ? (
+              <li className="flex min-h-11 items-center py-2.5 text-sm text-muted-foreground">
+                Aucun record sur cette période. Ça arrive.
+              </li>
+            ) : (
+              prs.map((pr) => (
+                <li
+                  key={`${pr.exerciseName}|${pr.type}`}
+                  className="flex min-h-11 items-center gap-3 py-2.5 text-sm"
+                >
+                  <TrophyIcon className={TROPHY} />
+                  <span className="min-w-0 flex-1 truncate">{pr.exerciseName}</span>
+                  <Badge variant="secondary" className="shrink-0">
+                    {PR_LABELS[pr.type].text}
+                  </Badge>
+                  {/* min-w, so the badge column stops shifting row to row as the
+                      value goes from "8 kg" to "3 600 kg". */}
+                  <span className="min-w-20 shrink-0 text-right font-semibold tabular-nums">
+                    {formatNumber(pr.value)} {PR_LABELS[pr.type].unit}
+                  </span>
+                </li>
+              ))
+            )}
+          </ul>
+        </section>
+
+        {/* Its own section and no trophy: a first attempt beat nothing, it's the
+            number the next one has to pass. */}
+        {firsts.length > 0 ? (
+          <section className="flex flex-col gap-2">
+            <h2 className="text-[1.05rem] font-bold">Premières références</h2>
+            <ul className="divide-y">
+              {firsts.map((pr) => (
+                <li
+                  key={`${pr.exerciseName}|${pr.type}`}
+                  className="flex min-h-11 items-center gap-3 py-2.5 text-sm"
+                >
+                  <span className="min-w-0 flex-1 truncate">{pr.exerciseName}</span>
+                  <Badge variant="secondary" className="shrink-0">
+                    {PR_LABELS[pr.type].text}
+                  </Badge>
+                  <span className="min-w-20 shrink-0 text-right font-semibold tabular-nums">
+                    {formatNumber(pr.value)} {PR_LABELS[pr.type].unit}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {/* ponytail: the eight most recent, no pagination. The charts above are
+            where a long history is supposed to be read. */}
+        <section className="flex flex-col gap-2">
+          <h2 className="text-[1.05rem] font-bold">Déjà fait</h2>
+          <ul className="divide-y">
+            {data.sessions.length === 0 ? (
+              <li className="flex min-h-11 items-center py-2.5 text-sm text-muted-foreground">
+                Rien sur cette période. Va soulever quelque chose.
+              </li>
+            ) : (
+              [...data.sessions]
+                .reverse()
+                .slice(0, 8)
+                .map((session) => (
+                  <li
+                    key={session.date}
+                    className="flex min-h-11 items-center gap-3 py-2.5 text-sm"
+                  >
+                    <span className="min-w-0 flex-1 truncate tabular-nums">
+                      {formatShort(session.date)}
+                    </span>
+                    {session.pr ? <TrophyIcon className={TROPHY} /> : null}
+                    <span className="shrink-0 text-muted-foreground tabular-nums">
+                      {session.sets} série{session.sets > 1 ? "s" : ""} ·{" "}
+                      {formatNumber(session.volume)} kg
+                    </span>
+                  </li>
+                ))
+            )}
+          </ul>
+        </section>
+
+        {/* Imported cardio, its own section: no sets and no volume, so these rows
+            would read as broken muscu rows next to "Déjà fait". Hidden entirely
+            when there's nothing — a permanent 0 tells you nothing. */}
+        {data.cardio.length > 0 ? (
+          <section className="flex flex-col gap-2">
+            <h2 className="text-[1.05rem] font-bold">Cardio</h2>
+            <p className="text-sm text-muted-foreground">Importé de tes captures</p>
+            <ul className="divide-y">
               {data.cardio.map((entry) => (
-                <li key={entry._id} className="flex items-baseline gap-2 py-2">
-                  <span className="tabular-nums text-muted-foreground">{dayLabel(entry.date)}</span>
-                  <span className="truncate">{entry.kind}</span>
-                  <span className="ml-auto shrink-0 text-muted-foreground tabular-nums">
+                <li key={entry._id} className="flex min-h-11 items-center gap-3 py-2.5 text-sm">
+                  <span className="shrink-0 tabular-nums text-muted-foreground">
+                    {dayLabel(entry.date)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{entry.kind}</span>
+                  <span className="shrink-0 text-muted-foreground tabular-nums">
                     {[
                       entry.durationMin && `${entry.durationMin} min`,
                       entry.distanceKm && `${entry.distanceKm} km`,
@@ -279,67 +476,51 @@ export function Dashboard({ today }: { today: string }) {
                 </li>
               ))}
             </ul>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {data.weights.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Poids &amp; composition</CardTitle>
-            <CardDescription>
-              {/* ponytail: latest values + list. A weight/masse grasse trend
-                  chart once there are enough weigh-ins for a line to mean
-                  anything — with one row it would be a dot. */}
-              Dernière mesure : {measures(data.weights[0]) || "rien de lisible"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y text-sm">
-              {data.weights.map((entry) => (
-                <li key={entry._id} className="flex items-baseline gap-2 py-2">
-                  <span className="tabular-nums text-muted-foreground">{dayLabel(entry.date)}</span>
-                  <span className="ml-auto font-heading font-semibold tabular-nums">
-                    {measures(entry)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Records</CardTitle>
-          <CardDescription>Tous temps, toutes périodes confondues</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {data.prs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Aucun record pour l&apos;instant. Termine une séance, il en tombera.
-            </p>
-          ) : (
-            <ul className="divide-y text-sm">
-              {data.prs.map((pr) => (
-                <li key={`${pr.exerciseName}|${pr.type}`} className="flex items-center gap-2 py-2">
-                  <TrophyIcon className={TROPHY} />
-                  <span className="truncate">{pr.exerciseName}</span>
-                  <Badge variant="secondary" className="shrink-0">
-                    {PR_LABELS[pr.type].text}
-                  </Badge>
-                  <span className="ml-auto shrink-0 font-heading font-semibold tabular-nums">
-                    {pr.value} {PR_LABELS[pr.type].unit}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+          </section>
+        ) : null}
+      </div>
     </div>
   );
 }
+
+/** Heading, hint, and the text equivalent screen readers get instead of the SVG. */
+function ChartSection({
+  title,
+  hint,
+  alt,
+  children,
+}: {
+  title: string;
+  hint: string;
+  alt?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-2.5">
+      <div>
+        <h2 className="text-[1.05rem] font-bold">{title}</h2>
+        <p className="text-sm text-muted-foreground">{hint}</p>
+      </div>
+      {alt ? (
+        <p className="sr-only">
+          {title} — {alt}.
+        </p>
+      ) : null}
+      {children}
+    </section>
+  );
+}
+
+const Key = ({ color, children }: { color: string; children: React.ReactNode }) => (
+  <span>
+    <span
+      aria-hidden
+      className="mr-1.5 inline-block size-2.5 rounded-[2px] align-[-1px]"
+      style={{ background: color }}
+    />
+    {children}
+  </span>
+);
 
 /** Charts get a minimum width per data point and scroll sideways on a phone. */
 function Scroller({
@@ -362,6 +543,31 @@ function Scroller({
   );
 }
 
+/**
+ * THE POINT OF THIS SCREEN. Plotted from zero, a bench going 72,5 → 82,5 kg is a
+ * flat line and the progress is invisible. The grid spans the real value window
+ * instead, padded either side so the top point isn't glued to the frame.
+ */
+const valueWindow = ([min, max]: readonly [number, number]): [number, number] => [
+  min * 0.9,
+  max * 1.05,
+];
+
+const signed = (kg: number) => `${kg > 0 ? "+" : ""}${formatNumber(kg, 1)}`;
+
+function delta(points: { maxWeight: number }[]) {
+  const kg = points.at(-1)!.maxWeight - points[0].maxWeight;
+  if (kg > 0) return `+${formatNumber(kg, 1)} kg sur la période, en ${points.length} séances.`;
+  if (kg === 0) return "Charge identique sur la période. Le volume, lui, a peut-être bougé.";
+  return `${formatNumber(kg, 1)} kg sur la période. Un deload, une blessure, ou juste une mauvaise passe.`;
+}
+
+/**
+ * Render one tick in every `ceil(count / target)`, as a recharts skip count. Dense
+ * ranges otherwise overprint their own date labels.
+ */
+const thin = (count: number, target: number) => Math.ceil(count / target) - 1;
+
 const axis = {
   stroke: "var(--muted-foreground)",
   fontSize: 11,
@@ -374,7 +580,9 @@ const tooltip = {
     background: "var(--popover)",
     border: "1px solid var(--border)",
     borderRadius: 8,
-    fontSize: 12,
+    // The scale's body step, not one under it: a tooltip is a readout, and 12
+    // was a size nobody could tell from the 11px axis ticks.
+    fontSize: 14,
     fontVariantNumeric: "tabular-nums",
   },
   labelStyle: { color: "var(--muted-foreground)" },
@@ -387,20 +595,29 @@ const tooltip = {
  */
 const series = { isAnimationActive: false } as const;
 
+/** A zero week keeps a 2px stub: visible as a zero, not as a gap. The last
+ *  bucket is dimmed by its Cell — a Monday shouldn't read as a collapse. */
+const bars = { ...series, minPointSize: 2 } as const;
+
+/** Line plus filled area, so the shape reads before the numbers do. */
+const fill = (color: string) =>
+  ({
+    ...series,
+    type: "linear",
+    stroke: color,
+    strokeWidth: 2,
+    fill: color,
+    fillOpacity: 0.18,
+    dot: { r: 3, fill: "var(--background)", stroke: color, strokeWidth: 2 },
+  }) as const;
+
 const Grid = () => <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />;
 
-function Stat({ label, value, unit }: { label: string; value: number; unit?: string }) {
+function BandCell({ value, label }: { value: string; label: string }) {
   return (
-    <div className="rounded-lg border p-3">
-      <div className="font-heading text-xl font-semibold tabular-nums">
-        {value}
-        {unit ? <span className="text-sm text-muted-foreground"> {unit}</span> : null}
-      </div>
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div>
+      <div className="band-value">{value}</div>
+      <div className="band-label">{label}</div>
     </div>
   );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="p-6 text-center text-muted-foreground">{children}</p>;
 }

@@ -24,8 +24,11 @@ function Tabs({
   )
 }
 
+// h-11, not shadcn's h-8: horizontally this is the range filter on /progres and
+// /crew, the most-tapped control on both, and 32px is under the touch floor.
+// Vertical lists keep h-fit, so this only moves the pill row.
 const tabsListVariants = cva(
-  "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg p-[3px] text-muted-foreground group-data-horizontal/tabs:h-8 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
+  "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg p-[3px] text-muted-foreground group-data-horizontal/tabs:h-11 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
   {
     variants: {
       variant: {

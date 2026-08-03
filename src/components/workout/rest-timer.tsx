@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { PauseIcon, PlayIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export const REST_OPTIONS = [30, 60, 90, 120, 180];
 
@@ -84,6 +85,33 @@ export function useRestTimer(): Timer {
   return { remaining, total, running, endAt, start, toggle, stop };
 }
 
+/**
+ * End of rest had no visual cue at all, only a buzz: the bar's mount condition
+ * goes false on the same frame `remaining` hits 0, so the "Repos terminé, go"
+ * copy below never got a chance to render. Keeps it up 1.5 s past zero, then
+ * lets the CSS fade play out before unmounting.
+ *
+ * Skipping the rest gets no tail: `stop()` zeroes `endAt`, and dismissing
+ * something isn't an event you want to sit and watch.
+ */
+export function useRestOutro({ remaining, endAt }: Timer) {
+  const over = remaining === 0 && endAt !== 0;
+  // The deadline whose tail has already played, rather than a shown/hidden flag:
+  // a flag would need a setState in the effect body on the way in, which is the
+  // cascading render the compiler rejects.
+  const [played, setPlayed] = useState(0);
+
+  useEffect(() => {
+    if (!over) return;
+    // 1500 hold, then the 140ms fade the caller runs on an animation-delay.
+    const timeout = setTimeout(() => setPlayed(endAt), 1640);
+    return () => clearTimeout(timeout);
+  }, [over, endAt]);
+
+  const tail = over && played !== endAt;
+  return { show: remaining > 0 || tail, tail };
+}
+
 // A glyph that swaps under the user's thumb has ~100-160ms before the control
 // stops feeling connected to the tap. No blur: filter animation isn't
 // compositor-cheap, and at this size it bought nothing.
@@ -119,7 +147,9 @@ function DrainBar({ total, endAt, running }: { total: number; endAt: number; run
     >
       {endAt !== 0 && (
         <div
-          className="size-full bg-primary"
+          // accent-text, not primary: the dock's commit button is the screen's
+          // one saturated red, and it sits directly under this bar.
+          className="size-full bg-accent-text"
           style={{
             animation: `rest-drain ${total}s linear forwards`,
             animationDelay: `-${elapsed}s`,
@@ -144,9 +174,10 @@ function ToggleIcon({ running }: { running: boolean }) {
         <motion.span
           key={running ? "pause" : "play"}
           className="absolute grid place-items-center"
-          initial={{ opacity: 0, scale: 0.25 }}
+          // 0.9, not 0.25: nothing in the real world appears out of nothing.
+          initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.25 }}
+          exit={{ opacity: 0, scale: 0.9 }}
           transition={reduce ? { duration: 0 } : SPRING}
         >
           {running ? <PauseIcon /> : <PlayIcon />}
@@ -156,25 +187,33 @@ function ToggleIcon({ running }: { running: boolean }) {
   );
 }
 
-export function RestTimerBar({ timer }: { timer: Timer }) {
+export function RestTimerBar({ timer, className }: { timer: Timer; className?: string }) {
   const { remaining, total, running, endAt, toggle, stop } = timer;
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
 
   return (
-    <div className="space-y-2">
+    <div className={cn("space-y-2", className)}>
       <div className="flex items-center gap-3">
-        <span className="font-display text-3xl tabular-nums" aria-live="off">
+        {/* Body face, not the display face: Big Shoulders has no tabular figures,
+            so a clock ticking through a "1" would shove the pause/skip buttons
+            sideways under a thumb once a second. */}
+        <span className="text-3xl font-semibold tabular-nums" aria-live="off">
           {minutes}:{String(seconds).padStart(2, "0")}
         </span>
-        <span className="text-sm text-muted-foreground">
+        {/* The only announcement of rest ending: the digits are aria-live="off"
+            (a per-second count is noise) and the buzz is silent to a reader. */}
+        <span className="text-sm text-muted-foreground" aria-live="polite">
           {remaining === 0 ? "Repos terminé, go" : "Repos"}
         </span>
         <div className="ml-auto flex gap-2">
           <Button
             variant="outline"
-            size="icon-lg"
-            className="size-12 transition-transform active:scale-[0.96]"
+            className="size-12 active:scale-[0.96]"
+            // The bar now outlives the countdown by 1.5 s, and `toggle` is a
+            // no-op at zero: a live-looking button that does nothing is worse
+            // than a dimmed one.
+            disabled={remaining === 0}
             onClick={toggle}
             aria-label={running ? "Mettre le repos en pause" : "Reprendre le repos"}
           >
@@ -182,8 +221,7 @@ export function RestTimerBar({ timer }: { timer: Timer }) {
           </Button>
           <Button
             variant="outline"
-            size="icon-lg"
-            className="size-12 transition-transform active:scale-[0.96]"
+            className="size-12 active:scale-[0.96]"
             onClick={stop}
             aria-label="Passer le repos"
           >

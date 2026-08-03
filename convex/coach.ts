@@ -596,7 +596,12 @@ export const listMessages = query({
     await authorize(ctx, args.threadId, user._id);
     const paginated = await listUIMessages(ctx, components.agent, args);
     const streams = await syncStreams(ctx, components.agent, args);
-    return { ...paginated, streams };
+    // Machine-generated turns are persisted as user messages; without this they
+    // render as the user's own bubbles (see `KICKOFF`).
+    const page = paginated.page.filter(
+      (message) => !(message.role === "user" && isSentinel(message.text)),
+    );
+    return { ...paginated, page, streams };
   },
 });
 
@@ -621,7 +626,7 @@ export const send = action({
         messages: [
           {
             role: "user" as const,
-            content: `(captures jointes à ce message, à lire avec extract_screenshot : ${args.storageIds.join(", ")})`,
+            content: `${ATTACHMENTS}, à lire avec extract_screenshot : ${args.storageIds.join(", ")})`,
           },
         ],
       }),
@@ -631,14 +636,27 @@ export const send = action({
 });
 
 /**
- * The coach speaks first. Passed as `messages` rather than `prompt` so the
- * kickoff isn't saved — the user sees only the reply.
+ * The two machine-written user turns: the coach's kickoff, and the marker that
+ * tells it which captures are attached. Both ARE saved — the component treats
+ * the last `messages` entry as the prompt, and `storageOptions.saveMessages:
+ * "none"` would drop the reply with it. `listMessages` hides them instead, which
+ * also cleans the threads that already have the rows. Hiding is display-only:
+ * later turns still replay them to the model, which is why the marker exists.
  */
+export const KICKOFF = "(le user vient d'ouvrir la conversation)";
+/** Prefix, not the whole string: the storage ids are appended to it in `send`. */
+const ATTACHMENTS = "(captures jointes à ce message";
+
+function isSentinel(text: string) {
+  const trimmed = text.trim();
+  return trimmed === KICKOFF || trimmed.startsWith(ATTACHMENTS);
+}
+
 export const greet = action({
   args: { threadId: v.string(), today: v.string() },
   handler: async (ctx, args) => {
     await stream(ctx, args.threadId, args.today, {
-      messages: [{ role: "user", content: "(le user vient d'ouvrir la conversation)" }],
+      messages: [{ role: "user", content: KICKOFF }],
     });
     return null;
   },
