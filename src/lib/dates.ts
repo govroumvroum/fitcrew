@@ -39,6 +39,28 @@ export const formatDay = (date: string) => day.format(parse(date));
 /** "mardi 28 juillet" — for headings. */
 export const formatFull = (date: string) => full.format(parse(date));
 
+/**
+ * `formatFull` for a date we did NOT write: falls back to the raw string instead
+ * of throwing.
+ *
+ * Every date in the schema comes from `localDate()` and is trustworthy, so
+ * `formatFull` above is right to assume it. A date inside an LLM tool call is
+ * not: `Intl.format` THROWS `RangeError: Invalid time value` on an unparseable
+ * one, and a throw inside a card takes down the whole chat route — it failed a
+ * production build before this existed.
+ *
+ * The shape test alone isn't enough, which was the actual bug: "2026-13-40"
+ * matches `\d{4}-\d{2}-\d{2}` and still has no 13th month. So parse it, and
+ * round-trip it back to a string — that rejects both a NaN date and any engine
+ * lenient enough to roll "2026-02-31" over into March.
+ */
+export function formatLoose(date: string) {
+  const parsed = parse(date);
+  if (Number.isNaN(parsed.getTime())) return date;
+  if (parsed.toISOString().slice(0, 10) !== date) return date;
+  return full.format(parsed);
+}
+
 const short = new Intl.DateTimeFormat("fr-FR", {
   weekday: "short",
   day: "numeric",

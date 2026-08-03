@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery } from "./_generated/server";
+import { aiFeature } from "./schema";
 
 // ---------------------------------------------------------------------------
 // Pure logic. See aiUsage.check.ts.
@@ -55,12 +56,7 @@ export function costUsdFrom(providerMetadata: unknown): number | undefined {
 export const record = internalMutation({
   args: {
     userId: v.optional(v.id("users")),
-    feature: v.union(
-      v.literal("coach"),
-      v.literal("screenshot"),
-      v.literal("demos"),
-      v.literal("challenge"),
-    ),
+    feature: aiFeature,
     model: v.string(),
     inputTokens: v.number(),
     outputTokens: v.number(),

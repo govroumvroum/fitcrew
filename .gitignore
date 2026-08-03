@@ -52,3 +52,6 @@ next-env.d.ts
 # commit and `convex/_generated/api.d.ts` must not reference it either, or the
 # build fails wherever this file is absent.
 /convex/seed.ts
+
+# Local screenshots taken while verifying a change.
+.shots/

@@ -8,6 +8,7 @@ import {
   HouseIcon,
   MessageCircleIcon,
   TrophyIcon,
+  UtensilsCrossedIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -20,6 +21,7 @@ const TABS = [
   { href: "/seance", label: "Séance", Icon: DumbbellIcon },
   { href: "/programme", label: "Programme", Icon: ClipboardListIcon },
   { href: "/coach", label: "Coach", Icon: MessageCircleIcon },
+  { href: "/nutrition", label: "Nutrition", Icon: UtensilsCrossedIcon },
   { href: "/progres", label: "Progrès", Icon: ChartLineIcon },
   { href: "/crew", label: "Crew", Icon: TrophyIcon },
 ];
