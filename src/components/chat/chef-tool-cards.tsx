@@ -27,7 +27,7 @@ import type {
 import type { FoodFact } from "../../../convex/foodFacts";
 import type { Macros } from "../../../convex/nutrition";
 import { Chips, Estimated, Field, Header, Surface } from "@/components/chat/tool-cards";
-import { SLOT_LABELS, macroLine } from "@/components/nutrition/macros";
+import { SLOT_LABELS, macroLine, macrosOnly } from "@/components/nutrition/macros";
 import { formatLoose } from "@/lib/dates";
 import { formatNumber } from "@/lib/utils";
 
@@ -96,19 +96,35 @@ const ACTIVITY: Record<NutritionProfileInput["activityLevel"], string> = {
 
 const icon = (Icon: typeof CheckIcon) => <Icon className="size-4 shrink-0 text-muted-foreground" />;
 
-/** One planned meal, stacked rather than in columns — 390 px has no room for both
- *  a dish name and four figures on the same line. */
+/**
+ * One planned meal, stacked rather than in columns — 390 px has no room for both
+ * a dish name and four figures on the same line.
+ *
+ * Separated by a rule rather than zebra-striped. `odd:bg-muted/40` down seven
+ * meals was a lot of alternating fill for no information: the stripe told you
+ * nothing the gap already told you, and it fought the figures for attention.
+ *
+ * The calorie figure is the loud element. It used to sit at 11px muted alongside
+ * the macros while the dish name took the emphasis — but the name is a label you
+ * read once, and the number is what the card exists to tell you.
+ */
 function MealBlock({ meal }: { meal: Meal }) {
   return (
-    <li className="space-y-0.5 rounded-md px-2 py-1.5 odd:bg-muted/40">
+    <li className="space-y-1 border-b px-1 py-2.5 last:border-b-0">
       <div className="flex items-baseline gap-2">
         <span className="eyebrow min-w-0 flex-1">{SLOT_LABELS[meal.slot]}</span>
         <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
           {meal.prepMinutes} min
         </span>
       </div>
-      <p className="text-sm">{meal.name}</p>
-      <p className="text-[11px] text-muted-foreground tabular-nums">≈ {macroLine(meal.macros)}</p>
+      <div className="flex items-baseline gap-2">
+        <p className="min-w-0 flex-1 text-sm">{meal.name}</p>
+        <p className="shrink-0 text-sm font-semibold tabular-nums">
+          {formatNumber(meal.macros.calories)}
+          <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">kcal</span>
+        </p>
+      </div>
+      <p className="text-[11px] text-muted-foreground tabular-nums">{macrosOnly(meal.macros)}</p>
       {/* ponytail: ingredient names, no quantities, and no steps. The whole recipe
           for 21 meals is a wall on a phone; the Chef narrates the day and
           /nutrition shows today's meals in full. */}
@@ -302,7 +318,7 @@ export function ShoppingListCard({
         {output.map((line) => (
           <li
             key={line.name}
-            className="flex items-baseline gap-2 rounded-md px-2 py-1.5 odd:bg-muted/40"
+            className="flex items-baseline gap-2 border-b px-1 py-2 last:border-b-0"
           >
             <span className="min-w-0 flex-1 text-sm">{line.name}</span>
             <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
@@ -378,7 +394,7 @@ export function InventoryCard({
         {input.items.map((item) => (
           <li
             key={item.name}
-            className="flex items-baseline gap-2 rounded-md px-2 py-1.5 odd:bg-muted/40"
+            className="flex items-baseline gap-2 border-b px-1 py-2 last:border-b-0"
           >
             <span className="min-w-0 flex-1 text-sm">{item.name}</span>
             {item.quantity ? (
@@ -455,7 +471,7 @@ export function LookupFoodCard({ output, isNew }: { output: LookupFoodOutput; is
       ) : (
         <ul className="space-y-1">
           {results.map((fact) => (
-            <li key={fact.code} className="space-y-0.5 rounded-md px-2 py-1.5 odd:bg-muted/40">
+            <li key={fact.code} className="space-y-0.5 border-b px-1 py-2 last:border-b-0">
               <p className="text-sm">
                 {fact.name}
                 {fact.brand ? <span className="text-muted-foreground"> — {fact.brand}</span> : null}

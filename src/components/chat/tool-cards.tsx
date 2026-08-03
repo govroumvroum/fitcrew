@@ -65,7 +65,12 @@ export function Surface({ isNew, children }: { isNew?: boolean; children: React.
   return (
     <div
       className={cn(
-        "w-full space-y-2 rounded-xl border bg-card p-3",
+        "w-full space-y-2.5 rounded-xl border bg-card p-3",
+        // A 1px inset highlight on the top edge only. --card sits barely above
+        // --background, so a flat border left every card looking like a faint
+        // rectangle; this reads as an edge catching light from above and gives the
+        // card a physical top without touching the palette.
+        "shadow-[inset_0_1px_0_oklch(1_0_0/0.05)]",
         isNew &&
           "duration-300 ease-[cubic-bezier(0.2,0,0,1)] animate-in fade-in slide-in-from-bottom-1 motion-reduce:animate-none",
       )}
@@ -85,12 +90,22 @@ export function Header({
   aside?: string;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      {icon}
+    // The rule underneath is what makes this read as a header rather than as the
+    // card's first row — every card used to open with three lines of the same
+    // weight and you had to read them to find out which was the title.
+    <div className="flex items-center gap-2.5 border-b pb-2.5">
+      {/* The icon gets a coin rather than floating loose at 16px: it anchors the
+          left edge and gives the row a height the title alone didn't have.
+          rounded-md against the card's rounded-xl minus p-3 — concentric. */}
+      {icon ? (
+        <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/60 text-muted-foreground">
+          {icon}
+        </span>
+      ) : null}
       {/* min-w-0 flex-1 on the title, shrink-0 on the badge: a long title (a meal
           name, an exercise name) otherwise pushes the badge off the card instead
           of truncating itself. */}
-      <span className="min-w-0 flex-1 font-heading text-sm font-semibold tracking-[-0.01em]">
+      <span className="min-w-0 flex-1 font-heading text-[15px] leading-tight font-semibold tracking-[-0.01em]">
         {title}
       </span>
       {aside && (
@@ -105,9 +120,9 @@ export function Header({
 /** One exercise line: name left, prescription right, both scannable at a glance. */
 function ExerciseRow({ exercise }: { exercise: Exercise }) {
   return (
-    <li className="flex items-baseline gap-2 rounded-md px-2 py-1.5 odd:bg-muted/40">
+    <li className="flex items-baseline gap-2 border-b px-1 py-2 last:border-b-0">
       <span className="min-w-0 flex-1 text-sm">{exercise.name}</span>
-      <span className="shrink-0 text-sm tabular-nums">
+      <span className="shrink-0 text-sm font-semibold tabular-nums">
         {exercise.sets}×{exercise.reps}
       </span>
       <span className="w-14 shrink-0 text-right text-sm text-muted-foreground tabular-nums">
@@ -196,11 +211,13 @@ export function Field({
   numeric?: boolean;
 }) {
   return (
-    <div className="rounded-md bg-muted/40 px-2 py-1.5">
+    <div className="rounded-md bg-muted/40 px-2.5 py-2">
       {/* .eyebrow: "Niveau", "Ton", "Séances" are micro-labels, which is exactly
           what the class is for — these were the last hand-rolled 12px in /coach. */}
       <dt className="eyebrow">{label}</dt>
-      <dd className={numeric ? "tabular-nums" : undefined}>{value}</dd>
+      {/* The value is the answer, the label is only how to read it: without the
+          weight bump both sat at the same size and the eye had nowhere to land. */}
+      <dd className={cn("font-medium", numeric && "tabular-nums")}>{value}</dd>
     </div>
   );
 }
@@ -303,7 +320,7 @@ export function LoggedCard({
         {input.exercises.map((exercise) => (
           <li
             key={exercise.name}
-            className="flex items-baseline gap-2 rounded-md px-2 py-1.5 odd:bg-muted/40"
+            className="flex items-baseline gap-2 border-b px-1 py-2 last:border-b-0"
           >
             <span className="min-w-0 flex-1 text-sm">{exercise.name}</span>
             <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
@@ -343,7 +360,7 @@ export function SourcesCard({ output, isNew }: { output: SearchOutput; isNew?: b
       />
       <ul>
         {output.results.map((result) => (
-          <li key={result.url} className="rounded-md px-2 py-1.5 odd:bg-muted/40">
+          <li key={result.url} className="border-b px-1 py-2 last:border-b-0">
             <a
               href={result.url}
               target="_blank"

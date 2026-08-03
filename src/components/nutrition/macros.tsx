@@ -44,13 +44,22 @@ export function remaining(consumed: number, target: number): number | null {
 }
 
 /** "520 kcal · P 32 g · G 60 g · L 12 g" — one meal or one entry, on one line. */
-export function macroLine(m: Macros): string {
+/**
+ * The three macros without the energy figure, for callers that already show the
+ * calories on their own (a card where the kcal is the headline number). Split out
+ * rather than given a `calories: false` flag: a boolean parameter at a call site
+ * reads as a mystery, `macrosOnly` doesn't.
+ */
+export function macrosOnly(m: Macros): string {
   return [
-    `${formatNumber(m.calories)} kcal`,
     `P ${formatNumber(m.protein)} g`,
     `G ${formatNumber(m.carbs)} g`,
     `L ${formatNumber(m.fat)} g`,
   ].join(" · ");
+}
+
+export function macroLine(m: Macros): string {
+  return `${formatNumber(m.calories)} kcal · ${macrosOnly(m)}`;
 }
 
 /**

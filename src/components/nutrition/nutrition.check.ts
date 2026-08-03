@@ -2,7 +2,7 @@
  *  Run: `bun src/components/nutrition/nutrition.check.ts` */
 import assert from "node:assert/strict";
 import type { MealSlot } from "../../../convex/nutrition";
-import { groupBySlot, macroLine, parseNum, pct, remaining } from "./macros";
+import { groupBySlot, macroLine, parseNum, pct, remaining, macrosOnly } from "./macros";
 
 // --- bar percentage ----------------------------------------------------------
 assert.equal(pct(0, 2000), 0);
@@ -74,3 +74,15 @@ assert.equal(parseNum("beaucoup"), 0);
 assert.equal(parseNum("-3"), 0);
 
 console.log("src/components/nutrition ok");
+
+// `macroLine` composes `macrosOnly`, so a card printing its own kcal headline and
+// then `macrosOnly` underneath can't end up showing the energy figure twice.
+assert.equal(
+  macrosOnly({ calories: 570, protein: 34, carbs: 82, fat: 13 }),
+  "P 34 g · G 82 g · L 13 g",
+);
+assert.equal(
+  macroLine({ calories: 570, protein: 34, carbs: 82, fat: 13 }),
+  "570 kcal · P 34 g · G 82 g · L 13 g",
+);
+assert.ok(!macrosOnly({ calories: 570, protein: 34, carbs: 82, fat: 13 }).includes("kcal"));
