@@ -51,7 +51,7 @@ Reference in the body:
 <img src="https://raw.githubusercontent.com/govroumvroum/fitcrew/pr-media/<branch-slug>/shot.png" width="320" />
 ```
 
-`width="320"` — raw 390px-wide images at full size make the PR body unreadable.
+`width="320"` — raw 780px-wide images at full size make the PR body unreadable.
 
 ## 3. Body
 
