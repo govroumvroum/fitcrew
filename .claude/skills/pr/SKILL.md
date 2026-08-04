@@ -20,7 +20,16 @@ Skip only for backend-only diffs (convex functions, config, deps) — say so in 
 Capture at fitcrew's target viewport, **390x844**:
 
 1. `bun dev` in the background, wait for `localhost:3000`.
-2. chrome-devtools MCP: `new_page` → `resize_page` to 390x844 → navigate → `take_screenshot` (`filePath` into `$CLAUDE_JOB_DIR/tmp` or `/tmp`).
+2. `agent-browser` (the `agent-browser` skill — read `agent-browser skills get core` if you need more than the below):
+
+```sh
+agent-browser open                     # launch first, viewport before any nav
+agent-browser set viewport 390 844 2   # 2 = retina, shots stay legible
+agent-browser open localhost:3000/<route>
+agent-browser screenshot /tmp/<name>.png
+agent-browser close   # when done with every shot
+```
+
 3. One shot per screen the diff changes. Before/after only when the change is a redesign of something that already existed — otherwise after is enough.
 
 Host them on the `pr-media` orphan branch (never merged, so PNGs stay out of `main`'s history):
@@ -42,7 +51,7 @@ Reference in the body:
 <img src="https://raw.githubusercontent.com/govroumvroum/fitcrew/pr-media/<branch-slug>/shot.png" width="320" />
 ```
 
-`width="320"` — raw 390px-wide images at full size make the PR body unreadable.
+`width="320"` — raw 780px-wide images at full size make the PR body unreadable.
 
 ## 3. Body
 
