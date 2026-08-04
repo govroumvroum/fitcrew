@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { PauseIcon, PlayIcon, XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -129,12 +129,27 @@ const SPRING = { type: "spring", duration: 0.16, bounce: 0 } as const;
  * because `elapsed` is frozen at mount and every style string stays identical.
  */
 function DrainBar({ total, endAt, running }: { total: number; endAt: number; running: boolean }) {
-  // useState initialiser, not a plain expression: this must be read once per
-  // mount. Recomputing it on every render would rewrite animation-delay and
-  // re-seek the animation a second, which is the exact stutter we're removing.
-  const [elapsed] = useState(() =>
-    endAt === 0 ? 0 : Math.max(0, total - (endAt - Date.now()) / 1000),
-  );
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Seeking the animation from an effect rather than an inline style, because the
+  // seek has to happen on mount AND every time Cache Components' <Activity>
+  // re-shows this route: display:none cancels a CSS animation outright, and
+  // re-display restarts it from animation-delay. A delay frozen at mount would
+  // rewind the bar to wherever it was when you left /seance while the digits
+  // above — anchored to the wall-clock deadline — stayed correct.
+  //
+  // Still not computed during render: an effect keyed on the deadline runs on
+  // mount and on re-show only, never on the 1Hz digit tick, so the stutter the
+  // frozen seek was avoiding stays avoided.
+  //
+  // useLayoutEffect, not useEffect: the `animation` shorthand in the style below
+  // resets delay to 0, so seeking after paint would flash the bar full for a
+  // frame every time a resume remounts it mid-drain.
+  useLayoutEffect(() => {
+    if (!ref.current || endAt === 0) return;
+    const elapsed = Math.max(0, total - (endAt - Date.now()) / 1000);
+    ref.current.style.animationDelay = `-${elapsed}s`;
+  }, [total, endAt]);
 
   return (
     <div
@@ -147,12 +162,13 @@ function DrainBar({ total, endAt, running }: { total: number; endAt: number; run
     >
       {endAt !== 0 && (
         <div
+          ref={ref}
           // accent-text, not primary: the dock's commit button is the screen's
           // one saturated red, and it sits directly under this bar.
           className="size-full bg-accent-text"
+          // animationDelay is deliberately absent here — the effect above owns it.
           style={{
             animation: `rest-drain ${total}s linear forwards`,
-            animationDelay: `-${elapsed}s`,
             animationPlayState: running ? "running" : "paused",
           }}
         />
