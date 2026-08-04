@@ -19,6 +19,14 @@ type Timer = {
    * the animation needs to be re-seeked and never in between.
    */
   endAt: number;
+  /**
+   * When the current pause began, epoch ms; 0 while running. `endAt` stops being
+   * the truth the moment you pause — the wall clock keeps moving and the deadline
+   * doesn't — so the bar needs this to work out how far it had drained. Like
+   * `endAt` it changes only at a pause or resume, never on the 1Hz tick, which is
+   * what keeps it out of the bar's re-seek dependencies.
+   */
+  pausedAt: number;
   start: (seconds: number) => void;
   toggle: () => void;
   stop: () => void;
@@ -35,6 +43,7 @@ export function useRestTimer(): Timer {
   const [total, setTotal] = useState(0);
   const [running, setRunning] = useState(false);
   const [endAt, setEndAt] = useState(0);
+  const [pausedAt, setPausedAt] = useState(0);
 
   // The effect owns the rAF loop: starting is `setRunning(true)`, and cancelling
   // on pause or unmount is just the cleanup. No frame ref, no manual cancels
@@ -59,6 +68,7 @@ export function useRestTimer(): Timer {
 
   function start(seconds: number) {
     setEndAt(Date.now() + seconds * 1000);
+    setPausedAt(0);
     setTotal(seconds);
     setRemaining(seconds);
     setRunning(true);
@@ -66,10 +76,12 @@ export function useRestTimer(): Timer {
 
   function toggle() {
     if (running) {
+      setPausedAt(Date.now());
       setRunning(false);
     } else if (remaining > 0) {
       // Re-anchor the deadline: the clock kept moving while we were paused.
       setEndAt(Date.now() + remaining * 1000);
+      setPausedAt(0);
       setRunning(true);
     }
   }
@@ -77,12 +89,13 @@ export function useRestTimer(): Timer {
   function stop() {
     setRunning(false);
     setRemaining(0);
+    setPausedAt(0);
     // Clears the bar: `endAt === 0` is what tells it to render an empty track
     // rather than a frozen animation.
     setEndAt(0);
   }
 
-  return { remaining, total, running, endAt, start, toggle, stop };
+  return { remaining, total, running, endAt, pausedAt, start, toggle, stop };
 }
 
 /**
@@ -125,10 +138,20 @@ const SPRING = { type: "spring", duration: 0.16, bounce: 0 } as const;
  * freezes it in place without React touching the DOM.
  *
  * The digits above still re-render at 1Hz — a smoothly counting number is
- * unreadable — but those re-renders leave this animation completely alone,
- * because `elapsed` is frozen at mount and every style string stays identical.
+ * unreadable — but those re-renders leave this animation completely alone: the
+ * seek lives in a layout effect whose deps only move at a start, pause or resume.
  */
-function DrainBar({ total, endAt, running }: { total: number; endAt: number; running: boolean }) {
+function DrainBar({
+  total,
+  endAt,
+  pausedAt,
+  running,
+}: {
+  total: number;
+  endAt: number;
+  pausedAt: number;
+  running: boolean;
+}) {
   const ref = useRef<HTMLDivElement>(null);
 
   // Seeking the animation from an effect rather than an inline style, because the
@@ -138,18 +161,22 @@ function DrainBar({ total, endAt, running }: { total: number; endAt: number; run
   // rewind the bar to wherever it was when you left /seance while the digits
   // above — anchored to the wall-clock deadline — stayed correct.
   //
-  // Still not computed during render: an effect keyed on the deadline runs on
-  // mount and on re-show only, never on the 1Hz digit tick, so the stutter the
-  // frozen seek was avoiding stays avoided.
+  // `pausedAt || Date.now()` is the "now" the seek is measured against: while
+  // running that's the live clock, but a paused rest has to be measured against
+  // the moment it stopped, or a re-show after a pause seeks the bar to where the
+  // rest *would* have got to, under digits that correctly haven't moved.
+  //
+  // Still not computed during render: every dep changes only at a start, pause or
+  // resume, so this runs on mount and on re-show and never on the 1Hz digit tick,
+  // which is what keeps the stutter the frozen seek was avoiding avoided.
   //
   // useLayoutEffect, not useEffect: the `animation` shorthand in the style below
   // resets delay to 0, so seeking after paint would flash the bar full for a
   // frame every time a resume remounts it mid-drain.
   useLayoutEffect(() => {
     if (!ref.current || endAt === 0) return;
-    const elapsed = Math.max(0, total - (endAt - Date.now()) / 1000);
-    ref.current.style.animationDelay = `-${elapsed}s`;
-  }, [total, endAt]);
+    ref.current.style.animationDelay = `-${drainSeek({ total, endAt, pausedAt, now: Date.now() })}s`;
+  }, [total, endAt, pausedAt]);
 
   return (
     <div
@@ -175,6 +202,33 @@ function DrainBar({ total, endAt, running }: { total: number; endAt: number; run
       )}
     </div>
   );
+}
+
+/**
+ * How many seconds of `total` the bar has already drained, i.e. where to seek its
+ * animation. Exported and pure so `rest-timer.check.ts` can pin the paused case,
+ * which is the one that got this wrong: measuring a paused rest against the live
+ * clock seeks the bar to where the rest *would* have got to.
+ *
+ * `now` is the caller's clock so the check can supply a fixed one.
+ */
+export function drainSeek({
+  total,
+  endAt,
+  pausedAt,
+  now,
+}: {
+  total: number;
+  endAt: number;
+  pausedAt: number;
+  now: number;
+}) {
+  if (endAt === 0) return 0;
+  // Clamped at both ends. The floor stops a seek from rewinding into the drain;
+  // the ceiling matters because `useRestOutro` keeps the bar mounted 1.5 s past
+  // zero, so a re-show during that tail would otherwise ask for a delay longer
+  // than the animation itself.
+  return Math.min(total, Math.max(0, total - (endAt - (pausedAt || now)) / 1000));
 }
 
 /**
@@ -204,7 +258,7 @@ function ToggleIcon({ running }: { running: boolean }) {
 }
 
 export function RestTimerBar({ timer, className }: { timer: Timer; className?: string }) {
-  const { remaining, total, running, endAt, toggle, stop } = timer;
+  const { remaining, total, running, endAt, pausedAt, toggle, stop } = timer;
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
 
@@ -247,7 +301,7 @@ export function RestTimerBar({ timer, className }: { timer: Timer; className?: s
       </div>
       {/* key: a new deadline is a new animation. Start and resume remount this,
           a 1Hz digit tick does not. */}
-      <DrainBar key={endAt} total={total} endAt={endAt} running={running} />
+      <DrainBar key={endAt} total={total} endAt={endAt} pausedAt={pausedAt} running={running} />
     </div>
   );
 }
