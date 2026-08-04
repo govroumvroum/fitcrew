@@ -3,6 +3,18 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  // Every <Link> now prefetches one App Shell per route, shared across the two
+  // navs (TabBar and NavRail both render all seven links), instead of a full
+  // prefetch per link. Measured on the signed-in home page against a prod build:
+  // 34.6 KB transferred / 110 KB decoded → 15.2 KB / 36 KB.
+  //
+  // partialPrefetching requires cacheComponents, which is the part with teeth: a
+  // server component that reads cookies()/headers() or a bare `new Date()` now
+  // has to sit inside <Suspense> or await io(). Nothing in this app does today —
+  // auth lives in proxy.ts and every page's data comes from Convex on the
+  // client — but that's the rule any new server component has to follow.
+  cacheComponents: true,
+  partialPrefetching: true,
   // PostHog is proxied through our own origin so ad blockers don't eat the
   // events. EU region: this app stores body weight and body composition.
   async rewrites() {

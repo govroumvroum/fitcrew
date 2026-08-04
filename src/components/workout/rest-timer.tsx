@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { PauseIcon, PlayIcon, XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +19,14 @@ type Timer = {
    * the animation needs to be re-seeked and never in between.
    */
   endAt: number;
+  /**
+   * When the current pause began, epoch ms; 0 while running. `endAt` stops being
+   * the truth the moment you pause — the wall clock keeps moving and the deadline
+   * doesn't — so the bar needs this to work out how far it had drained. Like
+   * `endAt` it changes only at a pause or resume, never on the 1Hz tick, which is
+   * what keeps it out of the bar's re-seek dependencies.
+   */
+  pausedAt: number;
   start: (seconds: number) => void;
   toggle: () => void;
   stop: () => void;
@@ -35,6 +43,7 @@ export function useRestTimer(): Timer {
   const [total, setTotal] = useState(0);
   const [running, setRunning] = useState(false);
   const [endAt, setEndAt] = useState(0);
+  const [pausedAt, setPausedAt] = useState(0);
 
   // The effect owns the rAF loop: starting is `setRunning(true)`, and cancelling
   // on pause or unmount is just the cleanup. No frame ref, no manual cancels
@@ -59,6 +68,7 @@ export function useRestTimer(): Timer {
 
   function start(seconds: number) {
     setEndAt(Date.now() + seconds * 1000);
+    setPausedAt(0);
     setTotal(seconds);
     setRemaining(seconds);
     setRunning(true);
@@ -66,10 +76,12 @@ export function useRestTimer(): Timer {
 
   function toggle() {
     if (running) {
+      setPausedAt(Date.now());
       setRunning(false);
     } else if (remaining > 0) {
       // Re-anchor the deadline: the clock kept moving while we were paused.
       setEndAt(Date.now() + remaining * 1000);
+      setPausedAt(0);
       setRunning(true);
     }
   }
@@ -77,12 +89,13 @@ export function useRestTimer(): Timer {
   function stop() {
     setRunning(false);
     setRemaining(0);
+    setPausedAt(0);
     // Clears the bar: `endAt === 0` is what tells it to render an empty track
     // rather than a frozen animation.
     setEndAt(0);
   }
 
-  return { remaining, total, running, endAt, start, toggle, stop };
+  return { remaining, total, running, endAt, pausedAt, start, toggle, stop };
 }
 
 /**
@@ -125,16 +138,45 @@ const SPRING = { type: "spring", duration: 0.16, bounce: 0 } as const;
  * freezes it in place without React touching the DOM.
  *
  * The digits above still re-render at 1Hz — a smoothly counting number is
- * unreadable — but those re-renders leave this animation completely alone,
- * because `elapsed` is frozen at mount and every style string stays identical.
+ * unreadable — but those re-renders leave this animation completely alone: the
+ * seek lives in a layout effect whose deps only move at a start, pause or resume.
  */
-function DrainBar({ total, endAt, running }: { total: number; endAt: number; running: boolean }) {
-  // useState initialiser, not a plain expression: this must be read once per
-  // mount. Recomputing it on every render would rewrite animation-delay and
-  // re-seek the animation a second, which is the exact stutter we're removing.
-  const [elapsed] = useState(() =>
-    endAt === 0 ? 0 : Math.max(0, total - (endAt - Date.now()) / 1000),
-  );
+function DrainBar({
+  total,
+  endAt,
+  pausedAt,
+  running,
+}: {
+  total: number;
+  endAt: number;
+  pausedAt: number;
+  running: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Seeking the animation from an effect rather than an inline style, because the
+  // seek has to happen on mount AND every time Cache Components' <Activity>
+  // re-shows this route: display:none cancels a CSS animation outright, and
+  // re-display restarts it from animation-delay. A delay frozen at mount would
+  // rewind the bar to wherever it was when you left /seance while the digits
+  // above — anchored to the wall-clock deadline — stayed correct.
+  //
+  // `pausedAt || Date.now()` is the "now" the seek is measured against: while
+  // running that's the live clock, but a paused rest has to be measured against
+  // the moment it stopped, or a re-show after a pause seeks the bar to where the
+  // rest *would* have got to, under digits that correctly haven't moved.
+  //
+  // Still not computed during render: every dep changes only at a start, pause or
+  // resume, so this runs on mount and on re-show and never on the 1Hz digit tick,
+  // which is what keeps the stutter the frozen seek was avoiding avoided.
+  //
+  // useLayoutEffect, not useEffect: the `animation` shorthand in the style below
+  // resets delay to 0, so seeking after paint would flash the bar full for a
+  // frame every time a resume remounts it mid-drain.
+  useLayoutEffect(() => {
+    if (!ref.current || endAt === 0) return;
+    ref.current.style.animationDelay = `-${drainSeek({ total, endAt, pausedAt })}s`;
+  }, [total, endAt, pausedAt]);
 
   return (
     <div
@@ -147,18 +189,44 @@ function DrainBar({ total, endAt, running }: { total: number; endAt: number; run
     >
       {endAt !== 0 && (
         <div
+          ref={ref}
           // accent-text, not primary: the dock's commit button is the screen's
           // one saturated red, and it sits directly under this bar.
           className="size-full bg-accent-text"
+          // animationDelay is deliberately absent here — the effect above owns it.
           style={{
             animation: `rest-drain ${total}s linear forwards`,
-            animationDelay: `-${elapsed}s`,
             animationPlayState: running ? "running" : "paused",
           }}
         />
       )}
     </div>
   );
+}
+
+/**
+ * How many seconds of `total` the bar has already drained, i.e. where to seek its
+ * animation.
+ *
+ * This owns the running-vs-paused decision rather than taking a "now" from the
+ * caller, and that's the whole point of the shape: the bug this function exists
+ * to prevent was never in the arithmetic, it was a call site handing a live clock
+ * to a paused rest. With the choice in here there's no argument left to get
+ * wrong, and `rest-timer.check.ts` exercises the branch that actually regresses.
+ *
+ * `now` stays injectable only so the check can pin a fixed clock; nothing in the
+ * app passes it.
+ */
+export function drainSeek(
+  { total, endAt, pausedAt }: Pick<Timer, "total" | "endAt" | "pausedAt">,
+  now = Date.now(),
+) {
+  if (endAt === 0) return 0;
+  // Clamped at both ends. The floor stops a seek from rewinding into the drain;
+  // the ceiling matters because `useRestOutro` keeps the bar mounted 1.5 s past
+  // zero, so a re-show during that tail would otherwise ask for a delay longer
+  // than the animation itself.
+  return Math.min(total, Math.max(0, total - (endAt - (pausedAt || now)) / 1000));
 }
 
 /**
@@ -188,7 +256,7 @@ function ToggleIcon({ running }: { running: boolean }) {
 }
 
 export function RestTimerBar({ timer, className }: { timer: Timer; className?: string }) {
-  const { remaining, total, running, endAt, toggle, stop } = timer;
+  const { remaining, total, running, endAt, pausedAt, toggle, stop } = timer;
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
 
@@ -231,7 +299,7 @@ export function RestTimerBar({ timer, className }: { timer: Timer; className?: s
       </div>
       {/* key: a new deadline is a new animation. Start and resume remount this,
           a 1Hz digit tick does not. */}
-      <DrainBar key={endAt} total={total} endAt={endAt} running={running} />
+      <DrainBar key={endAt} total={total} endAt={endAt} pausedAt={pausedAt} running={running} />
     </div>
   );
 }
