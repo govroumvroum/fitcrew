@@ -175,7 +175,7 @@ function DrainBar({
   // frame every time a resume remounts it mid-drain.
   useLayoutEffect(() => {
     if (!ref.current || endAt === 0) return;
-    ref.current.style.animationDelay = `-${drainSeek({ total, endAt, pausedAt, now: Date.now() })}s`;
+    ref.current.style.animationDelay = `-${drainSeek({ total, endAt, pausedAt })}s`;
   }, [total, endAt, pausedAt]);
 
   return (
@@ -206,23 +206,21 @@ function DrainBar({
 
 /**
  * How many seconds of `total` the bar has already drained, i.e. where to seek its
- * animation. Exported and pure so `rest-timer.check.ts` can pin the paused case,
- * which is the one that got this wrong: measuring a paused rest against the live
- * clock seeks the bar to where the rest *would* have got to.
+ * animation.
  *
- * `now` is the caller's clock so the check can supply a fixed one.
+ * This owns the running-vs-paused decision rather than taking a "now" from the
+ * caller, and that's the whole point of the shape: the bug this function exists
+ * to prevent was never in the arithmetic, it was a call site handing a live clock
+ * to a paused rest. With the choice in here there's no argument left to get
+ * wrong, and `rest-timer.check.ts` exercises the branch that actually regresses.
+ *
+ * `now` stays injectable only so the check can pin a fixed clock; nothing in the
+ * app passes it.
  */
-export function drainSeek({
-  total,
-  endAt,
-  pausedAt,
-  now,
-}: {
-  total: number;
-  endAt: number;
-  pausedAt: number;
-  now: number;
-}) {
+export function drainSeek(
+  { total, endAt, pausedAt }: Pick<Timer, "total" | "endAt" | "pausedAt">,
+  now = Date.now(),
+) {
   if (endAt === 0) return 0;
   // Clamped at both ends. The floor stops a seek from rewinding into the drain;
   // the ceiling matters because `useRestOutro` keeps the bar mounted 1.5 s past
