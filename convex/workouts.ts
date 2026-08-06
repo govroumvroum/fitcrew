@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, mutation, query } from "./_generated/server";
-import { nextDayIndexFor, prefillFor } from "./programs";
+import { latestInLineage, lineageOf, nextDayIndexFor, prefillFor } from "./programs";
 import { recordPrs, statsByExercise } from "./progress";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
@@ -245,7 +245,24 @@ export const start = mutation({
     });
     // Not a selection — the Coach and the crew read it as "what he's training
     // these days" (see `users.currentProgramId`).
-    if (program) await ctx.db.patch("users", user._id, { currentProgramId: program._id });
+    //
+    // The LINEAGE's latest row, not the one the client handed us: a coach swap
+    // that landed after the card rendered leaves `args.programId` pointing at a
+    // superseded version, and everything downstream reads this field as "the
+    // program as it stands" — `coach.swapExercise` bases the next version's
+    // number AND its days on it, `consult.coachGrounding` and `crew` read its
+    // days. Stamping the stale row there means a swap that computes
+    // `version + 1` from a version that already exists: two rows tie, the older
+    // one wins every read (`latestPerLineage` keeps the first at equal version),
+    // and the swap the user just asked for is invisible for good. Reading the
+    // lineage range also puts it in the OCC read set, so a swap racing this
+    // mutation conflicts and the retry sees it.
+    if (program) {
+      const latest = await latestInLineage(ctx, user._id, lineageOf(program) as Id<"programs">);
+      // The workout row keeps `program._id`: its set rows were seeded from THAT
+      // version's prescription, and `today` renders the day off it.
+      await ctx.db.patch("users", user._id, { currentProgramId: latest?._id ?? program._id });
+    }
     for (const set of args.sets) {
       await ctx.db.insert("sets", { ...set, workoutId, userId: user._id, completed: false });
     }

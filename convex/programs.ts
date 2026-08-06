@@ -134,29 +134,31 @@ export async function prefillFor(
   return out;
 }
 
-/** The latest row of a lineage the caller owns. The index range is scoped to the
- * user, so "not found" and "not yours" are the same answer — deliberately.
+/** The latest row of a lineage the caller owns, or null if it has none. The
+ * index range is scoped to the user, so "not found" and "not yours" are the same
+ * answer — deliberately.
+ *
+ * Reading the range is also what makes a concurrent version bump conflict: a row
+ * inserted into it after this read fails the mutation's OCC check and the retry
+ * sees the new latest. A caller that skips this and trusts an id it was handed
+ * gets no such protection.
  *
  * ponytail: the read path tolerates a row with no `lineageId` (the `?? _id`
  * default), this write path requires the backfill — `.eq("lineageId", …)` can't
  * match a row that hasn't got the field. `backfillLineage` runs on every deploy
  * (see `runAll` and vercel.json), so an unbackfilled row can't reach a user's
  * screen; the day that stops being true, read the root row here as a fallback. */
-async function ownLineage(
+export async function latestInLineage(
   ctx: QueryCtx,
   userId: Id<"users">,
   lineageId: Id<"programs">,
-): Promise<Doc<"programs">> {
+): Promise<Doc<"programs"> | null> {
   const rows = await ctx.db
     .query("programs")
     .withIndex("by_user_and_lineage", (q) => q.eq("userId", userId).eq("lineageId", lineageId))
     .take(MAX_PROGRAM_ROWS);
-  const latest = rows.reduce<Doc<"programs"> | null>(
-    (best, row) => (!best || row.version > best.version ? row : best),
-    null,
-  );
-  if (!latest) throw new Error("Programme introuvable");
-  return latest;
+  // One lineage in, so one row out — same "highest version wins" as every read.
+  return latestPerLineage(rows)[0] ?? null;
 }
 
 /**
@@ -223,7 +225,8 @@ export const setStatus = mutation({
   args: { lineageId: v.id("programs"), status: programStatus },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
-    const latest = await ownLineage(ctx, user._id, args.lineageId);
+    const latest = await latestInLineage(ctx, user._id, args.lineageId);
+    if (!latest) throw new Error("Programme introuvable");
     await ctx.db.patch("programs", latest._id, { status: args.status });
     return null;
   },

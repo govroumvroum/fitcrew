@@ -64,6 +64,19 @@ assert.deepEqual(
 // at 5), not by its newest row — a swap must not make an old program jump up.
 assert.equal(latest[1].version, 3);
 
+// Two rows at the SAME version is a corrupted lineage, and this is why it must
+// never happen: the tie goes to whichever comes first out of the index, and
+// `by_user_and_lineage` is ["userId", "lineageId", "version"] — so equal
+// versions come out oldest-first and the newer row is invisible on every screen,
+// for good. `latestInLineage` is the one way to pick the row a new version is
+// numbered from, precisely so nothing can mint a duplicate.
+const tied = latestPerLineage([...rows, row("m4", 40, 3, "m1")]);
+assert.equal(
+  tied.find((p) => lineageOf(p) === "m1")?._id,
+  "m3",
+  "à version égale c'est la plus ancienne qui gagne — donc personne ne doit créer d'égalité",
+);
+
 const members = lineageMembers(rows);
 assert.deepEqual([...(members.get("m1") ?? [])].sort(), ["m1", "m2", "m3"]);
 assert.deepEqual([...(members.get("b1") ?? [])], ["b1"]);

@@ -123,8 +123,12 @@ export const swapExercise = internalMutation({
 
     const days = swapInDays(current.days, args.dayIndex, args.from, args.to);
     // A new version WITHIN the lineage of the last program trained, leaving the
-    // others untouched. `currentProgramId` is stamped with the latest row of
-    // that lineage, so `current.version` is the lineage's maximum.
+    // others untouched. `current.version` is the lineage's maximum because every
+    // writer of `currentProgramId` stamps the lineage's latest row — the two are
+    // `saveProgram` above and `workouts.start`, which resolves it through
+    // `latestInLineage` rather than trusting the id the client sent. Break that
+    // and this line writes a version that already exists; the older row wins
+    // every read and this swap disappears.
     const programId = await ctx.db.insert("programs", {
       userId: user._id,
       lineageId: current.lineageId ?? current._id,
