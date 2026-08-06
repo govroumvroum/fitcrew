@@ -32,7 +32,7 @@ import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { ExerciseDemo, useExerciseDemos } from "./demo";
-import { defaultReps, workingValues } from "./prescription";
+import { seedSets, workingValues } from "./prescription";
 import { REST_OPTIONS, RestTimerBar, useRestOutro, useRestTimer } from "./rest-timer";
 
 type Values = { weight: number; reps: number };
@@ -50,9 +50,11 @@ const SPRING = { type: "spring", duration: 0.3, bounce: 0 } as const;
 
 export function Session({ date }: { date: string }) {
   const data = useQuery(api.workouts.today, { date });
+  // Every program, each with its own next day and its own prefill: the picker
+  // below is one card per active one.
+  const programs = useQuery(api.programs.list, { date });
 
   const router = useRouter();
-  const start = useMutation(api.workouts.start);
   const finish = useMutation(api.workouts.finish);
   const cancel = useMutation(api.workouts.cancel);
   const logSet = useMutation(api.workouts.logSet).withOptimisticUpdate((store, args) => {
@@ -103,18 +105,46 @@ export function Session({ date }: { date: string }) {
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
-  if (data === undefined) return <Skeleton className="h-64 w-full" />;
+  if (data === undefined || programs === undefined) return <Skeleton className="h-64 w-full" />;
   if (data === null) return <Empty>Profil en cours de création…</Empty>;
 
   const { day, workout, sets } = data;
-  if (!day) {
+  // Every program runs at once, so there is nothing to select: the ones not
+  // archived are all startable, and each carries its own next day.
+  const active = programs.filter((program) => program.status === "active");
+
+  // Nothing running: pick a program. One card each, and no `day` to read —
+  // `workouts.today` only knows a day once a séance has chosen one.
+  if (!workout) {
+    if (active.length === 0) {
+      const none = programs.length === 0;
+      return (
+        <Empty>
+          <h1 className="sr-only">Séance</h1>
+          {none ? "Pas encore de programme." : "Aucun programme actif."}
+          <Button asChild className="mt-4 h-14 w-full text-base active:scale-[0.97]">
+            <Link href={none ? "/coach" : "/programme"}>
+              {none ? "Passe voir le coach" : "Réactive un programme"}
+            </Link>
+          </Button>
+        </Empty>
+      );
+    }
     return (
-      <Empty>
-        Pas encore de programme.
-        <Button asChild className="mt-4 h-14 w-full text-base active:scale-[0.97]">
-          <Link href="/coach">Passe voir le coach</Link>
-        </Button>
-      </Empty>
+      <div className="flex flex-1 flex-col gap-6 p-4">
+        {/* The cards carry the program names, so a visible page title would only
+            repeat them. */}
+        <h1 className="sr-only">Séance</h1>
+        {active.map((program) => (
+          <ProgramPick
+            key={program.lineageId}
+            date={date}
+            program={program}
+            open={active.length === 1}
+          />
+        ))}
+        <History date={date} />
+      </div>
     );
   }
 
@@ -126,64 +156,28 @@ export function Session({ date }: { date: string }) {
 
   const done = sets.filter((set) => set.completed);
 
-  if (!workout) {
-    const seed = day.exercises.flatMap((exercise) => {
-      const last = data.prefill.find((p) => p.name === exercise.name);
-      return Array.from({ length: exercise.sets }, (_, index) => ({
-        exerciseName: exercise.name,
-        index,
-        weight: last?.weight ?? 0,
-        reps: last?.reps ?? defaultReps(exercise.reps),
-      }));
-    });
+  // A séance attached to no program — the Coach's retroactive log leaves one
+  // open when the user gave no notes. There is no prescription to render.
+  if (!day) {
     return (
       <div className="flex flex-1 flex-col gap-6 p-4">
-        <section className="slab flex flex-col gap-4">
-          <div>
-            <p className="eyebrow">À venir</p>
-            <h1 className="font-heading text-2xl font-bold sm:text-3xl">{day.name}</h1>
-            <p className="text-sm text-muted-foreground">
-              {day.exercises.length} exercices au programme
-            </p>
-          </div>
-          <ul className="divide-y">
-            {day.exercises.map((exercise) => (
-              <li key={exercise.name} className="flex min-h-11 items-center gap-3 py-2.5 text-sm">
-                <span className="min-w-0 flex-1 truncate">{exercise.name}</span>
-                <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
-                  {exercise.sets} × {exercise.reps}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <Button
-            className="h-14 w-full text-base active:scale-[0.97]"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await start({ date, dayIndex: data.dayIndex, sets: seed });
-              } catch {
-                toast.error("Séance pas démarrée, réessaie.");
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            C&apos;est parti
-          </Button>
-        </section>
-        <History date={date} dayIndex={data.dayIndex} />
+        <Empty>Une séance sans programme est en cours. Elle a été notée par le coach.</Empty>
+        <History date={date} />
       </div>
     );
   }
 
   if (workout.endedAt) {
+    // Muscu ce matin, boxe ce soir: the récap must not be a dead end for the
+    // programs still untouched today.
+    const left = active.filter((program) => !program.trainedToday);
     return (
       <div className="flex flex-1 flex-col gap-5 p-4">
         <section className="slab flex flex-col gap-4">
           <div>
-            <p className="eyebrow">Séance pliée</p>
+            <p className="eyebrow">
+              Séance pliée{data.programName ? ` · ${data.programName}` : ""}
+            </p>
             <h1 className="font-heading text-2xl font-bold sm:text-3xl">{day.name}</h1>
             <p className="text-sm text-muted-foreground">
               {done.length === 0
@@ -253,6 +247,16 @@ export function Session({ date }: { date: string }) {
         ) : null}
 
         {workout.notes ? <p className="text-sm text-muted-foreground">{workout.notes}</p> : null}
+
+        {left.length > 0 ? (
+          <section className="flex flex-col gap-4">
+            <p className="eyebrow">Il te reste</p>
+            {left.map((program) => (
+              <ProgramPick key={program.lineageId} date={date} program={program} />
+            ))}
+          </section>
+        ) : null}
+
         {/* Looking back is exactly what you do once it's done — without this the
             history vanished for the rest of the day. No rotation here: the next
             séance isn't today's business. */}
@@ -315,6 +319,7 @@ export function Session({ date }: { date: string }) {
                 it: mid-séance you know which séance you're in, so the header is
                 orientation and the <h1> belongs on the exercise below. */}
             <p className="eyebrow">
+              {data.programName ? `${data.programName} · ` : ""}
               {day.name} · démarrée à{" "}
               {new Date(workout.startedAt).toLocaleTimeString("fr-FR", {
                 hour: "2-digit",
@@ -666,42 +671,113 @@ export function Session({ date }: { date: string }) {
   );
 }
 
+type ProgramEntry = (typeof api.programs.list)["_returnType"][number];
+
+/**
+ * One startable program. There is no selection to make first — every active
+ * program is live, so the screen shows them side by side and the tap IS the
+ * choice.
+ *
+ * ponytail: nothing stops a second séance being started from another tab while
+ * one runs here; the screen simply never offers it, because `workouts.today`
+ * hands back the running séance and this card isn't rendered. `start` dedupes on
+ * (date, program), so the worst case is resuming the same one.
+ */
+function ProgramPick({
+  date,
+  program,
+  open,
+}: {
+  date: string;
+  program: ProgramEntry;
+  open?: boolean;
+}) {
+  const start = useMutation(api.workouts.start);
+  const [busy, setBusy] = useState(false);
+  const exercises = program.days[program.nextDayIndex]?.exercises ?? [];
+  const total = exercises.reduce((sum, exercise) => sum + exercise.sets, 0);
+
+  return (
+    <section className="slab flex flex-col gap-4">
+      <div>
+        {/* The program is the eyebrow and the day is the heading: with two
+            programs live, "Jour 2" alone doesn't say which séance this is. */}
+        <p className="eyebrow">{program.name}</p>
+        <h2 className="font-heading text-2xl font-bold sm:text-3xl">
+          {program.nextDayName ?? "Prochaine séance"}
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          {exercises.length} exercice{exercises.length > 1 ? "s" : ""} ·{" "}
+          <span className="tabular-nums">{total}</span> série{total > 1 ? "s" : ""}
+          {/* Marked, never hidden: a second séance on the same program is
+              allowed, it just shouldn't be the obvious next tap. */}
+          {program.trainedToday ? " · déjà fait aujourd'hui" : ""}
+        </p>
+      </div>
+
+      {/* ponytail: native <details>, like everywhere else here. Open when it's
+          the only program — with several, the whole prescription of each is a
+          wall before the first button. */}
+      <details open={open} className="group">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium marker:hidden">
+          <ChevronDownIcon className="chevron" />
+          Le détail
+        </summary>
+        <ul className="divide-y">
+          {exercises.map((exercise) => (
+            <li key={exercise.name} className="flex min-h-11 items-center gap-3 py-2.5 text-sm">
+              <span className="min-w-0 flex-1 truncate">{exercise.name}</span>
+              <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+                {exercise.sets} × {exercise.reps}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      {/* Red on every card, not just the first: the programs are equals and
+          there is no selection, so ranking one of them would be a lie. Each slab
+          is its own surface and carries its own commit — what the app rations is
+          two red buttons competing inside ONE surface. A program already trained
+          today drops to secondary, which is the only ranking there is. */}
+      <Button
+        className="h-14 w-full text-base active:scale-[0.97]"
+        variant={program.trainedToday ? "secondary" : "default"}
+        disabled={busy || exercises.length === 0}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await start({
+              date,
+              programId: program.id,
+              sets: seedSets(exercises, program.prefill),
+            });
+          } catch {
+            toast.error("Séance pas démarrée, réessaie.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {program.trainedToday ? "En refaire une" : "C'est parti"}
+      </Button>
+    </section>
+  );
+}
+
 /**
  * Its own subscription, and never mounted during a live session: that screen
  * resubscribes `today` on every check-off and must not drag the history along.
  */
-function History({ date, dayIndex }: { date: string; dayIndex?: number }) {
+function History({ date }: { date: string }) {
   const data = useQuery(api.workouts.history, { date });
   if (!data) return null;
 
-  // No dates, ever: program days rotate one per séance, whenever you train, so
-  // "next" is an order and not a calendar. Wraps past the last day. No dayIndex
-  // (the finished screen) means no rotation at all — just "déjà fait".
-  const upcoming =
-    dayIndex === undefined
-      ? []
-      : Array.from({ length: Math.max(0, data.dayNames.length - 1) }, (_, offset) => {
-          return data.dayNames[(dayIndex + 1 + offset) % data.dayNames.length];
-        });
-
+  // No "À suivre" list here any more: with programs running in parallel there is
+  // no single rotation to project, and each program's own next day is on its
+  // card up the screen.
   return (
     <>
-      {upcoming.length > 0 ? (
-        <section className="space-y-2">
-          <p className="eyebrow">À suivre</p>
-          <ul className="divide-y">
-            {upcoming.map((name) => (
-              <li
-                key={name}
-                className="flex min-h-11 items-center py-2.5 text-sm text-muted-foreground"
-              >
-                {name}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
       {data.past.length > 0 ? (
         <section className="space-y-2">
           <p className="eyebrow">Déjà fait</p>
@@ -721,12 +797,22 @@ function History({ date, dayIndex }: { date: string; dayIndex?: number }) {
                         {/* shrink-0: "jeu. 30 juil." wrapped to two lines. */}
                         <span className="shrink-0 tabular-nums">{formatShort(session.date)}</span>
                         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                          {session.dayName ?? (session.imported ? "Importée" : "Séance")}
+                          {session.dayName ??
+                            session.programName ??
+                            (session.imported ? "Importée" : "Séance")}
                         </span>
                         {session.pr ? <TrophyIcon className={TROPHY} /> : null}
                       </span>
-                      <span className="block text-muted-foreground tabular-nums">
-                        {session.sets} séries · {formatNumber(session.volume)} kg
+                      {/* Which program the séance belonged to: with a muscu and a
+                          boxe program running at once, "Jour 2" alone is ambiguous.
+                          Only when the day name already took the line above. */}
+                      <span className="block text-muted-foreground">
+                        {session.dayName && session.programName
+                          ? `${session.programName} · `
+                          : null}
+                        <span className="tabular-nums">
+                          {session.sets} séries · {formatNumber(session.volume)} kg
+                        </span>
                       </span>
                     </span>
                   </summary>

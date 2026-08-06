@@ -1,9 +1,11 @@
 /**
- * Self-check for the program shape helpers in convex/coach.ts.
+ * Self-check for the program shape helpers in convex/coach.ts and the lineage
+ * grouping in convex/programs.ts.
  * Run: `bun src/components/chat/program.check.ts`
  */
 import assert from "node:assert/strict";
 import { swapInDays, toDays } from "../../../convex/coach";
+import { latestPerLineage, lineageMembers, lineageOf } from "../../../convex/programs";
 import { formatLoose } from "@/lib/dates";
 
 const squat = { name: "Squat", sets: 4, reps: "8", restSeconds: 120, notes: null };
@@ -28,6 +30,47 @@ assert.throws(() => swapInDays(days, 0, "Développé couché", presse), /introuv
 assert.throws(() => swapInDays(days, 3, "Squat", presse), /Jour 3/);
 
 console.log("coach program helpers ok");
+
+// ---------------------------------------------------------------------------
+// Lineages: a program is a chain of versioned rows, several run in parallel.
+// ---------------------------------------------------------------------------
+
+const row = (_id: string, _creationTime: number, version: number, lineageId?: string) => ({
+  _id,
+  _creationTime,
+  version,
+  ...(lineageId ? { lineageId } : {}),
+});
+
+// A legacy row, written before lineages existed, is its own root.
+assert.equal(lineageOf(row("legacy", 1, 1)), "legacy");
+assert.equal(lineageOf(row("m2", 5, 2, "m1")), "m1");
+
+// muscu (3 versions) and boxe (1), out of order, plus one unmigrated row.
+const rows = [
+  row("m2", 20, 2, "m1"),
+  row("b1", 30, 1, "b1"),
+  row("m1", 10, 1, "m1"),
+  row("m3", 25, 3, "m1"),
+  row("legacy", 5, 7),
+];
+const latest = latestPerLineage(rows);
+// Highest version per lineage wins…
+assert.deepEqual(
+  latest.map((p) => p._id),
+  ["b1", "m3", "legacy"],
+);
+// …and the order is by when each LINEAGE started (b1 at 30, muscu at 10, legacy
+// at 5), not by its newest row — a swap must not make an old program jump up.
+assert.equal(latest[1].version, 3);
+
+const members = lineageMembers(rows);
+assert.deepEqual([...(members.get("m1") ?? [])].sort(), ["m1", "m2", "m3"]);
+assert.deepEqual([...(members.get("b1") ?? [])], ["b1"]);
+// The unmigrated row answers for its own lineage, so its rotation still works.
+assert.deepEqual([...(members.get("legacy") ?? [])], ["legacy"]);
+
+console.log("program lineages ok");
 
 // ---------------------------------------------------------------------------
 // formatLoose: a date written by a model, not by us.

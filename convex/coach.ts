@@ -26,6 +26,7 @@ import {
 } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
 import { languageModel } from "./model";
+import { latestPerLineage } from "./programs";
 import { programExercise } from "./schema";
 import { searchWeb } from "./search";
 import { zGenerateProgram, zLogWorkout, zSaveOnboarding, zSwapExercise } from "./toolSchemas";
@@ -76,11 +77,16 @@ export function swapInDays(
 }
 
 // ---------------------------------------------------------------------------
-// Program persistence — always a new version, never an edit
+// Program persistence — always a new row, never an edit
 // ---------------------------------------------------------------------------
 
 const programDays = v.array(v.object({ name: v.string(), exercises: v.array(programExercise) }));
 
+/**
+ * A brand new program — a new lineage at version 1. The user's other programs
+ * are left exactly as they were: generating a boxing program is not a reason to
+ * throw away the musculation one. They run in parallel from here.
+ */
 export const saveProgram = internalMutation({
   args: {
     name: v.string(),
@@ -90,15 +96,16 @@ export const saveProgram = internalMutation({
   },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
-    const latest = await ctx.db
-      .query("programs")
-      .withIndex("by_user_and_version", (q) => q.eq("userId", user._id))
-      .order("desc")
-      .first();
-    const version = (latest?.version ?? 0) + 1;
-    const programId = await ctx.db.insert("programs", { userId: user._id, version, ...args });
+    const programId = await ctx.db.insert("programs", {
+      userId: user._id,
+      version: 1,
+      status: "active",
+      ...args,
+    });
+    // A root row's lineage is itself, and we only know the id after the insert.
+    await ctx.db.patch("programs", programId, { lineageId: programId });
     await ctx.db.patch("users", user._id, { currentProgramId: programId });
-    return { version, days: args.days.length };
+    return { version: 1, days: args.days.length };
   },
 });
 
@@ -106,14 +113,22 @@ export const swapExercise = internalMutation({
   args: { dayIndex: v.number(), from: v.string(), to: programExercise },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
+    // The last program trained, which is the one the conversation is almost
+    // always about. ponytail: no way to swap inside another program from the
+    // chat — add a `program` argument to the tool if that ever bites.
     const current = user.currentProgramId
       ? await ctx.db.get("programs", user.currentProgramId)
       : null;
     if (!current) throw new Error("Pas encore de programme à modifier");
 
     const days = swapInDays(current.days, args.dayIndex, args.from, args.to);
+    // A new version WITHIN the lineage of the last program trained, leaving the
+    // others untouched. `currentProgramId` is stamped with the latest row of
+    // that lineage, so `current.version` is the lineage's maximum.
     const programId = await ctx.db.insert("programs", {
       userId: user._id,
+      lineageId: current.lineageId ?? current._id,
+      ...(current.status ? { status: current.status } : {}),
       version: current.version + 1,
       name: current.name,
       days,
@@ -129,12 +144,18 @@ export const swapExercise = internalMutation({
 // Reads the coach needs
 // ---------------------------------------------------------------------------
 
+/**
+ * The user plus every program they're currently running — plural on purpose:
+ * a musculation program and a boxing one are both live at once.
+ */
 async function loadContext(ctx: QueryCtx) {
   const user = await requireCurrentUser(ctx);
-  const program = user.currentProgramId
-    ? await ctx.db.get("programs", user.currentProgramId)
-    : null;
-  return { user, program };
+  const rows = await ctx.db
+    .query("programs")
+    .withIndex("by_user_and_lineage", (q) => q.eq("userId", user._id))
+    .take(500);
+  const programs = latestPerLineage(rows).filter((p) => (p.status ?? "active") === "active");
+  return { user, programs, currentProgramId: user.currentProgramId ?? null };
 }
 
 /**
@@ -165,13 +186,21 @@ export const context = internalQuery({
 export const exerciseContext = internalQuery({
   args: { name: v.string() },
   handler: async (ctx, args) => {
-    const { user, program } = await loadContext(ctx);
+    const { user, programs } = await loadContext(ctx);
     const needle = args.name.toLowerCase().trim();
 
-    let prescription: { day: string; exercise: Days[number]["exercises"][number] } | null = null;
-    for (const day of program?.days ?? []) {
-      const found = day.exercises.find((e) => e.name.toLowerCase().trim() === needle);
-      if (found) prescription = { day: day.name, exercise: found };
+    // Across every active program: the exercise the user is asking about may
+    // well be in the boxing one rather than in the last one he trained.
+    let prescription: {
+      program: string;
+      day: string;
+      exercise: Days[number]["exercises"][number];
+    } | null = null;
+    for (const program of programs) {
+      for (const day of program.days) {
+        const found = day.exercises.find((e) => e.name.toLowerCase().trim() === needle);
+        if (found) prescription = { program: program.name, day: day.name, exercise: found };
+      }
     }
 
     const recentSets = await ctx.db
@@ -228,7 +257,7 @@ function coachTools(today: string) {
 
     generate_program: createTool({
       description:
-        "Crée et enregistre un nouveau programme. Chaque appel crée une nouvelle version, l'historique est conservé.",
+        "Crée et enregistre un NOUVEAU programme, qui s'ajoute à ceux que le user suit déjà : rien n'est remplacé ni archivé. Les programmes tournent en parallèle. Ne l'appelle pas pour modifier un programme existant.",
       inputSchema: zGenerateProgram,
       execute: async (ctx: ToolCtx, input) => {
         return await ctx.runMutation(internal.coach.saveProgram, {
@@ -242,7 +271,7 @@ function coachTools(today: string) {
 
     swap_exercise: createTool({
       description:
-        "Remplace un exercice du programme actuel par un autre. Crée une nouvelle version du programme.",
+        "Remplace un exercice du programme le plus récemment travaillé par un autre. Crée une nouvelle version de CE programme, sans toucher aux autres.",
       inputSchema: zSwapExercise,
       execute: async (ctx: ToolCtx, { dayIndex, from, to }) => {
         const { notes, ...rest } = to;
@@ -283,11 +312,10 @@ function coachTools(today: string) {
         // ponytail: reuses the live logger's mutations, so it's 2 writes per set
         // (insert then check off). Add a bulk mutation to workouts.ts if someone
         // starts back-filling whole months.
+        // No `programId`: a séance the user recounts after the fact is attached
+        // to no program, so it never moves anyone's rotation.
         const workoutId = await ctx.runMutation(api.workouts.start, {
           date: input.date,
-          // ponytail: 0 = "no program day"; `start` needs the arg and a
-          // retroactive log rarely maps onto one.
-          dayIndex: 0,
           sets: [],
         });
         let logged = 0;
@@ -373,9 +401,24 @@ const QUESTIONS = `1. Niveau (débutant / intermédiaire / avancé)
 6. Durée de séance préférée (30 min / 45 min / 1 h / 1 h+)
 7. Matériel dispo (salle complète, haltères, poids du corps…)`;
 
+/** One program, written out for the model. */
+const renderProgram = (program: Doc<"programs">, lastTrained: boolean) =>
+  `« ${program.name} » (v${program.version}, ${program.days.length} jours)${lastTrained ? " — le plus récemment travaillé" : ""}
+${program.days
+  .map(
+    (day, i) =>
+      `[jour ${i}] ${day.name}\n${day.exercises
+        .map((e, j) => `  ${j + 1}. ${e.name} — ${e.sets}×${e.reps} (repos ${e.restSeconds}s)`)
+        .join("\n")}`,
+  )
+  .join("\n")}
+Progression : ${program.progressionRules}
+Deload : ${program.deloadEveryWeeks ? `toutes les ${program.deloadEveryWeeks} semaines` : "non défini"}`;
+
 function systemPrompt(
   user: Doc<"users">,
-  program: Doc<"programs"> | null,
+  programs: Doc<"programs">[],
+  currentProgramId: Id<"programs"> | null,
   today: string,
   cardio: Doc<"cardio">[] = [],
   weight: Doc<"bodyweight"> | null = null,
@@ -410,19 +453,10 @@ ${QUESTIONS}
 }
 
 ${
-  program
-    ? `PROGRAMME ACTUEL — « ${program.name} » (version ${program.version})
-${program.days
-  .map(
-    (day, i) =>
-      `[jour ${i}] ${day.name}\n${day.exercises
-        .map((e, j) => `  ${j + 1}. ${e.name} — ${e.sets}×${e.reps} (repos ${e.restSeconds}s)`)
-        .join("\n")}`,
-  )
-  .join("\n")}
-Progression : ${program.progressionRules}
-Deload : ${program.deloadEveryWeeks ? `toutes les ${program.deloadEveryWeeks} semaines` : "non défini"}`
-    : "PROGRAMME ACTUEL : aucun."
+  programs.length
+    ? `PROGRAMMES EN COURS (${programs.length}) — ils tournent EN PARALLÈLE, chacun avance sa propre rotation de jours.
+${programs.map((p) => renderProgram(p, p._id === currentProgramId)).join("\n\n")}`
+    : "PROGRAMMES EN COURS : aucun."
 }
 
 ${
@@ -451,6 +485,8 @@ Tiens-en compte pour la fatigue et le volume jambes, mais n'en parle que si c'es
 }
 
 RÈGLES PROGRAMME (quand tu appelles generate_program)
+- \`generate_program\` crée un NOUVEAU programme, en plus de ceux du dessus. Il ne remplace rien. Le user peut en mener plusieurs de front (muscu + boxe, par exemple) et chacun a sa propre rotation.
+- Pour MODIFIER un programme existant (durée des séances, nombre de jours, exercices qui ne passent pas), ne le régénère pas : ça en créerait un deuxième. Utilise \`swap_exercise\`, ou dis-lui clairement que tu vas en créer un nouveau et demande si c'est bien ce qu'il veut.
 - Un jour = un focus clair, nommé "Jour N — Focus (muscles)".
 - L'ÉCHAUFFEMENT N'EST JAMAIS UN EXERCICE de la liste. Pas de ligne "Échauffement", "Mobilité" ou "Cardio d'échauffement" dans \`exercises\`. Si tu veux en parler, mets-le dans \`progressionRules\` ou dans ton message.
 - Respecte le matériel dispo, la durée de séance et les limitations. Un exercice contre-indiqué est une faute.
@@ -458,11 +494,10 @@ RÈGLES PROGRAMME (quand tu appelles generate_program)
 - Après \`generate_program\`, résume le programme jour par jour dans ton message : le user ne voit que ce que tu écris.
 
 AUTRES OUTILS
-- \`swap_exercise\` dès qu'il déteste ou ne peut pas faire un exercice. Propose un remplaçant équivalent, ne demande pas 3 fois confirmation.
+- \`swap_exercise\` dès qu'il déteste ou ne peut pas faire un exercice. Propose un remplaçant équivalent, ne demande pas 3 fois confirmation. Il agit sur le programme le plus récemment travaillé : si l'exercice appartient à un autre, dis-le-lui plutôt que de le faire au mauvais endroit.
 - \`explain_exercise\` avant d'expliquer un exercice de son programme : ça te donne son historique réel.
 - \`log_workout\` seulement pour une séance passée qu'il te raconte. Une séance en cours se loge dans l'écran Séance, pas ici.
 - \`extract_screenshot\` dès qu'une capture est jointe à son message. Si l'outil renvoie des entrées, dis-lui juste de vérifier et valider la fiche affichée — tu n'enregistres rien toi-même. Si il renvoie une liste vide, NE LUI PARLE PAS de fiche à valider : il n'y en a aucune à l'écran. Dis-lui ce que tu vois sur la capture et ce qui manque (une pesée a besoin du poids réel, pas du poids idéal ni de la masse musculaire), et propose-lui de te donner le chiffre directement.
-- Il veut changer la durée des séances ou le nombre de jours : régénère le programme avec \`generate_program\`.
 - \`ask_chef\` seulement quand la réponse dépend vraiment de son alimentation (quoi manger autour d'une séance, si ses apports servent son objectif). Une seule question, avec le minimum de contexte : le Chef ne voit pas votre conversation. Ce n'est pas ton domaine : tu relaies sa réponse, tu ne la corriges pas, et tu rappelles que ses chiffres sont des estimations. La nutrition d'une pathologie ne se règle ni avec lui ni avec toi : c'est un professionnel de santé.
 - \`search_web\` seulement pour ce que tu ne peux pas savoir : une recommandation à jour, un complément ou un terme dont il te parle, la technique d'un exercice précis. Jamais pour ce qui est déjà écrit au-dessus (son profil, son programme, ses records, son cardio) et jamais pour du conseil d'entraînement générique que tu connais déjà — une recherche inutile, c'est de l'attente et des tokens pour rien.
 - Quand tu t'appuies sur une recherche, cite tes sources dans ta réponse (le nom du site ou le lien) pour qu'il puisse vérifier. Si l'outil renvoie une erreur ou zéro résultat, dis-lui simplement que la recherche ne marche pas là et continue avec ce que tu sais.
@@ -674,7 +709,10 @@ async function stream(
     | { prompt: string; messages?: { role: "user"; content: string }[] }
     | { messages: { role: "user"; content: string }[] },
 ) {
-  const { user, program, cardio, weight } = await ctx.runQuery(internal.coach.context, {});
+  const { user, programs, currentProgramId, cardio, weight } = await ctx.runQuery(
+    internal.coach.context,
+    {},
+  );
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
   if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);
@@ -684,7 +722,7 @@ async function stream(
     { userId: user._id, threadId },
     {
       ...promptArgs,
-      system: systemPrompt(user, program, today, cardio, weight),
+      system: systemPrompt(user, programs, currentProgramId, today, cardio, weight),
       tools: coachTools(today),
       // A tool call must be followed by the coach's own words, so one step is
       // never enough (the AI SDK default).

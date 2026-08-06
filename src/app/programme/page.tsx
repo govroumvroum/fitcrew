@@ -1,9 +1,10 @@
 "use client";
 
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { ChevronDownIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,6 +20,15 @@ const restLabel = (s: number) =>
 /** "Jour 1 — Haut du corps" → "Haut du corps", for the cramped rotation slots. */
 const shortLabel = (name: string) => name.split("—")[1]?.trim() ?? name;
 
+type Program = (typeof api.programs.list)["_returnType"][number];
+type Status = Program["status"];
+
+const STATUS_LABEL: Record<Status, string> = {
+  active: "En cours",
+  archived: "Archivé",
+  completed: "Terminé",
+};
+
 export default function ProgrammePage() {
   const date = useLocalDate();
 
@@ -30,24 +40,27 @@ export default function ProgrammePage() {
 }
 
 function Programme({ date }: { date: string }) {
-  const data = useQuery(api.programs.current, { date });
+  const programs = useQuery(api.programs.list, { date });
+  const setStatus = useMutation(api.programs.setStatus);
 
-  // Which day is expanded — the only state on the page. The program is the
-  // coach's document: no draft, no dirty flag, no save.
-  const [opened, setOpened] = useState<number | null>(null);
-
-  // Unconditional (hook rules). ponytail: resolves every name in the program at
-  // once instead of per open day — resolution is cached per name server-side, so
-  // it's paid once for the app's lifetime, and no GIF loads until a sheet opens.
+  // Unconditional (hook rules). ponytail: resolves every name of every program
+  // at once instead of per open day — resolution is cached per name server-side,
+  // so it's paid once for the app's lifetime, and no GIF loads until a sheet
+  // opens.
   const demoUrlFor = useExerciseDemos([
-    ...new Set(data?.program.days.flatMap((day) => day.exercises.map((it) => it.name)) ?? []),
+    ...new Set(
+      programs
+        ?.filter((program) => program.status === "active")
+        .flatMap((program) => program.days.flatMap((day) => day.exercises.map((it) => it.name))) ??
+        [],
+    ),
   ]);
 
-  if (data === undefined) return <Skeleton className="m-4 h-64" />;
-  if (data === null) {
+  if (programs === undefined) return <Skeleton className="m-4 h-64" />;
+  if (programs.length === 0) {
     return (
       <div className="p-6 text-center text-muted-foreground">
-        {/* The loaded branch gets its h1 from program.name; this one had none. */}
+        {/* The loaded branch gets its h1 from the page header; this one had none. */}
         <h1 className="sr-only">Programme</h1>
         <p>Pas encore de programme. Le coach t&apos;en écrit un quand tu veux.</p>
         <Button asChild size="lg" className="mt-4 h-14 w-full text-base">
@@ -57,33 +70,141 @@ function Programme({ date }: { date: string }) {
     );
   }
 
-  const { program, nextDayIndex } = data;
+  // `setStatus` keys on the LINEAGE, not on the row `id` — the row changes every
+  // time the coach swaps an exercise, the lineage is the program.
+  const change = (program: Program, status: Status) => {
+    void setStatus({ lineageId: program.lineageId, status }).catch(() =>
+      toast.error("Statut pas changé, réessaie."),
+    );
+  };
+
+  const active = programs.filter((program) => program.status === "active");
+  const past = programs.filter((program) => program.status !== "active");
+
+  return (
+    <div className="flex flex-col gap-6 p-4">
+      <header className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold">
+          {programs.length > 1 ? "Tes programmes" : "Ton programme"}
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          {active.length > 1
+            ? "Ils tournent en parallèle : chacun a sa propre rotation, un jour par séance, et aucun n'attend l'autre."
+            : "Les jours tournent dans l'ordre, un par séance, quand tu t'entraînes. Pas de calendrier, pas de retard possible."}
+        </p>
+      </header>
+
+      {active.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Aucun programme actif. Réactive-en un ci-dessous, ou demande-en un neuf au coach.
+        </p>
+      ) : (
+        active.map((program) => (
+          <ProgramSection
+            key={program.lineageId}
+            program={program}
+            demoUrlFor={demoUrlFor}
+            onStatus={change}
+          />
+        ))
+      )}
+
+      {past.length > 0 ? (
+        // ponytail: native <details> again. Archived programs are kept, not
+        // shown — a name, a version and a way back is all they owe.
+        <details className="group rounded-lg border bg-card/45 p-3.5">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium text-muted-foreground marker:hidden">
+            <ChevronDownIcon className="chevron" />
+            Archivés et terminés
+            <Badge variant="secondary" className="ml-auto shrink-0 tabular-nums">
+              {past.length}
+            </Badge>
+          </summary>
+          <ul className="mt-1 divide-y">
+            {past.map((program) => (
+              <li key={program.lineageId} className="flex items-center gap-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-muted-foreground">
+                    {program.name}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {STATUS_LABEL[program.status]} ·{" "}
+                    <span className="tabular-nums">{program.dayCount}</span> jour
+                    {program.dayCount > 1 ? "s" : ""} ·{" "}
+                    <span className="tabular-nums">v{program.version}</span>
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  className="h-11 shrink-0 px-3 active:scale-[0.98]"
+                  onClick={() => change(program, "active")}
+                >
+                  Réactiver
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
+      {/* Read-only page: the programs belong to the coach, which owns writing a
+          new one and swapping exercises. Nothing to edit here, just somewhere to
+          ask. ponytail: plain navigation, no composed message — nothing in
+          /coach reads a prefill (only `?thread=`), and inventing one would mean
+          a backend protocol this screen has no business owning. */}
+      <div className="flex flex-col gap-2">
+        <p className="text-sm text-muted-foreground">
+          Un exercice qui ne passe pas, du matériel en moins, une séance trop longue&#8239;? Tu ne
+          modifies pas le programme, tu le dis au coach et il le réécrit.
+        </p>
+        <Button asChild size="lg" className="h-14 w-full text-base">
+          <Link href="/coach">Demander un changement au coach</Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ProgramSection({
+  program,
+  demoUrlFor,
+  onStatus,
+}: {
+  program: Program;
+  demoUrlFor: (name: string) => string | null;
+  onStatus: (program: Program, status: Status) => void;
+}) {
+  // Which day is expanded — the only state here. The program is the coach's
+  // document: no draft, no dirty flag, no save.
+  const [opened, setOpened] = useState<number | null>(null);
+
+  const { days, nextDayIndex } = program;
   const openDay = opened ?? nextDayIndex;
   // A one-slot rotation isn't a cycle, so drawing it as one would lie. Below
-  // that threshold the day itself carries the page.
-  const isLoop = program.days.length > 1;
-  const totalSets = program.days.reduce(
+  // that threshold the day itself carries the section.
+  const isLoop = days.length > 1;
+  const totalSets = days.reduce(
     (sum, day) => sum + day.exercises.reduce((n, ex) => n + ex.sets, 0),
     0,
   );
   // A set costs its rest plus ~35 s of work. Estimated from the prescription,
   // never presented as a measurement — hence the caveat under the numbers.
   const avgMinutes =
-    program.days.reduce(
+    days.reduce(
       (sum, day) => sum + day.exercises.reduce((n, ex) => n + ex.sets * (ex.restSeconds + 35), 0),
       0,
     ) /
     60 /
-    program.days.length;
+    days.length;
 
   return (
-    <div className="flex flex-col gap-5 p-4">
-      <header className="flex flex-col gap-2">
+    <section className="flex flex-col gap-5">
+      <header className="flex flex-col gap-1">
         <div className="flex items-center gap-3">
           <p className="eyebrow min-w-0 flex-1">
             Écrit par le coach · le{" "}
             <span className="tabular-nums">
-              {formatDay(new Date(program._creationTime).toISOString().slice(0, 10))}
+              {formatDay(new Date(program.createdAt).toISOString().slice(0, 10))}
             </span>
           </p>
           <Badge variant="secondary" className="shrink-0 tabular-nums">
@@ -92,21 +213,15 @@ function Programme({ date }: { date: string }) {
         </div>
         {/* No font-heading/tracking here: the base layer already gives h1–h3 the
             display face and -0.01em. */}
-        <h1 className="text-2xl font-semibold">{program.name}</h1>
-        <p className="text-sm text-muted-foreground">
-          Les jours tournent dans l&apos;ordre, un par séance, quand tu t&apos;entraînes. Pas de
-          calendrier, pas de retard possible.
-        </p>
+        <h2 className="text-2xl font-semibold">{program.name}</h2>
       </header>
 
-      {/* Where you are in the loop. The program has no calendar, so the shape is
-          a rotation you're standing in — a slot opens its day below, nothing
-          more. It must never grow into a week view. */}
-      <section className={cn("flex flex-col gap-3", isLoop && "slab")}>
+      {/* Where you are in the loop. A program has no calendar, so the shape is a
+          rotation you're standing in — a slot opens its day below, nothing more.
+          It must never grow into a week view. */}
+      <div className={cn("flex flex-col gap-3", isLoop && "slab")}>
         <div className="min-w-0">
-          <p className="eyebrow">
-            {isLoop ? "La rotation" : "Un seul jour, répété à chaque séance"}
-          </p>
+          <p className="eyebrow">{isLoop ? "La rotation" : "Un seul jour, répété à chaque séance"}</p>
           {isLoop ? (
             <p className="text-sm text-muted-foreground">
               Le jour qui vient, puis le suivant. Tu ne peux pas être en retard sur une boucle.
@@ -115,9 +230,9 @@ function Programme({ date }: { date: string }) {
         </div>
         {isLoop ? (
           <div className="grid auto-cols-fr grid-flow-col gap-[3px]">
-            {program.days.map((day, index) => {
+            {days.map((day, index) => {
               const next = index === nextDayIndex;
-              const offset = (index - nextDayIndex + program.days.length) % program.days.length;
+              const offset = (index - nextDayIndex + days.length) % days.length;
               return (
                 <button
                   key={day.name}
@@ -161,11 +276,11 @@ function Programme({ date }: { date: string }) {
             })}
           </div>
         ) : null}
-      </section>
+      </div>
 
       <div className="flex flex-col gap-5 md:grid md:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] md:items-start md:gap-5">
         <div className="flex flex-col gap-2.5">
-          {program.days.map((day, index) => {
+          {days.map((day, index) => {
             const next = index === nextDayIndex;
             const sets = day.exercises.reduce((n, ex) => n + ex.sets, 0);
             return (
@@ -187,7 +302,7 @@ function Programme({ date }: { date: string }) {
                 // ancestor is actually allowed to be narrower than its content.
                 className={cn(
                   "group min-w-0 overflow-hidden",
-                  // With no cycle to draw, the day's own table is the page's
+                  // With no cycle to draw, the day's own table is the section's
                   // dominant element, so it takes the slab (p-0: the rows carry
                   // their own padding).
                   // bg-card/55, like the two panels beside it: at /40 the day
@@ -295,7 +410,7 @@ function Programme({ date }: { date: string }) {
                 <span className="min-w-0 flex-1 text-sm text-muted-foreground">
                   Jours dans la rotation
                 </span>
-                <span className="font-semibold tabular-nums">{program.days.length}</span>
+                <span className="font-semibold tabular-nums">{days.length}</span>
               </li>
             </ul>
             <p className="text-sm text-muted-foreground">
@@ -305,20 +420,24 @@ function Programme({ date }: { date: string }) {
         </div>
       </div>
 
-      {/* Read-only page: the program belongs to the coach, which owns the swap
-          and the regeneration. Nothing to edit here, just somewhere to ask.
-          ponytail: plain navigation, no composed message — nothing in /coach
-          reads a prefill (only `?thread=`), and inventing one would mean a
-          backend protocol this screen has no business owning. */}
-      <div className="flex flex-col gap-2">
-        <p className="text-sm text-muted-foreground">
-          Un exercice qui ne passe pas, du matériel en moins, une séance trop longue&#8239;? Tu ne
-          modifies pas le programme, tu le dis au coach et il le réécrit.
-        </p>
-        <Button asChild size="lg" className="h-14 w-full text-base">
-          <Link href="/coach">Demander un changement au coach</Link>
+      {/* Two ghost words, right-aligned: putting a program away is a rare,
+          reversible decision and must not compete with the day list above it. */}
+      <div className="flex justify-end gap-1">
+        <Button
+          variant="ghost"
+          className="h-11 px-3 text-muted-foreground active:scale-[0.98]"
+          onClick={() => onStatus(program, "completed")}
+        >
+          Terminé
+        </Button>
+        <Button
+          variant="ghost"
+          className="h-11 px-3 text-muted-foreground active:scale-[0.98]"
+          onClick={() => onStatus(program, "archived")}
+        >
+          Archiver
         </Button>
       </div>
-    </div>
+    </section>
   );
 }

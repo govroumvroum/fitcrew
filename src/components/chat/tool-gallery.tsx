@@ -117,7 +117,8 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
   ],
   "tool-generate_program": [
     {
-      label: "Programme 2 jours, v3",
+      // Always v1 now: `generate_program` opens a new lineage every time.
+      label: "Nouveau programme, 2 jours",
       tool: done(
         "tool-generate_program",
         {
@@ -175,7 +176,7 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
             "Ajoute 2,5 kg dès que tu tiens le haut de la fourchette sur toutes les séries. Si tu rates le bas de la fourchette deux séances de suite, retire 5 % et remonte.",
           deloadEveryWeeks: 6,
         },
-        { version: 3 },
+        { version: 1 },
       ),
     },
   ],

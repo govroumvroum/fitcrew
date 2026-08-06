@@ -1,6 +1,6 @@
 /** Self-check for prescription.ts. Run: `bun src/components/workout/prescription.check.ts` */
 import assert from "node:assert/strict";
-import { defaultReps, workingValues, type SetRow } from "./prescription";
+import { defaultReps, seedSets, workingValues, type SetRow } from "./prescription";
 
 assert.equal(defaultReps("8"), 8);
 assert.equal(defaultReps("8-12"), 8);
@@ -28,5 +28,25 @@ assert.deepEqual(
   workingValues([row(2, 70, 8, false), row(1, 65, 9, true), row(0, 60, 10, true)], "8"),
   { weight: 65, reps: 9 },
 );
+
+// One row per prescribed set, numbered from 0, prefill applied by name.
+assert.deepEqual(
+  seedSets(
+    [
+      { name: "Squat", sets: 2, reps: "5" },
+      { name: "Tractions", sets: 1, reps: "AMRAP" },
+    ],
+    [{ name: "Squat", weight: 80, reps: 6 }],
+  ),
+  [
+    { exerciseName: "Squat", index: 0, weight: 80, reps: 6 },
+    { exerciseName: "Squat", index: 1, weight: 80, reps: 6 },
+    // Never trained → 0 kg and the prescription's reps, not another exercise's.
+    { exerciseName: "Tractions", index: 0, weight: 0, reps: 10 },
+  ],
+);
+
+// A prefill entry for an exercise that isn't in the day is ignored, not appended.
+assert.deepEqual(seedSets([], [{ name: "Squat", weight: 80, reps: 6 }]), []);
 
 console.log("prescription.ts ok");
