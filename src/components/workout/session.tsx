@@ -156,12 +156,13 @@ export function Session({ date }: { date: string }) {
 
   const done = sets.filter((set) => set.completed);
 
-  // A séance attached to no program — the Coach's retroactive log leaves one
-  // open when the user gave no notes. There is no prescription to render.
+  // Guard, not a state the app produces: `workouts.today` only hands back a
+  // séance that has a program, and a program row is never deleted. It stays
+  // because `day` is nullable and a blank screen would be worse.
   if (!day) {
     return (
       <div className="flex flex-1 flex-col gap-6 p-4">
-        <Empty>Une séance sans programme est en cours. Elle a été notée par le coach.</Empty>
+        <Empty>Le programme de cette séance est introuvable.</Empty>
         <History date={date} />
       </div>
     );
@@ -709,9 +710,6 @@ function ProgramPick({
         <p className="text-sm text-muted-foreground">
           {exercises.length} exercice{exercises.length > 1 ? "s" : ""} ·{" "}
           <span className="tabular-nums">{total}</span> série{total > 1 ? "s" : ""}
-          {/* Marked, never hidden: a second séance on the same program is
-              allowed, it just shouldn't be the obvious next tap. */}
-          {program.trainedToday ? " · déjà fait aujourd'hui" : ""}
         </p>
       </div>
 
@@ -738,11 +736,9 @@ function ProgramPick({
       {/* Red on every card, not just the first: the programs are equals and
           there is no selection, so ranking one of them would be a lie. Each slab
           is its own surface and carries its own commit — what the app rations is
-          two red buttons competing inside ONE surface. A program already trained
-          today drops to secondary, which is the only ranking there is. */}
+          two red buttons competing inside ONE surface. */}
       <Button
         className="h-14 w-full text-base active:scale-[0.97]"
-        variant={program.trainedToday ? "secondary" : "default"}
         disabled={busy || exercises.length === 0}
         onClick={async () => {
           setBusy(true);
@@ -759,7 +755,7 @@ function ProgramPick({
           }
         }}
       >
-        {program.trainedToday ? "En refaire une" : "C'est parti"}
+        C&apos;est parti
       </Button>
     </section>
   );

@@ -135,7 +135,13 @@ export async function prefillFor(
 }
 
 /** The latest row of a lineage the caller owns. The index range is scoped to the
- * user, so "not found" and "not yours" are the same answer — deliberately. */
+ * user, so "not found" and "not yours" are the same answer — deliberately.
+ *
+ * ponytail: the read path tolerates a row with no `lineageId` (the `?? _id`
+ * default), this write path requires the backfill — `.eq("lineageId", …)` can't
+ * match a row that hasn't got the field. `backfillLineage` runs on every deploy
+ * (see `runAll` and vercel.json), so an unbackfilled row can't reach a user's
+ * screen; the day that stops being true, read the root row here as a fallback. */
 async function ownLineage(
   ctx: QueryCtx,
   userId: Id<"users">,
@@ -152,28 +158,6 @@ async function ownLineage(
   if (!latest) throw new Error("Programme introuvable");
   return latest;
 }
-
-/**
- * The program the Coach last saw the user train, plus which of its days comes
- * next. Programs run in parallel, so this is one of several — `list` is what the
- * séance screen renders.
- *
- * `date` is an argument and not `Date.now()` for the same reason as in
- * `workouts.today`: queries don't rerun as the clock advances, and the client
- * owns "today" in its own timezone.
- */
-export const current = query({
-  args: { date: v.string() },
-  handler: async (ctx, args) => {
-    const user = await getCurrentUser(ctx);
-    if (!user?.currentProgramId) return null;
-
-    const program = await ctx.db.get("programs", user.currentProgramId);
-    if (!program) return null;
-
-    return { program, nextDayIndex: await nextDayIndexFor(ctx, program, args.date) };
-  },
-});
 
 /**
  * Every program the user has, whole, one entry per lineage, each with its OWN

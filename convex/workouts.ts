@@ -14,6 +14,25 @@ async function ownSet(ctx: MutationCtx, setId: Id<"sets">): Promise<Doc<"sets">>
 }
 
 /**
+ * The séance the screen is on, out of today's rows (newest first).
+ *
+ * A row with no `programId` — the Coach's retroactive log, a screenshot import —
+ * is never it: there is no prescription to render and nothing ever calls
+ * `finish` on one, so treating it as "in progress" wedges /seance for the rest
+ * of the day. Those rows are history, and `history` shows them.
+ *
+ * Of what's left, an unfinished séance is what the user is doing right now;
+ * otherwise the last one finished today, so the récap and its records survive a
+ * reload.
+ */
+export function sessionOf<T extends { programId?: string; endedAt?: number }>(
+  todays: T[],
+): T | null {
+  const rows = todays.filter((w) => w.programId !== undefined);
+  return rows.find((w) => w.endedAt === undefined) ?? rows[0] ?? null;
+}
+
+/**
  * The séance in progress, if there is one: its prescription, its set rows, and
  * the weight/reps to prefill from the last time each exercise was done.
  *
@@ -37,9 +56,7 @@ export const today = query({
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.date))
       .order("desc")
       .take(10);
-    // An unfinished one is what the user is doing right now; otherwise the last
-    // one finished today, so the récap and its records survive a reload.
-    const workout = todays.find((w) => w.endedAt === undefined) ?? todays[0] ?? null;
+    const workout = sessionOf(todays);
 
     const program = workout?.programId ? await ctx.db.get("programs", workout.programId) : null;
 
