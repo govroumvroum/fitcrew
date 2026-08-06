@@ -45,6 +45,8 @@ export function Today({ date }: { date: string }) {
   // The home card is a summary: one line per program, and /seance is where you
   // pick. Only one program is spelled out in the heading.
   const only = active.length === 1 ? active[0] : null;
+  // Archived everything ≠ never had one: same distinction /seance makes.
+  const none = programs.length === 0;
   const done = sets.filter((set) => set.completed).length;
   const volume = Math.round(
     sets.reduce((total, set) => (set.completed ? total + set.weight * set.reps : total), 0),
@@ -78,7 +80,9 @@ export function Today({ date }: { date: string }) {
                       ? (only.nextDayName ?? only.name)
                       : active.length > 0
                         ? "Tes programmes"
-                        : "Pas encore de programme"}
+                        : none
+                          ? "Pas encore de programme"
+                          : "Aucun programme actif"}
                 </h2>
               </div>
               {day ? (
@@ -96,7 +100,9 @@ export function Today({ date }: { date: string }) {
             {!day ? (
               active.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Le coach t&apos;en écrit un après quelques questions.
+                  {none
+                    ? "Le coach t'en écrit un après quelques questions."
+                    : "Réactive-en un pour reprendre, ou demande-en un neuf au coach."}
                 </p>
               ) : only ? (
                 <p className="text-sm text-muted-foreground">{only.name}</p>
@@ -179,7 +185,11 @@ export function Today({ date }: { date: string }) {
 
             {!day ? (
               active.length === 0 ? (
-                <Cta href="/coach">Fais ton profil avec le coach</Cta>
+                none ? (
+                  <Cta href="/coach">Fais ton profil avec le coach</Cta>
+                ) : (
+                  <Cta href="/programme">Réactive un programme</Cta>
+                )
               ) : (
                 <Cta href="/seance">
                   {only ? "Commencer la séance" : "Choisir une séance"}

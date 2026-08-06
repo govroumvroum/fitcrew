@@ -93,7 +93,6 @@ export const today = query({
       workout,
       sets,
       day,
-      dayIndex,
       programName: program?.name ?? null,
       prefill,
       prs,
