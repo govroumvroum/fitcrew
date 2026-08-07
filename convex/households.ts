@@ -445,8 +445,16 @@ export async function adoptOwnMealsIntoFoyer(
   const profiles = await Promise.all(household.memberIds.map((id) => profileFor(ctx, id)));
   if (profiles.some((p) => p === null)) return;
 
-  // <week, <date, <slot, meal>>> — the meal that wins each (date, slot).
-  const winners = new Map<string, Map<string, Map<MealSlot, PlannedMeal>>>();
+  // Une seule passe : qui revendique chaque (semaine, date, créneau), avec le
+  // repas correspondant. Un (date, créneau) revendiqué par LES DEUX membres est
+  // un split (chacun son plat voté) ou une copie de retrait — une décision par
+  // date que l'adoption ne doit pas re-sweep : seules une génération complète
+  // de semaine (savePlan) re-propose un plat commun. Le sens ajout ne sert
+  // qu'aux repas d'un seul membre.
+  const claimed = new Map<
+    string,
+    Map<string, Map<MealSlot, { members: Set<Id<"users">>; meal: PlannedMeal }>>
+  >();
   for (const memberId of household.memberIds) {
     const plans = await ctx.db
       .query("mealPlans")
@@ -456,16 +464,30 @@ export async function adoptOwnMealsIntoFoyer(
       for (const day of plan.days) {
         for (const meal of day.meals) {
           if (!slots.includes(meal.slot)) continue;
-          const week = winners.get(plan.weekStart) ?? new Map();
+          const week = claimed.get(plan.weekStart) ?? new Map();
           const date = week.get(day.date) ?? new Map();
-          const existing = date.get(meal.slot);
-          // Locked beats everything; otherwise the first member in the row.
-          if (!existing || (meal.locked === true && existing.locked !== true)) {
-            date.set(meal.slot, { ...meal, portions: 2 });
-          }
+          const entry = date.get(meal.slot) ?? { members: new Set<Id<"users">>(), meal };
+          entry.members.add(memberId);
+          date.set(meal.slot, entry);
           week.set(day.date, date);
-          winners.set(plan.weekStart, week);
+          claimed.set(plan.weekStart, week);
         }
+      }
+    }
+  }
+
+  // <week, <date, <slot, meal>>> — les repas des (date, créneau) à un seul
+  // revendiquant passent dans la semaine foyer (portions = 2).
+  const winners = new Map<string, Map<string, Map<MealSlot, PlannedMeal>>>();
+  for (const [week, byDate] of claimed) {
+    for (const [date, bySlot] of byDate) {
+      for (const [slot, entry] of bySlot) {
+        if (entry.members.size !== 1) continue;
+        const weekMap = winners.get(week) ?? new Map();
+        const dateMap = weekMap.get(date) ?? new Map();
+        dateMap.set(slot, { ...entry.meal, portions: 2 });
+        weekMap.set(date, dateMap);
+        winners.set(week, weekMap);
       }
     }
   }
