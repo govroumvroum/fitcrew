@@ -347,7 +347,7 @@ export const dashboard = query({
               h.myProfile?.targets.calories ?? 0,
               h.partnerProfile?.targets.calories ?? 0,
             ),
-            ...(h.partner ? { sharedWith: h.partner.name } : {}),
+            ...(h.partner ? { sharedWith: h.partner.name?.trim() || "Ton partenaire" } : {}),
           })),
         ].sort(bySlot)
       : ownMeals;
@@ -528,8 +528,13 @@ export const moveMeal = internalMutation({
     if (fromShared && h.household) {
       const plan = await householdPlanFor(ctx, h.household._id, args.weekStart);
       if (!plan) throw new Error("Aucun plan pour cette semaine");
-      const from = requireDay(plan, args.from.date);
-      const to = requireDay(plan, args.to.date);
+      // The foyer week is sparse — a day exists only where a shared meal does —
+      // so both endpoints are created on demand, like the own branch below.
+      const days = plan.days.map((day) => ({ ...day, meals: [...day.meals] }));
+      const from = days.find((d) => d.date === args.from.date) ?? { date: args.from.date, meals: [] };
+      if (!days.includes(from)) days.push(from);
+      const to = days.find((d) => d.date === args.to.date) ?? { date: args.to.date, meals: [] };
+      if (!days.includes(to)) days.push(to);
 
       const index = from.meals.findIndex((m) => m.slot === args.from.slot);
       if (index < 0) throw new Error("Aucun repas à déplacer sur ce créneau");
@@ -545,7 +550,7 @@ export const moveMeal = internalMutation({
 
       from.meals.sort(bySlot);
       to.meals.sort(bySlot);
-      await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+      await ctx.db.patch("householdMealPlans", plan._id, { days });
       return { name: moved.name };
     }
 
