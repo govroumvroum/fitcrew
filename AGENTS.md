@@ -22,6 +22,10 @@ Convex agent skills for common tasks can be installed by running
 
 <!-- convex-ai-end -->
 
+# GitHub issues
+
+When creating or rewriting a GitHub issue, read `.agents/skills/issue/SKILL.md` first. It defines the research process and the quality bar for decision-ready issues, and should be used with the templates in `.github/ISSUE_TEMPLATE/`.
+
 # Migrations
 
 Data migrations live in `convex/migrations.ts`, built with `@convex-dev/migrations`.
