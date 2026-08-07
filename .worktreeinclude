@@ -1,0 +1,4 @@
+# Local secrets, copied (not symlinked) so each new worktree can run the app.
+.env
+.env.local
+.clerk/
