@@ -1,6 +1,12 @@
 /** Self-check for the nutrition maths. Run: `bun convex/nutrition.check.ts` */
 import assert from "node:assert/strict";
-import { type PlanDay, estimateTargets, shoppingListFrom, sumMacros } from "./nutrition";
+import {
+  type PlanDay,
+  estimateTargets,
+  mergeShoppingLists,
+  shoppingListFrom,
+  sumMacros,
+} from "./nutrition";
 
 const base = { age: 30, sex: "h", heightCm: 180, weightKg: 80, activityLevel: "modere" } as const;
 
@@ -88,5 +94,20 @@ assert.deepEqual(shoppingListFrom(days), [
 
 // An empty week is an empty list.
 assert.deepEqual(shoppingListFrom([]), []);
+
+// The foyer's list merged with the member's own: the same ingredient, however
+// it is spelled on either side, keeps the FIRST spelling as its name and the
+// quantities are concatenated, never summed — same ponytail as shoppingListFrom.
+assert.deepEqual(
+  mergeShoppingLists(
+    [{ name: "Tomate", quantities: ["200 g"] }],
+    [{ name: "tomates", quantities: ["3"] }],
+  ),
+  [{ name: "Tomate", quantities: ["200 g", "3"] }],
+);
+assert.deepEqual(mergeShoppingLists([], []), []);
+assert.deepEqual(mergeShoppingLists([], [{ name: "Œufs", quantities: ["6"] }]), [
+  { name: "Œufs", quantities: ["6"] },
+]);
 
 console.log("nutrition targets + shopping list ok");

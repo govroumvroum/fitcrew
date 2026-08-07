@@ -1,20 +1,24 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import { ChevronDownIcon, ClockIcon, LockIcon, LockOpenIcon, PlusIcon } from "lucide-react";
+import { ChevronDownIcon, ClockIcon, CopyIcon, LockIcon, LockOpenIcon, PlusIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { useId, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatFull, monday } from "@/lib/dates";
-import { formatNumber } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
-import type { PlannedMeal } from "../../../convex/nutrition";
+import type { MealSlot, PlannedMeal } from "../../../convex/nutrition";
 import { FoodLog } from "./food-log";
-import { MacroProgress, SLOT_LABELS, macroLine, pct, runMutation } from "./macros";
+import { MacroProgress, SLOT_LABELS, SLOT_ORDER, macroLine, pct, runMutation } from "./macros";
 
 /**
  * /nutrition. Reads one subscription (`api.nutrition.dashboard`) for today's
@@ -24,7 +28,7 @@ import { MacroProgress, SLOT_LABELS, macroLine, pct, runMutation } from "./macro
  * `generate_meal_plan` tool, and replacing / moving / adapting a meal is natural
  * language. So every one of those is a link into /chef rather than a button that
  * would have to reimplement the agent. What it does own is the journal, the lock
- * toggle and hydration — three writes with no model in the loop.
+ * toggle, hydration and the foyer card — four writes with no model in the loop.
  */
 
 /** Also the placeholder the page shows before the local date exists, so the two
@@ -128,6 +132,8 @@ export function NutritionDashboard({ today }: { today: string }) {
 
           <Meals meals={todayMeals} today={today} weekStart={weekStart} hasPlan={hasPlan} />
 
+          <Household household={data.household} />
+
           <Separator className="md:hidden" />
           <Hydration today={today} ml={hydrationMl} />
         </div>
@@ -154,13 +160,249 @@ const GOALS = {
   prise: "Prise de masse",
 } as const;
 
+/** The dashboard's `household` field — same shape as households.status, kept in
+ *  sync server-side. The card reads it from the page's one subscription rather
+ *  than a second query on status: two subscriptions could disagree mid-render
+ *  (same rule as the journal's `log` in food-log.tsx). */
+type HouseholdStatus = {
+  sharedSlots: MealSlot[];
+  partnerName: string | null;
+  pendingCode: string | null;
+  partnerHasProfile: boolean;
+  canShare: boolean;
+};
+
+/**
+ * Repas à deux: one dish, two portions, each computed for its eater's targets.
+ * The whole foyer lifecycle lives here — invite, join, shared slots, leave.
+ * Every write goes through `runMutation` so the server's French message is the
+ * one shown on failure, and the busy state keeps a second tap from racing the
+ * first while the subscription catches up.
+ */
+function Household({ household }: { household: HouseholdStatus | null }) {
+  const invite = useMutation(api.households.invite);
+  const cancelInvite = useMutation(api.households.cancelInvite);
+  const join = useMutation(api.households.join);
+  const setSharedSlots = useMutation(api.households.setSharedSlots);
+  const leave = useMutation(api.households.leave);
+
+  const [busy, setBusy] = useState(false);
+  const [code, setCode] = useState("");
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const id = useId();
+
+  const guard = (action: () => Promise<unknown>, ok: string) => {
+    setBusy(true);
+    runMutation(action, ok).finally(() => setBusy(false));
+  };
+
+  // No foyer yet: create an invite or enter one.
+  if (!household) {
+    return (
+      <section className="flex flex-col gap-2.5">
+        <div>
+          <h2 className="text-[1.05rem] font-bold">Repas à deux</h2>
+          <p className="text-sm text-muted-foreground">
+            Un même plat cuisiné une fois, deux portions — chacune calculée pour vos objectifs.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <Button
+            className="h-11"
+            disabled={busy}
+            onClick={() => guard(() => invite(), "Code créé, partage-le.")}
+          >
+            Créer un code d&apos;invitation
+          </Button>
+          <form
+            className="flex flex-col gap-1.5"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const trimmed = code.trim();
+              if (!trimmed) return;
+              setJoinError(null);
+              setBusy(true);
+              try {
+                await join({ code: trimmed });
+                setCode("");
+                toast.success("Foyer créé !");
+              } catch (err) {
+                // The server's message ("Ce code n'est plus valide"…) stays
+                // visible until the next attempt: a toast would vanish before
+                // the user has typed the code again.
+                setJoinError(err instanceof Error ? err.message : "Ça a raté, réessaie.");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`${id}-code`} className="text-[11px] text-muted-foreground">
+                Rejoindre avec un code
+              </Label>
+              <Input
+                id={`${id}-code`}
+                value={code}
+                onChange={(e) => {
+                  setCode(e.target.value);
+                  setJoinError(null);
+                }}
+                placeholder="ABC234"
+                maxLength={6}
+                autoCapitalize="characters"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={joinError !== null}
+                className="h-11 text-base uppercase tracking-widest sm:text-sm"
+              />
+              {joinError ? <p className="text-[11px] text-destructive">{joinError}</p> : null}
+            </div>
+            <Button
+              type="submit"
+              variant="outline"
+              className="h-11"
+              disabled={busy || code.trim() === ""}
+            >
+              Rejoindre le foyer
+            </Button>
+          </form>
+        </div>
+      </section>
+    );
+  }
+
+  // One member, an invite out. The code is only shown to its owner; the
+  // code-less variant below exists for the foyer whose invite code was cleared
+  // without a join — unreachable through the API, but the cancel is the way out.
+  if (!household.partnerName) {
+    return (
+      <section className="flex flex-col gap-2.5">
+        <div>
+          <h2 className="text-[1.05rem] font-bold">Repas à deux</h2>
+          <p className="text-sm text-muted-foreground">En attente de l&apos;autre personne.</p>
+        </div>
+        {household.pendingCode ? (
+          <div className="flex items-center gap-2 rounded-xl border bg-card p-3">
+            <p className="min-w-0 flex-1 text-center font-heading text-2xl font-bold tracking-[0.25em] tabular-nums">
+              {household.pendingCode}
+            </p>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-11 shrink-0"
+              aria-label="Copier le code d'invitation"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(household.pendingCode!);
+                  toast.success("Code copié.");
+                } catch {
+                  toast.error("Impossible de copier le code.");
+                }
+              }}
+            >
+              <CopyIcon className="size-4" aria-hidden />
+            </Button>
+          </div>
+        ) : null}
+        <p className="text-[11px] text-muted-foreground">
+          {household.pendingCode
+            ? "L'autre personne entre ce code dans Repas à deux pour rejoindre."
+            : "L'invitation n'a pas de code pour l'instant."}
+        </p>
+        <Button
+          variant="outline"
+          className="h-11"
+          disabled={busy}
+          onClick={() => guard(() => cancelInvite(), "Invitation annulée.")}
+        >
+          Annuler l&apos;invitation
+        </Button>
+      </section>
+    );
+  }
+
+  // The foyer is complete: pick the slots the two eat together.
+  return (
+    <section className="flex flex-col gap-2.5">
+      <div>
+        <h2 className="text-[1.05rem] font-bold">Foyer — {household.partnerName}</h2>
+        <p className="text-sm text-muted-foreground">
+          Les repas des créneaux cochés se cuisinent une fois pour deux.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <p className="eyebrow">Repas partagés</p>
+        <div className="flex flex-wrap gap-2">
+          {SLOT_ORDER.map((slot) => {
+            const on = household.sharedSlots.includes(slot);
+            return (
+              <button
+                key={slot}
+                type="button"
+                aria-pressed={on}
+                disabled={busy}
+                onClick={() => {
+                  if (busy) return;
+                  setBusy(true);
+                  // When a slot is removed, the server copies its meals into
+                  // both own plans before unsharing — nothing is orphaned.
+                  runMutation(
+                    () =>
+                      setSharedSlots({
+                        slots: on
+                          ? household.sharedSlots.filter((s) => s !== slot)
+                          : [...household.sharedSlots, slot],
+                      }),
+                    on ? "Créneau retiré du partage." : "Créneau partagé.",
+                  ).finally(() => setBusy(false));
+                }}
+                className={cn(
+                  "h-8 rounded-full border px-3 text-[11px] font-medium transition-colors active:scale-[0.96] disabled:opacity-50",
+                  on
+                    ? "border-transparent bg-primary text-primary-foreground"
+                    : "border-input text-muted-foreground",
+                )}
+              >
+                {SLOT_LABELS[slot]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {!household.partnerHasProfile ? (
+        <p className="text-[11px] text-muted-foreground">
+          Ton foyer est prêt, mais {household.partnerName} doit compléter son profil nutrition pour
+          que les repas soient partagés.
+        </p>
+      ) : null}
+
+      <Button
+        variant="destructive"
+        className="h-11"
+        disabled={busy}
+        onClick={() => {
+          // ponytail: native confirm, like the séance's cancel. Leaving copies
+          // the shared meals into both own plans server-side, so nobody loses a
+          // dish — only the sharing.
+          if (!window.confirm("Quitter le foyer ? Chacun garde ses repas, avec sa portion.")) return;
+          guard(() => leave(), "Foyer quitté.");
+        }}
+      >
+        Quitter le foyer
+      </Button>
+    </section>
+  );
+}
+
 function Meals({
   meals,
   today,
   weekStart,
   hasPlan,
 }: {
-  meals: PlannedMeal[];
+  meals: (PlannedMeal & { sharedWith?: string })[];
   today: string;
   weekStart: string;
   hasPlan: boolean;
@@ -186,7 +428,14 @@ function Meals({
         <article key={meal.slot} className="flex flex-col gap-2 rounded-xl border bg-card p-3">
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
-              <p className="eyebrow">{SLOT_LABELS[meal.slot]}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="eyebrow">{SLOT_LABELS[meal.slot]}</p>
+                {meal.sharedWith ? (
+                  <Badge variant="secondary" className="shrink-0">
+                    Partagé avec {meal.sharedWith}
+                  </Badge>
+                ) : null}
+              </div>
               <p className="font-heading font-semibold">{meal.name}</p>
               <p className="text-[11px] text-muted-foreground tabular-nums">
                 {macroLine(meal.macros)}

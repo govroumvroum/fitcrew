@@ -41,7 +41,7 @@ import {
 } from "./chefToolSchemas";
 import { foodByBarcode, isBarcode, searchFood } from "./foodFacts";
 import { languageModel } from "./model";
-import type { Macros, PlannedMeal } from "./nutrition";
+import type { Macros, MealSlot, PlannedMeal } from "./nutrition";
 import { shift, weekStart } from "./progress";
 import { KICKOFF, CHEF_ATTACHMENTS, isSentinel } from "./sentinels";
 import { getCurrentUser, requireCurrentUser } from "./users";
@@ -57,26 +57,62 @@ type ModelMeal = z.infer<typeof zPlannedMeal>;
  * `locked` is deliberately absent: it belongs to the user (the lock button in the
  * UI), and letting the model set it would let it lock its own proposals.
  */
-export function toPlannedMeal({ mealPrep, ...rest }: ModelMeal): PlannedMeal {
-  return { ...rest, ...(mealPrep ? { mealPrep } : {}) };
+export function toPlannedMeal({ mealPrep, portions, ...rest }: ModelMeal): PlannedMeal {
+  return {
+    ...rest,
+    ...(mealPrep ? { mealPrep } : {}),
+    // `portions` is ONLY set on shared foyer meals; a solo user's plan carries
+    // nothing and reads as `meal.portions ?? 2` everywhere.
+    ...(portions ? { portions } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Reads the chef needs
 // ---------------------------------------------------------------------------
 
+/** What `api.households.status` and the dashboard's `household` field return —
+ *  same shape, the two must never drift. */
+type HouseholdStatus = {
+  householdId: Id<"households">;
+  sharedSlots: MealSlot[];
+  partnerName: string | null;
+  pendingCode: string | null;
+  partnerHasProfile: boolean;
+  canShare: boolean;
+};
+
 /** What the dashboard query hands back — see `api.nutrition.dashboard`. */
 type Dashboard = {
   profile: Doc<"nutritionProfiles"> | null;
-  todayMeals: PlannedMeal[];
+  todayMeals: (PlannedMeal & { sharedWith?: string })[];
   log: Doc<"foodLog">[];
   consumed: Macros;
   hydrationMl: number;
   weekStart: string;
   hasPlan: boolean;
+  household: HouseholdStatus | null;
 };
 
-type ChefContext = { user: Doc<"users">; dashboard: Dashboard; inventory: Doc<"inventory">[] };
+/**
+ * PRIVACY BY CONSTRUCTION: the only partner data that ever enters the chef's
+ * context. Name, diet, allergies, excluded — never weight, age, height, goal
+ * or targets, which stay unread server-side.
+ */
+type HouseholdInChef = {
+  partnerName: string;
+  sharedSlots: MealSlot[];
+  partnerDiet: string | null;
+  partnerAllergies: string[];
+  partnerExcluded: string[];
+};
+
+type ChefContext = {
+  user: Doc<"users">;
+  dashboard: Dashboard;
+  inventory: Doc<"inventory">[];
+  household: HouseholdInChef | null;
+};
 
 /**
  * Everything the system prompt is built from, in one transaction. Reuses the
@@ -91,10 +127,37 @@ export const context = internalQuery({
   args: { today: v.string() },
   handler: async (ctx, args): Promise<ChefContext> => {
     const user = await requireCurrentUser(ctx);
+    const dashboard = await ctx.runQuery(api.nutrition.dashboard, { today: args.today });
+
+    // Only a complete foyer with two profiles starts sharing; anything less
+    // and the chef hears nothing about a partner.
+    let household: HouseholdInChef | null = null;
+    if (dashboard.household?.canShare) {
+      const row = await ctx.db.get("households", dashboard.household.householdId);
+      const partnerId = row?.memberIds.find((id) => id !== user._id);
+      if (partnerId) {
+        const profile = await ctx.db
+          .query("nutritionProfiles")
+          .withIndex("by_user", (q) => q.eq("userId", partnerId))
+          .unique();
+        if (profile) {
+          household = {
+            partnerName: dashboard.household.partnerName ?? "ton partenaire",
+            sharedSlots: dashboard.household.sharedSlots,
+            // Constraint fields only — see `HouseholdInChef`.
+            partnerDiet: profile.diet ?? null,
+            partnerAllergies: profile.allergies,
+            partnerExcluded: profile.excluded,
+          };
+        }
+      }
+    }
+
     return {
       user,
-      dashboard: await ctx.runQuery(api.nutrition.dashboard, { today: args.today }),
+      dashboard,
       inventory: await ctx.runQuery(api.nutrition.inventory, {}),
+      household,
     };
   },
 });
@@ -182,7 +245,7 @@ function chefTools(today: string) {
 
     shopping_list: createTool({
       description:
-        "La liste de courses de la semaine, consolidée depuis le plan. Rien à inventer : ça sort du plan enregistré.",
+        "La liste de courses de la semaine, consolidée depuis le plan, repas du foyer compris. Rien à inventer : ça sort du plan enregistré.",
       inputSchema: z.object({}),
       execute: async (ctx: ToolCtx) => await ctx.runQuery(api.nutrition.shoppingList, { ...week }),
     }),
@@ -338,8 +401,25 @@ function systemPrompt(
   dashboard: Dashboard,
   inventory: Doc<"inventory">[],
   today: string,
+  household: HouseholdInChef | null,
 ) {
   const p = dashboard.profile;
+
+  const foyerSection = household
+    ? `FOYER
+- ${user.name} et ${household.partnerName} partagent le(s) créneau(x) : ${household.sharedSlots
+        .map((slot) => SLOT_LABEL[slot])
+        .join(", ")} — ce sont les repas du foyer.
+- Un créneau partagé = UN SEUL plat, généré une fois, qui nourrit deux personnes (portions : 2). Il s'affiche chez les deux, chacun avec sa portion calculée d'après ses cibles. Ne génère jamais deux plats pour un créneau partagé.
+- Les macros d'un repas partagé = celles d'UNE portion, pas du plat entier.
+- Contraintes combinées — les DEUX doivent pouvoir manger le plat (en plus des contraintes de ${user.name} déjà décrites) : allergies de ${household.partnerName} : ${household.partnerAllergies.join(", ") || "aucune"}, aliments exclus : ${household.partnerExcluded.join(", ") || "aucun"}, régime : ${household.partnerDiet ?? "aucun"}.
+- Si les régimes diffèrent (ex. un végétarien et un omnivore), propose l'option la plus maligne sans décider à sa place : 1) un plat végétarien mais bien protéiné (légumineuses, tofu, œufs, fromage selon les régimes), 2) une base végétarienne avec un ajout de protéine animale à côté pour celui qui veut (poulet, poisson, jambon en accompagnement), 3) si vraiment incompatible, des repas séparés sur ce créneau.
+- Les allergies et exclusions du partenaire sont des contraintes DURES, comme celles de ${user.name}.
+- NE MENTIONNE JAMAIS dans tes réponses les données corporelles ni les cibles du partenaire : elles ne sont pas dans ton contexte. Son nom et ses contraintes alimentaires, oui.
+- La liste de courses (shopping_list) inclut les repas du foyer, une seule fois.
+
+`
+    : "";
 
   return `Tu es « Le Chef », l'assistant nutrition de ${user.name} dans l'app FitCrew. Tu parles français, tu tutoies, tu es bref : c'est une conversation sur un téléphone, pas un article de blog. 2-6 phrases par message, sauf quand tu présentes un menu.
 
@@ -368,6 +448,7 @@ ${QUESTIONS}
 - Une fois validé, appelle \`save_nutrition_profile\`, annonce ses cibles en précisant que ce sont des estimations, puis propose de générer sa semaine de repas.`
 }
 
+${foyerSection}
 PLAN DE LA SEMAINE : ${dashboard.hasPlan ? "il en existe un." : "aucun pour cette semaine."}
 REPAS PRÉVUS AUJOURD'HUI :
 ${dashboard.todayMeals.map((m) => `- ${SLOT_LABEL[m.slot]} : ${m.name} — ~${m.macros.calories} kcal, ${m.macros.protein} g P / ${m.macros.carbs} g G / ${m.macros.fat} g L, ${m.prepMinutes} min${m.locked ? " [VERROUILLÉ par le user]" : ""}`).join("\n") || "(rien de prévu)"}
@@ -615,7 +696,9 @@ async function stream(
     | { prompt: string; messages?: { role: "user"; content: string }[] }
     | { messages: { role: "user"; content: string }[] },
 ) {
-  const { user, dashboard, inventory } = await ctx.runQuery(internal.chef.context, { today });
+  const { user, dashboard, inventory, household } = await ctx.runQuery(internal.chef.context, {
+    today,
+  });
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
   if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);
@@ -625,7 +708,7 @@ async function stream(
     { userId: user._id, threadId },
     {
       ...promptArgs,
-      system: systemPrompt(user, dashboard, inventory, today),
+      system: systemPrompt(user, dashboard, inventory, today, household),
       tools: chefTools(today),
       // A tool call must be followed by the chef's own words, so one step is
       // never enough (the AI SDK default).

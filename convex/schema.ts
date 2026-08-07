@@ -72,6 +72,10 @@ export const plannedMeal = v.object({
   macros,
   locked: v.optional(v.boolean()),
   mealPrep: v.optional(v.string()), // "se prépare la veille", when relevant
+  // Number of portions the recipe makes. ONLY set on a shared foyer meal
+  // (always 2 there): a solo user's plan is byte-identical and carries nothing.
+  // Read everywhere as `meal.portions ?? 2` — that default IS the contract.
+  portions: v.optional(v.number()),
 });
 
 export const planDay = v.object({ date: v.string(), meals: v.array(plannedMeal) });
@@ -131,6 +135,12 @@ export default defineSchema({
     // and the Chef have a default context to talk about. Stamped by
     // `workouts.start`; read it as a hint, never as "the" program.
     currentProgramId: v.optional(v.id("programs")),
+    // The foyer row, when the user is in a couple ("un foyer"). Set together
+    // with the row's `memberIds` — the invariant is: a user has a householdId
+    // iff a `households` row lists them among its members. Indexed here because
+    // Convex indexes compare an array field as a WHOLE (not element-wise), so
+    // "which row contains me" cannot be answered from `households.memberIds`.
+    householdId: v.optional(v.id("households")),
   }).index("by_token", ["tokenIdentifier"]),
 
   // A program is a LINEAGE of versioned rows: `generate_program` starts one,
@@ -297,6 +307,28 @@ export default defineSchema({
     weekStart: v.string(), // YYYY-MM-DD Monday, produced by monday()
     days: v.array(planDay),
   }).index("by_user_and_week", ["userId", "weekStart"]),
+
+  // A couple sharing meals ("un foyer"). One row per foyer, no join table: the
+  // bounded `memberIds` array IS the membership — 1 while an invite is pending,
+  // exactly 2 once joined, and a third person would be a different feature.
+  // A solo user has no row at all: nothing in their day changes until the
+  // second member joins. "Which row contains me" is answered through the
+  // `users.householdId` pointer, not by querying this array (see the users
+  // table comment).
+  households: defineTable({
+    memberIds: v.array(v.id("users")),
+    sharedSlots: v.array(mealSlot), // which slots the couple eats together
+    inviteCode: v.optional(v.string()), // set while pending, deleted on join
+  }).index("by_invite_code", ["inviteCode"]),
+
+  // ONLY the shared-slot meals of the week, one row per foyer per week. Routing
+  // invariant: a meal in a shared slot lives here, every other meal lives in the
+  // member's own `mealPlans` — never both, so a meal is never generated twice.
+  householdMealPlans: defineTable({
+    householdId: v.id("households"),
+    weekStart: v.string(), // YYYY-MM-DD Monday, produced by monday()
+    days: v.array(planDay),
+  }).index("by_household_and_week", ["householdId", "weekStart"]),
 
   foodLog: defineTable({
     userId: v.id("users"),

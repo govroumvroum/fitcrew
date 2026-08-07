@@ -1,0 +1,446 @@
+import { type Infer, v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
+import { type MutationCtx, type QueryCtx, mutation, query } from "./_generated/server";
+import { macros, mealSlot, planDay, plannedMeal } from "./schema";
+import { getCurrentUser, requireCurrentUser } from "./users";
+
+export type Macros = Infer<typeof macros>;
+export type MealSlot = Infer<typeof mealSlot>;
+export type PlannedMeal = Infer<typeof plannedMeal>;
+export type PlanDay = Infer<typeof planDay>;
+
+// ---------------------------------------------------------------------------
+// Pure logic. No ctx, no clock — see households.check.ts.
+// ---------------------------------------------------------------------------
+
+// Local copy, not an import from nutrition.ts: nutrition.ts imports this module
+// to route meals, so a runtime import the other way would be a cycle. Same
+// numbers, same clamps — the foyer copies are bounded anyway (they come from
+// already-clamped macros).
+const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
+
+function clampMacros(m: Macros): Macros {
+  return {
+    calories: clamp(m.calories, 0, 3000),
+    protein: clamp(m.protein, 0, 300),
+    carbs: clamp(m.carbs, 0, 300),
+    fat: clamp(m.fat, 0, 300),
+  };
+}
+
+const SLOT_ORDER: MealSlot[] = ["petit_dejeuner", "dejeuner", "collation", "diner"];
+
+/** Chronological, same as nutrition.ts's `bySlot`. */
+const bySlot = (a: PlannedMeal, b: PlannedMeal) =>
+  SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot);
+
+/**
+ * A member's portion of a shared meal. The recipe's macros are for ONE portion;
+ * the dish totals `macros × portions` (default 2), and the split follows the
+ * two partners' calorie targets — round to integers. If either target is
+ * missing or zero at compute time, fall back to an equal split.
+ *
+ * The ratio is the ONLY thing ever derived from the partners' targets: targets
+ * themselves are read here and never leave this function.
+ */
+export function sharedPortion(meal: PlannedMeal, myCalories: number, partnerCalories: number): Macros {
+  const portions = meal.portions ?? 2;
+  const total = {
+    calories: meal.macros.calories * portions,
+    protein: meal.macros.protein * portions,
+    carbs: meal.macros.carbs * portions,
+    fat: meal.macros.fat * portions,
+  };
+  if (!myCalories || !partnerCalories) {
+    return {
+      calories: Math.round(total.calories / 2),
+      protein: Math.round(total.protein / 2),
+      carbs: Math.round(total.carbs / 2),
+      fat: Math.round(total.fat / 2),
+    };
+  }
+  const myShare = myCalories / (myCalories + partnerCalories);
+  return {
+    calories: Math.round(total.calories * myShare),
+    protein: Math.round(total.protein * myShare),
+    carbs: Math.round(total.carbs * myShare),
+    fat: Math.round(total.fat * myShare),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shared reads
+// ---------------------------------------------------------------------------
+
+const profileFor = (ctx: QueryCtx | MutationCtx, userId: Id<"users">) =>
+  ctx.db
+    .query("nutritionProfiles")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .unique();
+
+/**
+ * The caller's foyer row, if any. Read through `users.householdId`: Convex
+ * indexes compare an array field as a WHOLE, so "which row contains me" cannot
+ * be answered from `households.memberIds` — the pointer on the user is the
+ * lookup, and the array is only ever read whole once the row is in hand.
+ */
+export async function householdFor(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+): Promise<Doc<"households"> | null> {
+  const user = await ctx.db.get("users", userId);
+  if (!user?.householdId) return null;
+  return await ctx.db.get("households", user.householdId);
+}
+
+export function householdPlanFor(
+  ctx: QueryCtx | MutationCtx,
+  householdId: Id<"households">,
+  week: string,
+): Promise<Doc<"householdMealPlans"> | null> {
+  return ctx.db
+    .query("householdMealPlans")
+    .withIndex("by_household_and_week", (q) => q.eq("householdId", householdId).eq("weekStart", week))
+    .unique();
+}
+
+/**
+ * Everything a handler needs to route meals, fetched ONCE per handler call —
+ * one household read + two profile reads, whatever the number of slots. The
+ * per-slot decision is `isSharedSlot` below, pure.
+ */
+export type HouseholdContext = {
+  household: Doc<"households"> | null;
+  /** The partner's users row — null while an invite is pending. */
+  partner: Doc<"users"> | null;
+  myProfile: Doc<"nutritionProfiles"> | null;
+  partnerProfile: Doc<"nutritionProfiles"> | null;
+  /** Both members joined (2 in `memberIds`). */
+  complete: boolean;
+  /** Complete AND both profiles exist: shared slots are live. */
+  active: boolean;
+};
+
+export async function householdContext(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+): Promise<HouseholdContext> {
+  const household = await householdFor(ctx, userId);
+  if (!household) {
+    return {
+      household: null,
+      partner: null,
+      myProfile: null,
+      partnerProfile: null,
+      complete: false,
+      active: false,
+    };
+  }
+  const partnerId = household.memberIds.find((id) => id !== userId) ?? null;
+  const [partner, myProfile, partnerProfile] = await Promise.all([
+    partnerId ? ctx.db.get("users", partnerId) : Promise.resolve(null),
+    profileFor(ctx, userId),
+    partnerId ? profileFor(ctx, partnerId) : Promise.resolve(null),
+  ]);
+  const complete = household.memberIds.length === 2;
+  return {
+    household,
+    partner,
+    myProfile,
+    partnerProfile,
+    complete,
+    active: complete && myProfile !== null && partnerProfile !== null,
+  };
+}
+
+/**
+ * A slot is SHARED-ACTIVE when the foyer is complete, the slot is in
+ * `sharedSlots` and BOTH partners have a profile. A solo user or a pending
+ * foyer is completely unaffected — this never returns true for them.
+ */
+export function isSharedSlot(h: HouseholdContext, slot: MealSlot): boolean {
+  return h.active && h.household!.sharedSlots.includes(slot);
+}
+
+/** Convenience for one-off checks; handlers route via `householdContext` once. */
+export async function sharedSlotActive(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+  slot: MealSlot,
+): Promise<boolean> {
+  const h = await householdContext(ctx, userId);
+  return isSharedSlot(h, slot);
+}
+
+// ---------------------------------------------------------------------------
+// Invite lifecycle
+// ---------------------------------------------------------------------------
+
+// No 0/O/1/I: an invite code is read aloud and typed by hand.
+const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const CODE_LENGTH = 6;
+
+function randomInviteCode(): string {
+  let code = "";
+  for (let i = 0; i < CODE_LENGTH; i++) {
+    code += INVITE_ALPHABET[Math.floor(Math.random() * INVITE_ALPHABET.length)];
+  }
+  return code;
+}
+
+async function pendingCodeTaken(ctx: MutationCtx, code: string): Promise<boolean> {
+  const rows = await ctx.db
+    .query("households")
+    .withIndex("by_invite_code", (q) => q.eq("inviteCode", code))
+    .take(1);
+  return rows.length > 0;
+}
+
+export const invite = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireCurrentUser(ctx);
+    if (await householdFor(ctx, user._id)) throw new Error("Tu es déjà dans un foyer");
+
+    // 32^6 codes: a collision is a lottery win, but retry rather than fail.
+    let code = randomInviteCode();
+    for (let tries = 0; tries < 20 && (await pendingCodeTaken(ctx, code)); tries++) {
+      code = randomInviteCode();
+    }
+
+    const householdId = await ctx.db.insert("households", {
+      memberIds: [user._id],
+      sharedSlots: ["diner"],
+      inviteCode: code,
+    });
+    // The pointer that makes `householdFor` find the row — set together with
+    // `memberIds`, cleared together too (see cancelInvite, join, leave).
+    await ctx.db.patch("users", user._id, { householdId });
+    return { code };
+  },
+});
+
+export const cancelInvite = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireCurrentUser(ctx);
+    const household = await householdFor(ctx, user._id);
+    if (!household) throw new Error("Tu n'es pas dans un foyer");
+    if (household.memberIds.length !== 1) {
+      throw new Error("Le foyer n'a pas d'invitation en attente");
+    }
+    await ctx.db.patch("users", user._id, { householdId: undefined });
+    await ctx.db.delete("households", household._id);
+    return null;
+  },
+});
+
+export const join = mutation({
+  args: { code: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    if (await householdFor(ctx, user._id)) throw new Error("Tu es déjà dans un foyer");
+
+    const code = args.code.trim().toUpperCase();
+    const rows = await ctx.db
+      .query("households")
+      .withIndex("by_invite_code", (q) => q.eq("inviteCode", code))
+      .take(1);
+    const household = rows[0] ?? null;
+    // One message for "no such code" and "already taken": neither is useful to
+    // guess apart, and the pending owner is the only one who can see the truth.
+    if (!household || household.memberIds.length !== 1) {
+      throw new Error("Ce code n'est plus valide");
+    }
+    if (household.memberIds[0] === user._id) {
+      throw new Error("Ce code n'est plus valide");
+    }
+
+    const partnerId = household.memberIds[0];
+    await ctx.db.patch("households", household._id, {
+      memberIds: [partnerId, user._id],
+      // Convex `patch` DELETES a key set to `undefined`: the code dies with the
+      // invite — see the saveProfile comment in nutrition.ts.
+      inviteCode: undefined,
+    });
+    // Both members point at the row now: the joiner, and the inviter whose
+    // pointer was set at `invite`.
+    await ctx.db.patch("users", user._id, { householdId: household._id });
+    const partner = await ctx.db.get("users", partnerId);
+    return { partnerName: partner?.name ?? null };
+  },
+});
+
+export const status = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return null;
+    const h = await householdContext(ctx, user._id);
+    if (!h.household) return null;
+    return {
+      householdId: h.household._id,
+      sharedSlots: h.household.sharedSlots,
+      partnerName: h.partner?.name ?? null,
+      // The code belongs to the pending owner alone: only the sole member is
+      // told their own invite code.
+      pendingCode: h.household.memberIds.length === 1 ? (h.household.inviteCode ?? null) : null,
+      partnerHasProfile: h.complete && h.partnerProfile !== null,
+      canShare: h.active,
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Shared slots + leaving
+// ---------------------------------------------------------------------------
+
+/** The meal a member now owns: their portion, portions field dropped (only
+ *  shared foyer meals carry one), `locked` preserved — a locked shared meal
+ *  stays locked for both. */
+function ownMealFor(
+  meal: PlannedMeal,
+  mine: Doc<"nutritionProfiles"> | null,
+  partner: Doc<"nutritionProfiles"> | null,
+): PlannedMeal {
+  const portion = sharedPortion(
+    meal,
+    mine?.targets.calories ?? 0,
+    partner?.targets.calories ?? 0,
+  );
+  const own = { ...meal };
+  delete own.portions;
+  return { ...own, macros: clampMacros(portion) };
+}
+
+/** Replace-by-slot in a member's own plan: an occupied slot is overwritten, a
+ *  missing week doc is created. Nothing is written for an empty `meals` list. */
+async function adoptIntoMemberPlan(
+  ctx: MutationCtx,
+  memberId: Id<"users">,
+  week: string,
+  meals: { date: string; meal: PlannedMeal }[],
+) {
+  if (meals.length === 0) return;
+
+  const plan = await ctx.db
+    .query("mealPlans")
+    .withIndex("by_user_and_week", (q) => q.eq("userId", memberId).eq("weekStart", week))
+    .unique();
+
+  if (plan) {
+    const days = plan.days.map((day) => ({ ...day, meals: [...day.meals] }));
+    const byDate = new Map(days.map((d) => [d.date, d]));
+    for (const { date, meal } of meals) {
+      let day = byDate.get(date);
+      if (!day) {
+        day = { date, meals: [] };
+        byDate.set(date, day);
+        days.push(day);
+      }
+      const index = day.meals.findIndex((m) => m.slot === meal.slot);
+      if (index >= 0) day.meals[index] = meal;
+      else day.meals.push(meal);
+      day.meals.sort(bySlot);
+    }
+    await ctx.db.patch("mealPlans", plan._id, { days });
+  } else {
+    const days = new Map<string, PlanDay>();
+    for (const { date, meal } of meals) {
+      const day = days.get(date) ?? { date, meals: [] };
+      day.meals.push(meal);
+      day.meals.sort(bySlot);
+      days.set(date, day);
+    }
+    await ctx.db.insert("mealPlans", {
+      userId: memberId,
+      weekStart: week,
+      days: [...days.values()],
+    });
+  }
+}
+
+/** Every shared-slot meal of a foyer week, split per member with each one's
+ *  portion — the shared copy step used by both `leave` and `setSharedSlots`. */
+async function adoptFoyerWeek(
+  ctx: MutationCtx,
+  household: Doc<"households">,
+  row: Doc<"householdMealPlans">,
+  onlySlots: MealSlot[] | null,
+) {
+  const profiles = await Promise.all(household.memberIds.map((id) => profileFor(ctx, id)));
+  const meals = row.days.flatMap((day) =>
+    day.meals
+      .filter((meal) => onlySlots === null || onlySlots.includes(meal.slot))
+      .map((meal) => ({ date: day.date, meal })),
+  );
+  for (const [i, memberId] of household.memberIds.entries()) {
+    const mine = profiles[i] ?? null;
+    const partner = profiles[1 - i] ?? null;
+    await adoptIntoMemberPlan(
+      ctx,
+      memberId,
+      row.weekStart,
+      meals.map(({ date, meal }) => ({ date, meal: ownMealFor(meal, mine, partner) })),
+    );
+  }
+}
+
+export const setSharedSlots = mutation({
+  args: { slots: v.array(mealSlot) },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const household = await householdFor(ctx, user._id);
+    if (!household) throw new Error("Tu n'es pas dans un foyer");
+
+    const wanted = new Set(args.slots);
+    const slots = SLOT_ORDER.filter((slot) => wanted.has(slot));
+    const removed = household.sharedSlots.filter((slot) => !wanted.has(slot));
+
+    // A slot that stops being shared must not orphan its meal: copy it into
+    // BOTH members' own plans, each with their own portion, BEFORE unsharing.
+    if (removed.length > 0) {
+      const rows = await ctx.db
+        .query("householdMealPlans")
+        .withIndex("by_household_and_week", (q) => q.eq("householdId", household._id))
+        .take(100); // ponytail: weeks of a two-person foyer. Paginate if it ever grows.
+      for (const row of rows) {
+        await adoptFoyerWeek(ctx, household, row, removed);
+        const days = row.days.map((day) => ({
+          ...day,
+          meals: day.meals.filter((meal) => !removed.includes(meal.slot)),
+        }));
+        await ctx.db.patch("householdMealPlans", row._id, { days });
+      }
+    }
+
+    await ctx.db.patch("households", household._id, { sharedSlots: slots });
+    return { sharedSlots: slots };
+  },
+});
+
+export const leave = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireCurrentUser(ctx);
+    const household = await householdFor(ctx, user._id);
+    if (!household) throw new Error("Tu n'es pas dans un foyer");
+
+    // Copy BEFORE delete: every shared meal becomes each member's own, with
+    // their own portion, so both leave with a usable menu.
+    const rows = await ctx.db
+      .query("householdMealPlans")
+      .withIndex("by_household_and_week", (q) => q.eq("householdId", household._id))
+      .take(100); // ponytail: weeks of a two-person foyer. Paginate if it ever grows.
+    for (const row of rows) {
+      await adoptFoyerWeek(ctx, household, row, null);
+      await ctx.db.delete("householdMealPlans", row._id);
+    }
+    // Both pointers die with the row — the invariant holds on both sides.
+    for (const memberId of household.memberIds) {
+      await ctx.db.patch("users", memberId, { householdId: undefined });
+    }
+    await ctx.db.delete("households", household._id);
+    return null;
+  },
+});

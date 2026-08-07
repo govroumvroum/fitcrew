@@ -18,6 +18,7 @@ import {
   plannedMeal,
 } from "./schema";
 import { getCurrentUser, requireCurrentUser } from "./users";
+import { householdContext, householdPlanFor, isSharedSlot, sharedPortion } from "./households";
 
 export type NutritionGoal = Infer<typeof nutritionGoal>;
 export type ActivityLevel = Infer<typeof activityLevel>;
@@ -135,6 +136,29 @@ export function shoppingListFrom(days: PlanDay[]): { name: string; quantities: s
   return [...lines.values()];
 }
 
+/**
+ * Two shopping lists merged by normalised name, same ponytail as
+ * `shoppingListFrom`: first spelling wins as the display name, quantities are
+ * concatenated, never summed. The foyer's list and the member's own list are
+ * consolidated here so a shared dish appears exactly once.
+ */
+export function mergeShoppingLists(
+  a: { name: string; quantities: string[] }[],
+  b: { name: string; quantities: string[] }[],
+): { name: string; quantities: string[] }[] {
+  const lines = new Map<string, { name: string; quantities: string[] }>();
+  for (const list of [a, b]) {
+    for (const line of list) {
+      const key = normalizeName(line.name);
+      if (!key) continue;
+      const existing = lines.get(key);
+      if (existing) existing.quantities.push(...line.quantities);
+      else lines.set(key, { name: line.name, quantities: [...line.quantities] });
+    }
+  }
+  return [...lines.values()];
+}
+
 const SLOT_ORDER: MealSlot[] = ["petit_dejeuner", "dejeuner", "collation", "diner"];
 
 /** Chronological, so a regenerated day doesn't read out of order. */
@@ -182,8 +206,9 @@ async function requirePlan(ctx: MutationCtx, week: string) {
   return plan;
 }
 
-/** The day's meals, mutable in place — the caller patches `plan.days` back. */
-function requireDay(plan: Doc<"mealPlans">, date: string) {
+/** The day's meals, mutable in place — the caller patches `plan.days` back.
+ *  Works on both `mealPlans` and `householdMealPlans` docs: they share `days`. */
+function requireDay(plan: { days: PlanDay[] }, date: string) {
   const day = plan.days.find((d) => d.date === date);
   if (!day) throw new Error(`Aucun jour ${date} dans ce plan`);
   return day;
@@ -257,10 +282,16 @@ export const dashboard = query({
         hydrationMl: 0,
         weekStart: week,
         hasPlan: false,
+        household: null,
       };
     }
 
+    // One household fetch + two profile fetches for the whole query: `active`
+    // only becomes true with a complete foyer AND both profiles, and everything
+    // below routes on it.
+    const h = await householdContext(ctx, user._id);
     const plan = await planFor(ctx, user._id, week);
+    const sharedPlan = h.household ? await householdPlanFor(ctx, h.household._id, week) : null;
     const log = await ctx.db
       .query("foodLog")
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.today))
@@ -270,14 +301,48 @@ export const dashboard = query({
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.today))
       .unique();
 
+    const ownDay = plan?.days.find((d) => d.date === args.today);
+    const sharedDay = sharedPlan?.days.find((d) => d.date === args.today);
+    // A slot present in the foyer's plan REPLACES the member's own one: the
+    // foyer's dish wins, and it is never generated twice.
+    const sharedSlots = new Set(sharedDay?.meals.map((m) => m.slot) ?? []);
+    const ownMeals = (ownDay?.meals ?? []).filter((m) => !sharedSlots.has(m.slot));
+    const todayMeals: (PlannedMeal & { sharedWith?: string })[] = sharedDay
+      ? [
+          ...ownMeals,
+          ...sharedDay.meals.map((meal) => ({
+            ...meal,
+            // The dish's macros are per portion: mine, never the partner's.
+            macros: sharedPortion(
+              meal,
+              h.myProfile?.targets.calories ?? 0,
+              h.partnerProfile?.targets.calories ?? 0,
+            ),
+            ...(h.partner ? { sharedWith: h.partner.name } : {}),
+          })),
+        ].sort(bySlot)
+      : ownMeals;
+
     return {
       profile: await profileFor(ctx, user._id),
-      todayMeals: plan?.days.find((d) => d.date === args.today)?.meals ?? [],
+      todayMeals,
       log,
       consumed: sumMacros(log),
       hydrationMl: water?.ml ?? 0,
       weekStart: week,
-      hasPlan: plan !== null,
+      hasPlan: plan !== null || sharedPlan !== null,
+      // Same shape as `households.status`, on purpose: the two must never drift.
+      household: h.household
+        ? {
+            householdId: h.household._id,
+            sharedSlots: h.household.sharedSlots,
+            partnerName: h.partner?.name ?? null,
+            pendingCode:
+              h.household.memberIds.length === 1 ? (h.household.inviteCode ?? null) : null,
+            partnerHasProfile: h.complete && h.partnerProfile !== null,
+            canShare: h.active,
+          }
+        : null,
     };
   },
 });
@@ -300,16 +365,43 @@ export const savePlan = internalMutation({
       throw new Error("weekStart must be a Monday");
     }
 
+    // One household fetch + two profile fetches, then route every meal: shared
+    // slots to the foyer's plan, the rest to the member's own. A solo user has
+    // no household, so every meal lands in their own plan — untouched behavior.
+    const h = await householdContext(ctx, user._id);
     const days = args.days.map((day) => ({
       date: day.date,
       meals: day.meals.map(clampMeal).sort(bySlot),
     }));
+    const own = days.map((day) => ({
+      ...day,
+      meals: day.meals.filter((meal) => !isSharedSlot(h, meal.slot)),
+    }));
+    const shared = days.map((day) => ({
+      ...day,
+      meals: day.meals.filter((meal) => isSharedSlot(h, meal.slot)),
+    }));
+
     const existing = await planFor(ctx, user._id, args.weekStart);
     if (existing) {
-      await ctx.db.patch("mealPlans", existing._id, { days });
+      await ctx.db.patch("mealPlans", existing._id, { days: own });
     } else {
-      await ctx.db.insert("mealPlans", { userId: user._id, weekStart: args.weekStart, days });
+      await ctx.db.insert("mealPlans", { userId: user._id, weekStart: args.weekStart, days: own });
     }
+
+    if (h.household) {
+      const foyerWeek = await householdPlanFor(ctx, h.household._id, args.weekStart);
+      if (foyerWeek) {
+        await ctx.db.patch("householdMealPlans", foyerWeek._id, { days: shared });
+      } else if (shared.some((day) => day.meals.length > 0)) {
+        await ctx.db.insert("householdMealPlans", {
+          householdId: h.household._id,
+          weekStart: args.weekStart,
+          days: shared,
+        });
+      }
+    }
+
     return { meals: days.reduce((n, day) => n + day.meals.length, 0) };
   },
 });
@@ -317,9 +409,37 @@ export const savePlan = internalMutation({
 export const replaceMeal = internalMutation({
   args: { weekStart: v.string(), date: v.string(), slot: mealSlot, meal: plannedMeal },
   handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const h = await householdContext(ctx, user._id);
+    const meal = clampMeal({ ...args.meal, slot: args.slot });
+
+    // Shared slot: the foyer's week owns the meal. One household fetch up top,
+    // no per-meal reads.
+    if (isSharedSlot(h, args.slot) && h.household) {
+      const plan = await householdPlanFor(ctx, h.household._id, args.weekStart);
+      const days = plan?.days ?? [];
+      const day = requireDay({ days }, args.date);
+      const index = day.meals.findIndex((m) => m.slot === args.slot);
+      if (index >= 0) day.meals[index] = meal;
+      else day.meals.push(meal);
+      day.meals.sort(bySlot);
+
+      // Upsert the foyer's week when it doesn't exist yet: a meal can be
+      // replaced before the week was ever generated.
+      if (plan) {
+        await ctx.db.patch("householdMealPlans", plan._id, { days });
+      } else {
+        await ctx.db.insert("householdMealPlans", {
+          householdId: h.household._id,
+          weekStart: args.weekStart,
+          days,
+        });
+      }
+      return { name: meal.name };
+    }
+
     const plan = await requirePlan(ctx, args.weekStart);
     const day = requireDay(plan, args.date);
-    const meal = clampMeal({ ...args.meal, slot: args.slot });
 
     const index = day.meals.findIndex((m) => m.slot === args.slot);
     if (index >= 0) day.meals[index] = meal;
@@ -336,6 +456,42 @@ const slotRef = v.object({ date: v.string(), slot: mealSlot });
 export const moveMeal = internalMutation({
   args: { weekStart: v.string(), from: slotRef, to: slotRef },
   handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const h = await householdContext(ctx, user._id);
+    const fromShared = isSharedSlot(h, args.from.slot);
+    const toShared = isSharedSlot(h, args.to.slot);
+    // Crossing the foyer boundary would duplicate or orphan the dish: the
+    // shared realm and the personal realm never swap meals.
+    if (fromShared !== toShared) {
+      throw new Error(
+        "Impossible de déplacer un repas partagé vers un créneau personnel (ou l'inverse)",
+      );
+    }
+
+    if (fromShared && h.household) {
+      const plan = await householdPlanFor(ctx, h.household._id, args.weekStart);
+      if (!plan) throw new Error("Aucun plan pour cette semaine");
+      const from = requireDay(plan, args.from.date);
+      const to = requireDay(plan, args.to.date);
+
+      const index = from.meals.findIndex((m) => m.slot === args.from.slot);
+      if (index < 0) throw new Error("Aucun repas à déplacer sur ce créneau");
+      const moved = { ...from.meals[index], slot: args.to.slot };
+
+      // An occupied destination swaps instead of overwriting: dropping a planned
+      // meal on the floor because its slot was taken loses work silently.
+      const occupied = to.meals.findIndex((m) => m.slot === args.to.slot);
+      if (occupied >= 0) from.meals[index] = { ...to.meals[occupied], slot: args.from.slot };
+      else from.meals.splice(index, 1);
+      if (occupied >= 0) to.meals[occupied] = moved;
+      else to.meals.push(moved);
+
+      from.meals.sort(bySlot);
+      to.meals.sort(bySlot);
+      await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+      return { name: moved.name };
+    }
+
     const plan = await requirePlan(ctx, args.weekStart);
     const from = requireDay(plan, args.from.date);
     const to = requireDay(plan, args.to.date);
@@ -364,26 +520,67 @@ export const moveMeal = internalMutation({
  * produced for the free slots; an incoming meal aimed at a locked slot is
  * DROPPED, not appended — a locked meal means "leave this one alone", and two
  * dinners on one evening is not what anyone asked for.
+ *
+ * With a foyer, the day is split per realm: shared slots regenerate the foyer's
+ * day (locked shared meals stay there), the rest regenerate the member's own —
+ * a lock never leaks across the boundary.
  */
 export const regenerateDay = internalMutation({
   args: { weekStart: v.string(), date: v.string(), meals: v.array(plannedMeal) },
   handler: async (ctx, args) => {
-    const plan = await requirePlan(ctx, args.weekStart);
-    const day = requireDay(plan, args.date);
+    const user = await requireCurrentUser(ctx);
+    const h = await householdContext(ctx, user._id);
 
-    const kept = day.meals.filter((meal) => meal.locked === true);
-    const locked = new Set(kept.map((meal) => meal.slot));
-    const added = args.meals.filter((meal) => !locked.has(meal.slot)).map(clampMeal);
+    let kept = 0;
+    let added = 0;
+    const apply = (days: PlanDay[], incoming: PlannedMeal[]) => {
+      const day = requireDay({ days }, args.date);
+      const lockedMeals = day.meals.filter((meal) => meal.locked === true);
+      const locked = new Set(lockedMeals.map((meal) => meal.slot));
+      const fresh = incoming.filter((meal) => !locked.has(meal.slot)).map(clampMeal);
+      kept += lockedMeals.length;
+      added += fresh.length;
+      day.meals = [...lockedMeals, ...fresh].sort(bySlot);
+    };
 
-    day.meals = [...kept, ...added].sort(bySlot);
-    await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
-    return { kept: kept.length, added: added.length };
+    const ownIncoming = args.meals.filter((meal) => !isSharedSlot(h, meal.slot));
+    const sharedIncoming = args.meals.filter((meal) => isSharedSlot(h, meal.slot));
+
+    if (ownIncoming.length > 0) {
+      const plan = await requirePlan(ctx, args.weekStart);
+      apply(plan.days, ownIncoming);
+      await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
+    }
+
+    if (sharedIncoming.length > 0 && h.household) {
+      const plan = await householdPlanFor(ctx, h.household._id, args.weekStart);
+      if (!plan) throw new Error("Aucun plan pour cette semaine");
+      apply(plan.days, sharedIncoming);
+      await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+    }
+
+    return { kept, added };
   },
 });
 
 export const toggleLock = mutation({
   args: { weekStart: v.string(), date: v.string(), slot: mealSlot },
   handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const h = await householdContext(ctx, user._id);
+
+    if (isSharedSlot(h, args.slot) && h.household) {
+      const plan = await householdPlanFor(ctx, h.household._id, args.weekStart);
+      if (!plan) throw new Error("Aucun plan pour cette semaine");
+      const day = requireDay(plan, args.date);
+      const meal = day.meals.find((m) => m.slot === args.slot);
+      if (!meal) throw new Error("Aucun repas sur ce créneau");
+
+      meal.locked = meal.locked !== true;
+      await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+      return { locked: meal.locked };
+    }
+
     const plan = await requirePlan(ctx, args.weekStart);
     const day = requireDay(plan, args.date);
     const meal = day.meals.find((m) => m.slot === args.slot);
@@ -400,7 +597,19 @@ export const shoppingList = query({
   handler: async (ctx, args) => {
     const user = await getCurrentUser(ctx);
     if (!user) return [];
+    const h = await householdContext(ctx, user._id);
     const found = await planFor(ctx, user._id, args.weekStart);
+
+    // A complete foyer: one consolidated list — the foyer's meals and the
+    // member's own, merged so a shared dish appears exactly once. Solo or
+    // pending: unchanged behavior.
+    if (h.household && h.complete) {
+      const shared = await householdPlanFor(ctx, h.household._id, args.weekStart);
+      return mergeShoppingLists(
+        shoppingListFrom(shared?.days ?? []),
+        shoppingListFrom(found?.days ?? []),
+      );
+    }
     return shoppingListFrom(found?.days ?? []);
   },
 });
@@ -432,6 +641,34 @@ export const addLogEntry = mutation({
 export const logPlannedMeal = mutation({
   args: { date: v.string(), slot: mealSlot, weekStart: v.string() },
   handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const h = await householdContext(ctx, user._id);
+
+    // A shared meal: the foyer's dish, but MY portion of it — never the
+    // partner's, and the dish's macros are per portion anyway.
+    if (isSharedSlot(h, args.slot) && h.household) {
+      const plan = await householdPlanFor(ctx, h.household._id, args.weekStart);
+      if (!plan) throw new Error("Aucun plan pour cette semaine");
+      const day = requireDay(plan, args.date);
+      const meal = day.meals.find((m) => m.slot === args.slot);
+      if (!meal) throw new Error("Aucun repas prévu sur ce créneau");
+
+      return await ctx.db.insert("foodLog", {
+        userId: user._id,
+        date: args.date,
+        slot: args.slot,
+        name: meal.name,
+        macros: clampMacros(
+          sharedPortion(
+            meal,
+            h.myProfile?.targets.calories ?? 0,
+            h.partnerProfile?.targets.calories ?? 0,
+          ),
+        ),
+        source: "plan",
+      });
+    }
+
     const plan = await requirePlan(ctx, args.weekStart);
     const day = requireDay(plan, args.date);
     const meal = day.meals.find((m) => m.slot === args.slot);
