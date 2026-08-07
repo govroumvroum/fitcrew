@@ -87,12 +87,7 @@ export async function nextDayIndexFor(
   program: Doc<"programs">,
   date: string,
 ): Promise<number> {
-  const rows = await ctx.db
-    .query("programs")
-    .withIndex("by_user_and_lineage", (q) =>
-      q.eq("userId", program.userId).eq("lineageId", lineageOf(program) as Id<"programs">),
-    )
-    .take(MAX_PROGRAM_ROWS);
+  const rows = await lineageRows(ctx, program.userId, lineageOf(program) as Id<"programs">);
   // `program` itself is in the set even when the backfill hasn't reached it.
   const lineage = new Set<string>([program._id, ...rows.map((row) => row._id)]);
   return nextDayIndex(
@@ -134,9 +129,8 @@ export async function prefillFor(
   return out;
 }
 
-/** The latest row of a lineage the caller owns, or null if it has none. The
- * index range is scoped to the user, so "not found" and "not yours" are the same
- * answer — deliberately.
+/** All rows of one lineage the caller owns. The index range is scoped to the
+ * user, so "not found" and "not yours" are the same answer — deliberately.
  *
  * Reading the range is also what makes a concurrent version bump conflict: a row
  * inserted into it after this read fails the mutation's OCC check and the retry
@@ -148,17 +142,25 @@ export async function prefillFor(
  * match a row that hasn't got the field. `backfillLineage` runs on every deploy
  * (see `runAll` and vercel.json), so an unbackfilled row can't reach a user's
  * screen; the day that stops being true, read the root row here as a fallback. */
+export async function lineageRows(
+  ctx: QueryCtx,
+  userId: Id<"users">,
+  lineageId: Id<"programs">,
+): Promise<Doc<"programs">[]> {
+  return await ctx.db
+    .query("programs")
+    .withIndex("by_user_and_lineage", (q) => q.eq("userId", userId).eq("lineageId", lineageId))
+    .take(MAX_PROGRAM_ROWS);
+}
+
+/** The latest row of a lineage the caller owns, or null if it has none. */
 export async function latestInLineage(
   ctx: QueryCtx,
   userId: Id<"users">,
   lineageId: Id<"programs">,
 ): Promise<Doc<"programs"> | null> {
-  const rows = await ctx.db
-    .query("programs")
-    .withIndex("by_user_and_lineage", (q) => q.eq("userId", userId).eq("lineageId", lineageId))
-    .take(MAX_PROGRAM_ROWS);
   // One lineage in, so one row out — same "highest version wins" as every read.
-  return latestPerLineage(rows)[0] ?? null;
+  return latestPerLineage(await lineageRows(ctx, userId, lineageId))[0] ?? null;
 }
 
 /**
