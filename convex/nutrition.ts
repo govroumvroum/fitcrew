@@ -397,9 +397,12 @@ export const saveProfile = mutation({
     // A foyer can become shared-active by THIS profile appearing — the second
     // one to exist (the UI says « … doit compléter son profil »). Adoption moves
     // the meals already planned on the shared slots into the foyer's week, so
-    // the routing and the display never diverge. No-op outside a live foyer.
+    // the routing and the display never diverge. `!existing` = this save CREATES
+    // the profile, i.e. the transition itself : re-running on every save would
+    // sweep a legitimate SPLIT meal (an own meal on a shared slot, decided by
+    // the couple) back into the foyer and delete the losing dish.
     const h = await householdContext(ctx, user._id);
-    if (h.active && h.household) {
+    if (!existing && h.active && h.household) {
       await adoptOwnMealsIntoFoyer(ctx, h.household._id, h.household.sharedSlots);
     }
     return { targets };
