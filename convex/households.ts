@@ -2,7 +2,7 @@ import { type Infer, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { type MutationCtx, type QueryCtx, mutation, query } from "./_generated/server";
 import { macros, mealSlot, planDay, plannedMeal } from "./schema";
-import { getCurrentUser, requireCurrentUser } from "./users";
+import { requireCurrentUser } from "./users";
 
 export type Macros = Infer<typeof macros>;
 export type MealSlot = Infer<typeof mealSlot>;
@@ -162,16 +162,6 @@ export function isSharedSlot(h: HouseholdContext, slot: MealSlot): boolean {
   return h.active && h.household!.sharedSlots.includes(slot);
 }
 
-/** Convenience for one-off checks; handlers route via `householdContext` once. */
-export async function sharedSlotActive(
-  ctx: QueryCtx | MutationCtx,
-  userId: Id<"users">,
-  slot: MealSlot,
-): Promise<boolean> {
-  const h = await householdContext(ctx, userId);
-  return isSharedSlot(h, slot);
-}
-
 // ---------------------------------------------------------------------------
 // Invite lifecycle
 // ---------------------------------------------------------------------------
@@ -266,28 +256,12 @@ export const join = mutation({
     // Both members point at the row now: the joiner, and the inviter whose
     // pointer was set at `invite`.
     await ctx.db.patch("users", user._id, { householdId: household._id });
+    // The default slot (dîner) becomes shared the moment the foyer completes:
+    // meals already planned on it move into the foyer's week, so a visible meal
+    // is never left behind the routing.
+    await adoptOwnMealsIntoFoyer(ctx, household._id, household.sharedSlots);
     const partner = await ctx.db.get("users", partnerId);
     return { partnerName: partner?.name ?? null };
-  },
-});
-
-export const status = query({
-  args: {},
-  handler: async (ctx) => {
-    const user = await getCurrentUser(ctx);
-    if (!user) return null;
-    const h = await householdContext(ctx, user._id);
-    if (!h.household) return null;
-    return {
-      householdId: h.household._id,
-      sharedSlots: h.household.sharedSlots,
-      partnerName: h.partner?.name ?? null,
-      // The code belongs to the pending owner alone: only the sole member is
-      // told their own invite code.
-      pendingCode: h.household.memberIds.length === 1 ? (h.household.inviteCode ?? null) : null,
-      partnerHasProfile: h.complete && h.partnerProfile !== null,
-      canShare: h.active,
-    };
   },
 });
 
@@ -362,8 +336,7 @@ async function adoptIntoMemberPlan(
 
 /** Every shared-slot meal of a foyer week, split per member with each one's
  *  portion — the shared copy step used by both `leave` and `setSharedSlots`. */
-async function adoptFoyerWeek(
-  ctx: MutationCtx,
+async function adoptFoyerWeek(  ctx: MutationCtx,
   household: Doc<"households">,
   row: Doc<"householdMealPlans">,
   onlySlots: MealSlot[] | null,
@@ -386,6 +359,92 @@ async function adoptFoyerWeek(
   }
 }
 
+/**
+ * Inverse of `adoptFoyerWeek`: when a slot becomes shared, the meals already
+ * planned on it move from BOTH members' own plans into the foyer's week — a
+ * visible meal must never be left behind the routing, which follows the config.
+ * Per (date, slot) the locked meal wins, else the first member's. No-op while a
+ * profile is missing: a slot only routes to the foyer once it is shared-active.
+ */
+async function adoptOwnMealsIntoFoyer(
+  ctx: MutationCtx,
+  householdId: Id<"households">,
+  slots: MealSlot[],
+) {
+  const household = await ctx.db.get("households", householdId);
+  if (!household) return;
+  // Complete AND both profiles: the slot only routes to the foyer once the
+  // foyer is live, so adoption only makes sense then too.
+  if (household.memberIds.length !== 2) return;
+  const profiles = await Promise.all(household.memberIds.map((id) => profileFor(ctx, id)));
+  if (profiles.some((p) => p === null)) return;
+
+  // <week, <date, <slot, meal>>> — the meal that wins each (date, slot).
+  const winners = new Map<string, Map<string, Map<MealSlot, PlannedMeal>>>();
+  for (const memberId of household.memberIds) {
+    const plans = await ctx.db
+      .query("mealPlans")
+      .withIndex("by_user_and_week", (q) => q.eq("userId", memberId))
+      .take(100); // ponytail: weeks of a two-person foyer. Paginate if it ever grows.
+    for (const plan of plans) {
+      for (const day of plan.days) {
+        for (const meal of day.meals) {
+          if (!slots.includes(meal.slot)) continue;
+          const week = winners.get(plan.weekStart) ?? new Map();
+          const date = week.get(day.date) ?? new Map();
+          const existing = date.get(meal.slot);
+          // Locked beats everything; otherwise the first member in the row.
+          if (!existing || (meal.locked === true && existing.locked !== true)) {
+            date.set(meal.slot, { ...meal, portions: 2 });
+          }
+          week.set(day.date, date);
+          winners.set(plan.weekStart, week);
+        }
+      }
+    }
+  }
+  if (winners.size === 0) return;
+
+  // Write the winners into the foyer's week (created on demand) — the dish is
+  // now the couple's, not one member's alone.
+  for (const [week, byDate] of winners) {
+    const foyerWeek = await householdPlanFor(ctx, householdId, week);
+    const days = foyerWeek ? foyerWeek.days.map((day) => ({ ...day, meals: [...day.meals] })) : [];
+    for (const [date, slotsForDate] of byDate) {
+      const day = days.find((d) => d.date === date) ?? { date, meals: [] };
+      if (!days.includes(day)) days.push(day);
+      for (const [slot, meal] of slotsForDate) {
+        const index = day.meals.findIndex((m) => m.slot === slot);
+        if (index >= 0) day.meals[index] = meal;
+        else day.meals.push(meal);
+      }
+      day.meals.sort(bySlot);
+    }
+    if (foyerWeek) {
+      await ctx.db.patch("householdMealPlans", foyerWeek._id, { days });
+    } else {
+      await ctx.db.insert("householdMealPlans", { householdId, weekStart: week, days });
+    }
+  }
+
+  // Then out of every member's own plan: the slot is shared now, one dish only.
+  for (const memberId of household.memberIds) {
+    for (const [week, byDate] of winners) {
+      const plan = await ctx.db
+        .query("mealPlans")
+        .withIndex("by_user_and_week", (q) => q.eq("userId", memberId).eq("weekStart", week))
+        .unique();
+      if (!plan) continue;
+      const days = plan.days.map((day) => {
+        const slotsToDrop = byDate.get(day.date);
+        if (!slotsToDrop) return day;
+        return { ...day, meals: day.meals.filter((m) => !slotsToDrop.has(m.slot)) };
+      });
+      await ctx.db.patch("mealPlans", plan._id, { days });
+    }
+  }
+}
+
 export const setSharedSlots = mutation({
   args: { slots: v.array(mealSlot) },
   handler: async (ctx, args) => {
@@ -396,6 +455,7 @@ export const setSharedSlots = mutation({
     const wanted = new Set(args.slots);
     const slots = SLOT_ORDER.filter((slot) => wanted.has(slot));
     const removed = household.sharedSlots.filter((slot) => !wanted.has(slot));
+    const added = slots.filter((slot) => !household.sharedSlots.includes(slot));
 
     // A slot that stops being shared must not orphan its meal: copy it into
     // BOTH members' own plans, each with their own portion, BEFORE unsharing.
@@ -412,6 +472,12 @@ export const setSharedSlots = mutation({
         }));
         await ctx.db.patch("householdMealPlans", row._id, { days });
       }
+    }
+
+    // And a slot that starts being shared takes the meals already planned on
+    // it INTO the foyer's week, so the routing and the display never disagree.
+    if (added.length > 0) {
+      await adoptOwnMealsIntoFoyer(ctx, household._id, added);
     }
 
     await ctx.db.patch("households", household._id, { sharedSlots: slots });

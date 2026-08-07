@@ -165,6 +165,20 @@ const SLOT_ORDER: MealSlot[] = ["petit_dejeuner", "dejeuner", "collation", "dine
 const bySlot = (a: PlannedMeal, b: PlannedMeal) =>
   SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot);
 
+/** Two lists of days merged by date, meals concatenated and sorted by slot —
+ *  used by `savePlan` to recombine the foyer's locked meals with the incoming
+ *  week. */
+function mergeDays(a: PlanDay[], b: PlanDay[]): PlanDay[] {
+  const byDate = new Map<string, PlannedMeal[]>();
+  for (const day of [...a, ...b]) {
+    const meals = byDate.get(day.date) ?? [];
+    meals.push(...day.meals);
+    meals.sort(bySlot);
+    byDate.set(day.date, meals);
+  }
+  return [...byDate].map(([date, meals]) => ({ date, meals }));
+}
+
 /**
  * Plausibility clamps. The writer is often a language model, and a clamped
  * number is more useful to it than a failed turn — so clamp, never throw.
@@ -391,13 +405,34 @@ export const savePlan = internalMutation({
 
     if (h.household) {
       const foyerWeek = await householdPlanFor(ctx, h.household._id, args.weekStart);
+      // Two Chefs can regenerate the same foyer week, so a lock here means more
+      // than in a solo plan: an incoming proposal for a locked (date, slot) is
+      // DROPPED and the locked meal stays — same rule as `regenerateDay`,
+      // applied to the foyer realm where the other member may be generating.
+      const lockedSlots = new Map<string, MealSlot[]>();
+      for (const day of foyerWeek?.days ?? []) {
+        const slots = day.meals.filter((m) => m.locked === true).map((m) => m.slot);
+        if (slots.length) lockedSlots.set(day.date, slots);
+      }
+      const incoming = shared
+        .map((day) => ({
+          ...day,
+          meals: day.meals.filter((m) => !(lockedSlots.get(day.date) ?? []).includes(m.slot)),
+        }))
+        .filter((day) => day.meals.length > 0);
+      const kept = (foyerWeek?.days ?? []).map((day) => ({
+        ...day,
+        meals: day.meals.filter((m) => m.locked === true),
+      }));
+
+      const days = mergeDays(kept, incoming);
       if (foyerWeek) {
-        await ctx.db.patch("householdMealPlans", foyerWeek._id, { days: shared });
-      } else if (shared.some((day) => day.meals.length > 0)) {
+        await ctx.db.patch("householdMealPlans", foyerWeek._id, { days });
+      } else if (days.length > 0) {
         await ctx.db.insert("householdMealPlans", {
           householdId: h.household._id,
           weekStart: args.weekStart,
-          days: shared,
+          days,
         });
       }
     }
@@ -417,8 +452,9 @@ export const replaceMeal = internalMutation({
     // no per-meal reads.
     if (isSharedSlot(h, args.slot) && h.household) {
       const plan = await householdPlanFor(ctx, h.household._id, args.weekStart);
-      const days = plan?.days ?? [];
-      const day = requireDay({ days }, args.date);
+      const days = plan ? plan.days.map((day) => ({ ...day, meals: [...day.meals] })) : [];
+      const day = days.find((d) => d.date === args.date) ?? { date: args.date, meals: [] };
+      if (!days.includes(day)) days.push(day);
       const index = day.meals.findIndex((m) => m.slot === args.slot);
       if (index >= 0) day.meals[index] = meal;
       else day.meals.push(meal);

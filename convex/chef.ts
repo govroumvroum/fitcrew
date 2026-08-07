@@ -71,8 +71,7 @@ export function toPlannedMeal({ mealPrep, portions, ...rest }: ModelMeal): Plann
 // Reads the chef needs
 // ---------------------------------------------------------------------------
 
-/** What `api.households.status` and the dashboard's `household` field return —
- *  same shape, the two must never drift. */
+/** What the dashboard's `household` field returns — its single definition. */
 type HouseholdStatus = {
   householdId: Id<"households">;
   sharedSlots: MealSlot[];

@@ -160,10 +160,9 @@ const GOALS = {
   prise: "Prise de masse",
 } as const;
 
-/** The dashboard's `household` field — same shape as households.status, kept in
- *  sync server-side. The card reads it from the page's one subscription rather
- *  than a second query on status: two subscriptions could disagree mid-render
- *  (same rule as the journal's `log` in food-log.tsx). */
+/** The dashboard's `household` field. The card reads it from the page's one
+ *  subscription rather than a second query: two subscriptions could disagree
+ *  mid-render (same rule as the journal's `log` in food-log.tsx). */
 type HouseholdStatus = {
   sharedSlots: MealSlot[];
   partnerName: string | null;
