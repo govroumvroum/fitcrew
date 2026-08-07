@@ -9,6 +9,28 @@ export type MealSlot = Infer<typeof mealSlot>;
 export type PlannedMeal = Infer<typeof plannedMeal>;
 export type PlanDay = Infer<typeof planDay>;
 
+/** Le choix d'un membre dans un duel : "a" = l'incumbent, "b" = le challenger. */
+export type DuelChoice = "a" | "b";
+
+/** Un geste de chifoumi, en version salle de sport. */
+export type ChifoumiThrow = "pierre" | "papier" | "ciseaux";
+
+/**
+ * Règles du chifoumi : la pierre bat les ciseaux, les ciseaux battent le
+ * papier, le papier bat la pierre. Égalité → rejouer. Pure, testée.
+ */
+export function chifoumiResult(a: ChifoumiThrow, b: ChifoumiThrow): DuelChoice | "draw" {
+  if (a === b) return "draw";
+  if (
+    (a === "pierre" && b === "ciseaux") ||
+    (a === "ciseaux" && b === "papier") ||
+    (a === "papier" && b === "pierre")
+  ) {
+    return "a";
+  }
+  return "b";
+}
+
 // ---------------------------------------------------------------------------
 // Pure logic. No ctx, no clock — see households.check.ts.
 // ---------------------------------------------------------------------------
@@ -66,6 +88,43 @@ export function sharedPortion(meal: PlannedMeal, myCalories: number, partnerCalo
     carbs: Math.round(total.carbs * myShare),
     fat: Math.round(total.fat * myShare),
   };
+}
+
+/**
+ * Le duel est tranché : le gagnant "a" garde l'incumbent, "b" promeut le
+ * challenger (sa recette s'étale sur le repas, son auteur gardé). Dans les
+ * deux cas les champs de duel meurent avec la décision — le créneau redevient
+ * un repas partagé normal. Pure : le caller écrit le résultat.
+ */
+export function applyDuelResolution(meal: PlannedMeal, winner: DuelChoice): PlannedMeal {
+  const challenger = meal.duel;
+  const {
+    duel: _duel,
+    duelVotes: _duelVotes,
+    duelThrows: _duelThrows,
+    ...rest
+  } = meal;
+  if (winner !== "b" || !challenger) return rest;
+  return { ...rest, ...challenger.vs, proposedBy: challenger.proposedBy };
+}/**
+ * Le plat qu'un membre récupère quand un créneau en duel se dissout (split, ou
+ * le foyer qui se sépare) : le plat pour lequel il a VOTÉ — "b" veut dire le
+ * challenger — sinon l'incumbent (un membre sans vote, par sécurité). Les
+ * champs du foyer (portions, duel, duelVotes) sont retirés et les macros
+ * gardées telles quelles : le plat est à portion seule et rien que pour lui.
+ */
+export function dueledMealFor(meal: PlannedMeal, userId: Id<"users">): PlannedMeal {
+  const vote = meal.duelVotes?.find((vote) => vote.userId === userId);
+  const challenger = vote?.choice === "b" ? meal.duel : null;
+  const {
+    duel: _duel,
+    duelVotes: _duelVotes,
+    duelThrows: _duelThrows,
+    portions: _portions,
+    ...rest
+  } = meal;
+  if (!challenger) return rest;
+  return { ...rest, ...challenger.vs, proposedBy: challenger.proposedBy };
 }
 
 // ---------------------------------------------------------------------------
@@ -354,7 +413,13 @@ async function adoptFoyerWeek(  ctx: MutationCtx,
       ctx,
       memberId,
       row.weekStart,
-      meals.map(({ date, meal }) => ({ date, meal: ownMealFor(meal, mine, partner) })),
+      meals.map(({ date, meal }) => ({
+        date,
+        // Un créneau en duel se dissout en sortant : chaque membre repart avec
+        // le plat pour lequel il a voté (sinon l'incumbent), champs du foyer
+        // retirés, macros gardées telles quelles.
+        meal: meal.duel ? dueledMealFor(meal, memberId) : ownMealFor(meal, mine, partner),
+      })),
     );
   }
 }
@@ -510,5 +575,185 @@ export const leave = mutation({
     }
     await ctx.db.delete("households", household._id);
     return null;
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Duels de recettes
+// ---------------------------------------------------------------------------
+
+/** Le repas du foyer au (date, créneau), ou un message qui dit pourquoi non. */
+async function foyerMealAt(
+  ctx: MutationCtx,
+  household: Doc<"households">,
+  weekStart: string,
+  date: string,
+  slot: MealSlot,
+) {
+  const plan = await householdPlanFor(ctx, household._id, weekStart);
+  if (!plan) throw new Error("Aucun plan pour cette semaine");
+  const day = plan.days.find((d) => d.date === date);
+  const index = day?.meals.findIndex((m) => m.slot === slot) ?? -1;
+  const meal = index >= 0 ? day!.meals[index] : undefined;
+  if (!meal) throw new Error("Aucun repas prévu sur ce créneau");
+  if (!meal.duel) throw new Error("Ce créneau n'est pas en duel");
+  return { plan, day: day!, index, meal };
+}
+
+/**
+ * Un vote par membre sur le duel du créneau : "a" = le plat en place, "b" = le
+ * challenger. Un vote remplace le vote précédent du même membre. Quand les
+ * deux ont voté : à l'unanimité le duel se tranche immédiatement, à votes
+ * contraires il reste ouvert — la résolution (split ou chifoumi) vient ensuite.
+ */
+export const voteDuel = mutation({
+  args: {
+    weekStart: v.string(),
+    date: v.string(),
+    slot: mealSlot,
+    choice: v.union(v.literal("a"), v.literal("b")),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const household = await householdFor(ctx, user._id);
+    if (!household) throw new Error("Tu n'es pas dans un foyer");
+
+    const { plan, day, index, meal } = await foyerMealAt(
+      ctx,
+      household,
+      args.weekStart,
+      args.date,
+      args.slot,
+    );
+
+    // Mon vote remplace le mien : deux membres, deux voix max.
+    const votes = (meal.duelVotes ?? []).filter((vote) => vote.userId !== user._id);
+    votes.push({ userId: user._id, choice: args.choice });
+    meal.duelVotes = votes;
+
+    const allVoted =
+      household.memberIds.length === 2 &&
+      household.memberIds.every((id) => votes.some((vote) => vote.userId === id));
+
+    if (allVoted) {
+      if (votes[0].choice === votes[1].choice) {
+        const winner = votes[0].choice;
+        day.meals[index] = applyDuelResolution(meal, winner);
+        await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+        return { resolved: true, winner };
+      }
+      await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+      return { resolved: false };
+    }
+
+    await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+    return { resolved: null };
+  },
+});
+
+/**
+ * La résolution du duel quand les votes sont contraires.
+ * - split : le plat quitte la semaine du foyer, chaque membre récupère le plat
+ *   pour lequel il a voté dans SON plan, macros à portion seule, telles
+ *   quelles.
+ * - chifoumi : une pièce décide ; le gagnant s'applique exactement comme un
+ *   vote unanime.
+ */
+export const resolveDuel = mutation({
+  args: {
+    weekStart: v.string(),
+    date: v.string(),
+    slot: mealSlot,
+    mode: v.literal("split"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const household = await householdFor(ctx, user._id);
+    if (!household) throw new Error("Tu n'es pas dans un foyer");
+
+    const { plan, day, index, meal } = await foyerMealAt(
+      ctx,
+      household,
+      args.weekStart,
+      args.date,
+      args.slot,
+    );
+
+    // Split : le repas sort de la semaine foyer, les jours vidés tombent.
+    day.meals.splice(index, 1);
+    const days = plan.days.filter((d) => d.meals.length > 0);
+    if (days.length > 0) {
+      await ctx.db.patch("householdMealPlans", plan._id, { days });
+    } else {
+      await ctx.db.delete("householdMealPlans", plan._id);
+    }
+    // Chacun chez soi : le plat voté atterrit dans le plan du membre, en
+    // remplaçant le créneau, semaine/jour créés à la volée si besoin.
+    for (const memberId of household.memberIds) {
+      await adoptIntoMemberPlan(ctx, memberId, args.weekStart, [
+        { date: args.date, meal: dueledMealFor(meal, memberId) },
+      ]);
+    }
+    return { winner: null };
+  },
+});
+
+/**
+ * Chifoumi : chacun lance pierre / papier / ciseaux (icônes salle de sport),
+ * les règles classiques tranchent. Égalité → les lancers tombent et on
+ * relance. Sinon le gagnant du lancer impose LE PLAT POUR LEQUEL IL A VOTÉ.
+ * Les deux doivent avoir voté avant de lancer.
+ */
+export const chifoumiThrow = mutation({
+  args: {
+    weekStart: v.string(),
+    date: v.string(),
+    slot: mealSlot,
+    throw: v.union(v.literal("pierre"), v.literal("papier"), v.literal("ciseaux")),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const household = await householdFor(ctx, user._id);
+    if (!household) throw new Error("Tu n'es pas dans un foyer");
+
+    const { plan, day, index, meal } = await foyerMealAt(
+      ctx,
+      household,
+      args.weekStart,
+      args.date,
+      args.slot,
+    );
+    if (!meal.duelVotes || meal.duelVotes.length < 2) {
+      throw new Error("Les deux doivent avoir voté avant le chifoumi");
+    }
+
+    const mine = meal.duelThrows?.filter((t) => t.userId !== user._id) ?? [];
+    const throws = [...mine, { userId: user._id, throw: args.throw }];
+    const partner = throws.find((t) => t.userId !== user._id);
+
+    // Un seul lancer en piste : on attend le second.
+    if (!partner) {
+      day.meals[index] = { ...meal, duelThrows: throws };
+      await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+      return { resolved: null, tied: false };
+    }
+
+    const result = chifoumiResult(partner.throw, args.throw);
+    if (result === "draw") {
+      // Égalité : les lancers tombent, le créneau redevient en attente de
+      // lancers — les votes, eux, restent.
+      const cleared = { ...meal };
+      delete cleared.duelThrows;
+      day.meals[index] = cleared;
+      await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+      return { resolved: false, tied: true };
+    }
+
+    // Le membre dont le geste gagne impose le plat pour lequel il a voté.
+    const winnerMemberId = result === "a" ? partner.userId : user._id;
+    const winnerVote = meal.duelVotes.find((vote) => vote.userId === winnerMemberId)?.choice ?? "a";
+    day.meals[index] = applyDuelResolution(meal, winnerVote);
+    await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+    return { resolved: true, winner: winnerVote, winnerMemberId };
   },
 });

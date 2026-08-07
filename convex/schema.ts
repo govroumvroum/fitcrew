@@ -61,8 +61,12 @@ export const macros = v.object({
   fat: v.number(),
 });
 
-export const plannedMeal = v.object({
-  slot: mealSlot,
+// The recipe part of a meal — what makes a dish a dish, minus the plan fields
+// (slot, locked, portions) and the duel fields. Shared by `plannedMeal`
+// (inline) and by `plannedMeal.duel.vs`: the challenger recipe is duplicated
+// on purpose to keep the incumbent flat, validated at write time in
+// nutrition.ts.
+export const mealRecipe = v.object({
   name: v.string(),
   // An array, not a record keyed by the ingredient: a Convex field name must be
   // non-control ASCII and every one of these names is French.
@@ -70,12 +74,40 @@ export const plannedMeal = v.object({
   steps: v.array(v.string()),
   prepMinutes: v.number(),
   macros,
-  locked: v.optional(v.boolean()),
   mealPrep: v.optional(v.string()), // "se prépare la veille", when relevant
+});
+
+// One partner's vote in a duel: dish "a" (the incumbent) or "b" (the
+// challenger). Bounded — a foyer has exactly two members, so two votes max.
+export const duelVote = v.object({
+  userId: v.id("users"),
+  choice: v.union(v.literal("a"), v.literal("b")),
+});
+
+export const plannedMeal = v.object({
+  slot: mealSlot,
+  ...mealRecipe.fields,
+  locked: v.optional(v.boolean()),
   // Number of portions the recipe makes. ONLY set on a shared foyer meal
   // (always 2 there): a solo user's plan is byte-identical and carries nothing.
   // Read everywhere as `meal.portions ?? 2` — that default IS the contract.
   portions: v.optional(v.number()),
+  // Whose Chef proposed this dish — the incumbent AND the challenger both carry
+  // it. Absent on meals written before the duel feature, read as unknown.
+  proposedBy: v.optional(v.id("users")),
+  // The challenger dish when the slot is in a duel: the meal itself is dish
+  // "a", `duel.vs` is dish "b". ONLY ever set on foyer shared meals. `vs` is
+  // the recipe-only subset of plannedMeal, duplicated on purpose to keep the
+  // incumbent flat (validated at write time in nutrition.ts) — it never
+  // carries slot/locked/portions, and never nests another duel.
+  duel: v.optional(v.object({ vs: mealRecipe, proposedBy: v.id("users") })),
+  // Each partner's vote on a pending duel, bounded (2 members).
+  duelVotes: v.optional(v.array(duelVote)),
+  // Each partner's chifoumi throw, bounded (2 members). Set only while a duel
+  // is being settled by chifoumi — cleared when the duel dies.
+  duelThrows: v.optional(
+    v.array(v.object({ userId: v.id("users"), throw: v.union(v.literal("pierre"), v.literal("papier"), v.literal("ciseaux")) })),
+  ),
 });
 
 export const planDay = v.object({ date: v.string(), meals: v.array(plannedMeal) });

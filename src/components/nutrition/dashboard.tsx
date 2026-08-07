@@ -1,10 +1,19 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import { ChevronDownIcon, ClockIcon, CopyIcon, LockIcon, LockOpenIcon, PlusIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ClockIcon,
+  CopyIcon,
+  DumbbellIcon,
+  LockIcon,
+  LockOpenIcon,
+  PlusIcon,
+  StretchHorizontalIcon,
+} from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +25,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatFull, monday } from "@/lib/dates";
 import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
+import type { Id } from "../../../convex/_generated/dataModel";
+import type { ChifoumiThrow } from "../../../convex/households";
 import type { MealSlot, PlannedMeal } from "../../../convex/nutrition";
 import { FoodLog } from "./food-log";
 import { MacroProgress, SLOT_LABELS, SLOT_ORDER, macroLine, pct, runMutation } from "./macros";
@@ -376,8 +387,8 @@ function Household({ household }: { household: HouseholdStatus | null }) {
 
       {!household.partnerHasProfile ? (
         <p className="text-[11px] text-muted-foreground">
-          Ton foyer est prêt, mais {partnerName} doit compléter son profil nutrition pour
-          que les repas soient partagés.
+          Ton foyer est prêt, mais {partnerName} doit compléter son profil nutrition pour que les
+          repas soient partagés.
         </p>
       ) : null}
 
@@ -389,7 +400,8 @@ function Household({ household }: { household: HouseholdStatus | null }) {
           // ponytail: native confirm, like the séance's cancel. Leaving copies
           // the shared meals into both own plans server-side, so nobody loses a
           // dish — only the sharing.
-          if (!window.confirm("Quitter le foyer ? Chacun garde ses repas, avec sa portion.")) return;
+          if (!window.confirm("Quitter le foyer ? Chacun garde ses repas, avec sa portion."))
+            return;
           guard(() => leave(), "Foyer quitté.");
         }}
       >
@@ -410,8 +422,9 @@ function Meals({
   weekStart: string;
   hasPlan: boolean;
 }) {
-  const logPlannedMeal = useMutation(api.nutrition.logPlannedMeal);
-  const toggleLock = useMutation(api.nutrition.toggleLock);
+  // La bannière « duel tranché » : le duel disparaît des données au moment où
+  // il se résout, l'état local la maintient encore quelques secondes.
+  const [resolved, setResolved] = useState<{ slot: MealSlot; dish: string } | null>(null);
 
   return (
     <section className="flex flex-col gap-2.5">
@@ -426,111 +439,487 @@ function Meals({
         </p>
       </div>
 
-      {meals.map((meal) => (
-        // Concentric radii: rounded-xl with p-3 outside, rounded-md rows inside.
-        <article key={meal.slot} className="flex flex-col gap-2 rounded-xl border bg-card p-3">
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="eyebrow">{SLOT_LABELS[meal.slot]}</p>
-                {meal.sharedWith ? (
-                  <Badge variant="secondary" className="shrink-0">
-                    Partagé avec {meal.sharedWith}
-                  </Badge>
-                ) : null}
-              </div>
-              <p className="font-heading font-semibold">{meal.name}</p>
-              <p className="text-[11px] text-muted-foreground tabular-nums">
-                {macroLine(meal.macros)}
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-11 shrink-0"
-              aria-label={meal.locked ? `Déverrouiller ${meal.name}` : `Verrouiller ${meal.name}`}
-              aria-pressed={meal.locked === true}
-              onClick={() =>
-                runMutation(
-                  () => toggleLock({ weekStart, date: today, slot: meal.slot }),
-                  meal.locked
-                    ? "Repas déverrouillé."
-                    : "Repas verrouillé, il survit à une régénération.",
-                )
-              }
-            >
-              {meal.locked ? (
-                <LockIcon className="size-4 text-accent-text" aria-hidden />
-              ) : (
-                <LockOpenIcon className="size-4 text-muted-foreground" aria-hidden />
-              )}
-            </Button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1 tabular-nums">
-              <ClockIcon className="size-3" aria-hidden />
-              {meal.prepMinutes} min
-            </span>
-            {meal.mealPrep ? <span>{meal.mealPrep}</span> : null}
-          </div>
-
-          {/* Native <details>, like the coach's program cards: the recipe is what
-              you open when you cook, not what you scan at 8h. */}
-          <details className="group">
-            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-2 text-sm font-medium marker:hidden hover:bg-muted/60">
-              <ChevronDownIcon className="chevron" />
-              <span className="min-w-0 flex-1">La recette</span>
-              <span className="shrink-0 text-muted-foreground tabular-nums">
-                {meal.ingredients.length} ingrédient{meal.ingredients.length > 1 ? "s" : ""}
-              </span>
-            </summary>
-            <ul className="mt-1">
-              {meal.ingredients.map((ingredient) => (
-                <li
-                  key={ingredient.name}
-                  className="flex items-baseline gap-2 rounded-md px-2 py-1 text-sm odd:bg-muted/40"
-                >
-                  <span className="min-w-0 flex-1">{ingredient.name}</span>
-                  <span className="shrink-0 text-muted-foreground tabular-nums">
-                    {ingredient.quantity}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <ol className="mt-1 flex list-decimal flex-col gap-1 pl-6 text-sm">
-              {meal.steps.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
-          </details>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              className="h-11 flex-1"
-              onClick={() =>
-                runMutation(
-                  () => logPlannedMeal({ date: today, slot: meal.slot, weekStart }),
-                  "Ajouté au journal.",
-                )
-              }
-            >
-              <PlusIcon className="size-4" aria-hidden />
-              Ajouter au journal
-            </Button>
-            {/* Remplacer, déplacer, "plus rapide", "sans poisson" — all one
-                sentence to the Chef. A dropdown of canned alternatives here would
-                be a worse version of the thing that can actually cook. */}
-            <Button asChild variant="ghost" className="h-11">
-              <Link href="/chef">Changer</Link>
-            </Button>
-          </div>
-        </article>
-      ))}
+      {meals.map((meal) => {
+        const resolvedDish = resolved?.slot === meal.slot ? resolved.dish : null;
+        // Le spread resserre `duel` à sa valeur non-optionnelle : le branchement
+        // ne suffit pas à TypeScript pour ce prop.
+        const duelMeal = meal.duel ? { ...meal, duel: meal.duel } : null;
+        return duelMeal ? (
+          <DuelCard
+            key={meal.slot}
+            meal={duelMeal}
+            today={today}
+            weekStart={weekStart}
+            onResolved={(dish) => {
+              setResolved({ slot: meal.slot, dish });
+              setTimeout(
+                () => setResolved((r) => (r?.slot === meal.slot && r.dish === dish ? null : r)),
+                6000,
+              );
+            }}
+          />
+        ) : (
+          <MealCard
+            key={meal.slot}
+            meal={meal}
+            today={today}
+            weekStart={weekStart}
+            resolvedDish={resolvedDish}
+          />
+        );
+      })}
     </section>
   );
 }
+
+function MealCard({
+  meal,
+  today,
+  weekStart,
+  resolvedDish,
+}: {
+  meal: PlannedMeal & { sharedWith?: string };
+  today: string;
+  weekStart: string;
+  resolvedDish: string | null;
+}) {
+  const logPlannedMeal = useMutation(api.nutrition.logPlannedMeal);
+  const toggleLock = useMutation(api.nutrition.toggleLock);
+
+  return (
+    // Concentric radii: rounded-xl with p-3 outside, rounded-md rows inside.
+    <article className="flex flex-col gap-2 rounded-xl border bg-card p-3">
+      {resolvedDish ? (
+        <p className="rounded-md bg-primary/10 px-2 py-1.5 text-[11px] font-medium text-primary">
+          Le duel est tranché : {resolvedDish}
+        </p>
+      ) : null}
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="eyebrow">{SLOT_LABELS[meal.slot]}</p>
+            {meal.sharedWith ? (
+              <Badge variant="secondary" className="shrink-0">
+                Partagé avec {meal.sharedWith}
+              </Badge>
+            ) : null}
+          </div>
+          <p className="font-heading font-semibold">{meal.name}</p>
+          <p className="text-[11px] text-muted-foreground tabular-nums">{macroLine(meal.macros)}</p>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-11 shrink-0"
+          aria-label={meal.locked ? `Déverrouiller ${meal.name}` : `Verrouiller ${meal.name}`}
+          aria-pressed={meal.locked === true}
+          onClick={() =>
+            runMutation(
+              () => toggleLock({ weekStart, date: today, slot: meal.slot }),
+              meal.locked
+                ? "Repas déverrouillé."
+                : "Repas verrouillé, il survit à une régénération.",
+            )
+          }
+        >
+          {meal.locked ? (
+            <LockIcon className="size-4 text-accent-text" aria-hidden />
+          ) : (
+            <LockOpenIcon className="size-4 text-muted-foreground" aria-hidden />
+          )}
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1 tabular-nums">
+          <ClockIcon className="size-3" aria-hidden />
+          {meal.prepMinutes} min
+        </span>
+        {meal.mealPrep ? <span>{meal.mealPrep}</span> : null}
+      </div>
+
+      <RecipeAccordion ingredients={meal.ingredients} steps={meal.steps} />
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          className="h-11 flex-1"
+          onClick={() =>
+            runMutation(
+              () => logPlannedMeal({ date: today, slot: meal.slot, weekStart }),
+              "Ajouté au journal.",
+            )
+          }
+        >
+          <PlusIcon className="size-4" aria-hidden />
+          Ajouter au journal
+        </Button>
+        {/* Remplacer, déplacer, "plus rapide", "sans poisson" — all one
+            sentence to the Chef. A dropdown of canned alternatives here would
+            be a worse version of the thing that can actually cook. */}
+        <Button asChild variant="ghost" className="h-11">
+          <Link href="/chef">Changer</Link>
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+/** La recette en accordéon : ingrédients et étapes, ouverte quand on cuisine.
+ *  Native <details>, like the coach's program cards — shared by the meal card
+ *  and the two halves of a duel. */
+function RecipeAccordion({
+  ingredients,
+  steps,
+}: {
+  ingredients: { name: string; quantity: string }[];
+  steps: string[];
+}) {
+  return (
+    <details className="group">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-2 text-sm font-medium marker:hidden hover:bg-muted/60">
+        <ChevronDownIcon className="chevron" />
+        <span className="min-w-0 flex-1">La recette</span>
+        <span className="shrink-0 text-muted-foreground tabular-nums">
+          {ingredients.length} ingrédient{ingredients.length > 1 ? "s" : ""}
+        </span>
+      </summary>
+      <ul className="mt-1">
+        {ingredients.map((ingredient) => (
+          <li
+            key={ingredient.name}
+            className="flex items-baseline gap-2 rounded-md px-2 py-1 text-sm odd:bg-muted/40"
+          >
+            <span className="min-w-0 flex-1">{ingredient.name}</span>
+            <span className="shrink-0 text-muted-foreground tabular-nums">
+              {ingredient.quantity}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <ol className="mt-1 flex list-decimal flex-col gap-1 pl-6 text-sm">
+        {steps.map((step) => (
+          <li key={step}>{step}</li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+/** Comme runMutation, mais le message de succès est décidé par le retour de la
+ *  mutation : voter peut trancher le duel, lancer peut faire égalité. */
+async function runDuelMutation(action: () => Promise<string>, fallback: string) {
+  try {
+    toast.success((await action()) || fallback);
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : "Ça a raté, réessaie.");
+  }
+}
+
+type DuelMeal = PlannedMeal & { sharedWith?: string } & { duel: NonNullable<PlannedMeal["duel"]> };
+
+/**
+ * Un créneau partagé en duel : deux plats s'affrontent, chaque membre vote, et
+ * le duel se tranche par un accord ou par le chifoumi. Tout est piloté par la
+ * souscription — les mutations sont poussées ici, l'état (vote, lancer) vient
+ * des données — et le composant redevient une carte normale dès que le duel
+ * disparaît. Pas de verrou, pas de journal, pas de « Changer » : le créneau
+ * n'a pas encore de plat choisi.
+ */
+function DuelCard({
+  meal,
+  today,
+  weekStart,
+  onResolved,
+}: {
+  meal: DuelMeal;
+  today: string;
+  weekStart: string;
+  onResolved: (dish: string) => void;
+}) {
+  const me = useQuery(api.users.me);
+  const voteDuel = useMutation(api.households.voteDuel);
+  const resolveDuel = useMutation(api.households.resolveDuel);
+  const chifoumiThrow = useMutation(api.households.chifoumiThrow);
+
+  const [busy, setBusy] = useState(false);
+  // Passer au chifoumi est un choix local : le serveur ne le dit nulle part. Le
+  // lancer du partenaire (duelThrows non vide) suffit aussi à y basculer.
+  const [chifoumi, setChifoumi] = useState(false);
+  // Une égalité efface les deux lancers des données : le « relancez » ne peut
+  // venir que du retour de la mutation, il vit ici jusqu'au prochain lancer.
+  const [tied, setTied] = useState(false);
+
+  const myId = me?._id;
+  const partnerName = meal.sharedWith ?? "Ton partenaire";
+  const myName = me?.name?.trim() || "Toi";
+
+  const votes = meal.duelVotes ?? [];
+  const myVote = votes.find((vote) => vote.userId === myId);
+  const partnerVote = votes.find((vote) => vote.userId !== myId);
+  const throws = meal.duelThrows ?? [];
+  const myThrow = throws.find((t) => t.userId === myId);
+  const partnerThrow = throws.find((t) => t.userId !== myId);
+
+  const bothVoted = votes.length === 2;
+  const conflict = bothVoted && myVote?.choice !== partnerVote?.choice;
+  const throwPhase = chifoumi || throws.length > 0;
+
+  const proposerName = (proposedBy: Id<"users"> | undefined) =>
+    proposedBy === undefined ? "le Chef" : proposedBy === myId ? myName : partnerName;
+
+  const guard = (action: () => Promise<string>, fallback: string) => {
+    setBusy(true);
+    runDuelMutation(action, fallback).finally(() => setBusy(false));
+  };
+
+  const vote = (choice: "a" | "b") =>
+    guard(async () => {
+      const result = await voteDuel({ weekStart, date: today, slot: meal.slot, choice });
+      if (result.resolved === true) {
+        const winner = result.winner === "a" ? meal.name : meal.duel.vs.name;
+        onResolved(winner);
+        return `Le duel est tranché : ${winner}`;
+      }
+      return result.resolved === false
+        ? "Votes contraires — il faut trancher."
+        : "Ton choix est noté.";
+    }, "Ton choix est noté.");
+
+  const split = () =>
+    guard(
+      () => resolveDuel({ weekStart, date: today, slot: meal.slot, mode: "split" }).then(() => ""),
+      "Repas séparé — chacun son plat.",
+    );
+
+  const throwGesture = (gesture: ChifoumiThrow) => {
+    setTied(false);
+    guard(async () => {
+      const result = await chifoumiThrow({
+        weekStart,
+        date: today,
+        slot: meal.slot,
+        throw: gesture,
+      });
+      if (result.resolved === true) {
+        // Si je suis le second à lancer, le lancer du partenaire est dans les
+        // données ; sinon son geste est inconnu et le plat gagnant suffit.
+        if (partnerThrow) {
+          const winnerName = result.winnerMemberId === myId ? myName : partnerName;
+          return `${myName} a lancé ${gesture}, ${partnerName} a lancé ${partnerThrow.throw} — ${winnerName} gagne !`;
+        }
+        const winner = result.winner === "a" ? meal.name : meal.duel.vs.name;
+        return `Le duel est tranché : ${winner}`;
+      }
+      if (result.tied) {
+        setTied(true);
+        return "Égalité — relancez !";
+      }
+      return "Lancer envoyé !";
+    }, "Lancer envoyé !");
+  };
+
+  return (
+    <article className="flex flex-col gap-3 rounded-xl border bg-card p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="eyebrow">{SLOT_LABELS[meal.slot]}</p>
+        {meal.sharedWith ? (
+          <Badge variant="secondary" className="shrink-0">
+            Partagé avec {meal.sharedWith}
+          </Badge>
+        ) : null}
+      </div>
+      <div>
+        <p className="font-heading font-semibold">Duel de recettes</p>
+        <p className="text-[11px] text-muted-foreground">
+          Chacun propose un plat — le gagnant sera sur le créneau.
+        </p>
+      </div>
+
+      {throwPhase ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <p className="text-sm font-medium">Chifoumi — le gagnant impose son plat.</p>
+            {tied ? (
+              <p className="text-[11px] font-medium text-destructive">Égalité — relancez !</p>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {CHIFOUMI_GESTURES.map(({ gesture, label, icon }) => (
+              <ThrowButton
+                key={gesture}
+                label={label}
+                icon={icon}
+                selected={myThrow?.throw === gesture}
+                disabled={busy || myThrow !== undefined}
+                onClick={() => throwGesture(gesture)}
+              />
+            ))}
+          </div>
+          {myThrow && !partnerThrow ? (
+            <p className="text-[11px] text-muted-foreground">
+              En attente du lancer de {partnerName}.
+            </p>
+          ) : null}
+        </div>
+      ) : conflict ? (
+        <div className="flex flex-col gap-2.5 rounded-xl border bg-background p-3">
+          <div>
+            <p className="text-sm font-medium">Votes contraires.</p>
+            <p className="text-[11px] text-muted-foreground">
+              {myName} veut {meal.name}, {partnerName} veut {meal.duel.vs.name}.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" className="h-11 flex-1" disabled={busy} onClick={split}>
+              Séparer le repas
+            </Button>
+            <Button className="h-11 flex-1" disabled={busy} onClick={() => setChifoumi(true)}>
+              Chifoumi
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Empilées sur mobile (390 px), côte à côte à partir de sm. */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <DuelDish
+              label="Plat A"
+              dish={meal}
+              proposer={proposerName(meal.proposedBy)}
+              selected={myVote?.choice === "a"}
+              disabled={busy}
+              onChoose={() => vote("a")}
+            />
+            <DuelDish
+              label="Plat B"
+              dish={meal.duel.vs}
+              proposer={proposerName(meal.duel.proposedBy)}
+              selected={myVote?.choice === "b"}
+              disabled={busy}
+              onChoose={() => vote("b")}
+            />
+          </div>
+          {myVote && !partnerVote ? (
+            <p className="text-[11px] text-muted-foreground">
+              En attente du vote de {partnerName}.
+            </p>
+          ) : null}
+        </>
+      )}
+    </article>
+  );
+}
+
+/** Une moitié du duel : la recette du plat et son bouton de vote. */
+function DuelDish({
+  label,
+  dish,
+  proposer,
+  selected,
+  disabled,
+  onChoose,
+}: {
+  label: string;
+  dish: Pick<PlannedMeal, "name" | "macros" | "ingredients" | "steps" | "prepMinutes" | "mealPrep">;
+  proposer: string;
+  selected: boolean;
+  disabled: boolean;
+  onChoose: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border bg-background p-3">
+      <div>
+        <p className="eyebrow">{label}</p>
+        <p className="font-heading font-semibold">{dish.name}</p>
+      </div>
+      <p className="text-[11px] text-muted-foreground">Proposé par {proposer}</p>
+      <p className="text-[11px] text-muted-foreground tabular-nums">{macroLine(dish.macros)}</p>
+      <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1 tabular-nums">
+          <ClockIcon className="size-3" aria-hidden />
+          {dish.prepMinutes} min
+        </span>
+        {dish.mealPrep ? <span>{dish.mealPrep}</span> : null}
+      </div>
+      <RecipeAccordion ingredients={dish.ingredients} steps={dish.steps} />
+      <Button
+        variant={selected ? "default" : "outline"}
+        className="h-10 w-full"
+        disabled={disabled}
+        aria-pressed={selected}
+        onClick={onChoose}
+      >
+        {selected ? "Ton choix" : "Je choisis ça"}
+      </Button>
+    </div>
+  );
+}
+
+/** Un geste de chifoumi : icône au-dessus du libellé, en salle de sport. */
+function ThrowButton({
+  label,
+  icon,
+  selected,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  icon: ReactNode;
+  selected: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-[11px] font-medium transition-colors active:scale-[0.96] disabled:opacity-50",
+        selected
+          ? "border-transparent bg-primary text-primary-foreground"
+          : "border-input text-muted-foreground",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+/** La corde à sauter du chifoumi : un arc de corde et ses deux poignées. Pas
+ *  d'icône de corde dans lucide — dessinée à la main, même grammaire visuelle
+ *  que les icônes lucide (stroke, currentColor). */
+function RopeIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      className="size-7"
+      aria-hidden
+    >
+      <path d="M4.5 4.5 8.5 7" />
+      <path d="M19.5 4.5 15.5 7" />
+      <path d="M8.5 7c0 7.5 7 7.5 7 0" />
+    </svg>
+  );
+}
+
+/** Pierre, papier, ciseaux en version salle de sport : haltère, yoga, corde. */
+const CHIFOUMI_GESTURES = [
+  { gesture: "pierre", label: "Pierre", icon: <DumbbellIcon className="size-7" aria-hidden /> },
+  {
+    gesture: "papier",
+    label: "Papier",
+    icon: <StretchHorizontalIcon className="size-7" aria-hidden />,
+  },
+  { gesture: "ciseaux", label: "Ciseaux", icon: <RopeIcon /> },
+] as const satisfies readonly { gesture: ChifoumiThrow; label: string; icon: ReactNode }[];
 
 /** 2 L: the round number people aim at, not a computed need. */
 const WATER_TARGET = 2000;

@@ -1,7 +1,10 @@
 /** Self-check for the nutrition maths. Run: `bun convex/nutrition.check.ts` */
 import assert from "node:assert/strict";
+import type { Id } from "./_generated/dataModel";
 import {
+  allMealIngredients,
   type PlanDay,
+  type PlannedMeal,
   estimateTargets,
   shoppingListFrom,
   sumMacros,
@@ -93,5 +96,35 @@ assert.deepEqual(shoppingListFrom(days), [
 
 // An empty week is an empty list.
 assert.deepEqual(shoppingListFrom([]), []);
+
+// ---------------------------------------------------------------------------
+// allMealIngredients — un créneau en duel montre les DEUX plats à la liste.
+// ---------------------------------------------------------------------------
+
+const dueled: PlannedMeal = {
+  ...meal("Poulet rôti", [{ name: "Poulet", quantity: "2 filets" }]),
+  portions: 2,
+  proposedBy: "user-1" as Id<"users">,
+  duel: {
+    vs: {
+      name: "Saumon grillé",
+      ingredients: [{ name: "Saumon", quantity: "2 pavés" }],
+      steps: [],
+      prepMinutes: 15,
+      macros: { calories: 0, protein: 0, carbs: 0, fat: 0 },
+    },
+    proposedBy: "user-2" as Id<"users">,
+  },
+};
+
+// Les ingrédients des deux candidats, dans l'ordre.
+assert.deepEqual(allMealIngredients(dueled), [
+  { name: "Poulet", quantity: "2 filets" },
+  { name: "Saumon", quantity: "2 pavés" },
+]);
+
+// Sans duel : ses propres ingrédients, tels quels.
+const plain = meal("Salade", [{ name: "Tomate", quantity: "200 g" }]);
+assert.deepEqual(allMealIngredients(plain), [{ name: "Tomate", quantity: "200 g" }]);
 
 console.log("nutrition targets + shopping list ok");

@@ -1,6 +1,20 @@
 /** Self-check for the household maths. Run: `bun convex/households.check.ts` */
 import assert from "node:assert/strict";
-import { type PlannedMeal, sharedPortion } from "./households";
+import type { Id } from "./_generated/dataModel";
+import {
+  applyDuelResolution,
+  chifoumiResult,
+  dueledMealFor,
+  type PlannedMeal,
+  sharedPortion,
+} from "./households";
+import { mergeDueledSlot } from "./nutrition";
+
+const u1 = "user-1" as Id<"users">;
+const u2 = "user-2" as Id<"users">;
+const u3 = "user-3" as Id<"users">;
+
+const macros = (calories: number) => ({ calories, protein: 30, carbs: 50, fat: 20 });
 
 const meal = (
   macros: { calories: number; protein: number; carbs: number; fat: number },
@@ -13,6 +27,28 @@ const meal = (
   prepMinutes: 30,
   macros,
   ...(portions !== undefined && { portions }),
+});
+
+/** Une recette à mettre dans `duel.vs` ou dans un repas entier. */
+const recipe = (name: string, calories: number) => ({
+  name,
+  ingredients: [],
+  steps: [],
+  prepMinutes: 30,
+  macros: macros(calories),
+});
+
+/** Un créneau en duel : plat du foyer (a) contre challenger (b), voté ou non. */
+const dueled = (
+  incumbentName: string,
+  challengerName: string,
+  votes: { userId: Id<"users">; choice: "a" | "b" }[] = [],
+): PlannedMeal => ({
+  ...meal(macros(500), 2),
+  name: incumbentName,
+  proposedBy: u1,
+  duel: { vs: recipe(challengerName, 400), proposedBy: u2 },
+  ...(votes.length > 0 && { duelVotes: votes }),
 });
 
 // The recipe's macros are for ONE portion; the dish totals macros x portions.
@@ -71,4 +107,122 @@ assert.deepEqual(sharedPortion(base, 0, 2000), half);
 assert.deepEqual(sharedPortion(base, 2000, 0), half);
 assert.deepEqual(sharedPortion(base, 0, 0), half);
 
-console.log("households shared portion ok");
+// ---------------------------------------------------------------------------
+// mergeDueledSlot — la décision par (date, créneau) quand un Chef écrit une
+// semaine sur la semaine foyer.
+// ---------------------------------------------------------------------------
+
+// Pas d'incumbent : le plat entrant arrive avec son auteur.
+const fresh = mergeDueledSlot(null, meal(macros(500)), u1);
+assert.equal(fresh.proposedBy, u1);
+assert.equal(fresh.duel, undefined);
+
+// Même plat (nom normalisé) : l'incumbent gagne, un duel en attente est levé —
+// les deux Chefs s'accordent désormais.
+const agreeing = mergeDueledSlot(
+  dueled("Poulet rôti", "Saumon grillé", [{ userId: u2, choice: "b" }]),
+  { ...meal(macros(500), 2), name: "poulet roti" },
+  u2,
+);
+assert.equal(agreeing.name, "Poulet rôti");
+assert.equal(agreeing.duel, undefined);
+assert.equal(agreeing.duelVotes, undefined);
+
+// Nom différent : le duel s'ouvre — l'incumbent reste le plat "a", l'incoming
+// devient le challenger "b" avec son auteur, en sous-ensemble recette.
+const created = mergeDueledSlot(dueled("Poulet rôti", "Saumon grillé"), meal(macros(600), 2), u2);
+assert.equal(created.name, "Poulet rôti");
+assert.deepEqual(created.duel?.vs, recipe("Plat du foyer", 600));
+assert.equal(created.duel?.proposedBy, u2);
+
+// L'incoming re-propose le CHALLENGER : le duel reste en l'état.
+const challengerAgain = mergeDueledSlot(created, meal(macros(500), 2), u3);
+assert.deepEqual(challengerAgain, created);
+
+// Un TROISIÈME plat : le challenger est remplacé, l'incumbent intact.
+const replaced = mergeDueledSlot(created, { ...meal(macros(700), 2), name: "Curry de pois chiches" }, u3);
+assert.equal(replaced.name, "Poulet rôti");
+assert.deepEqual(replaced.duel?.vs, recipe("Curry de pois chiches", 700));
+assert.equal(replaced.duel?.proposedBy, u3);
+assert.equal(replaced.proposedBy, u1);
+
+// Un incumbent verrouillé garde la place : la proposition tombe.
+const locked = { ...meal(macros(500), 2), locked: true };
+assert.equal(mergeDueledSlot(locked, meal(macros(600), 2), u2), locked);
+
+// Un incumbent sans auteur (écrit avant la feature) reçoit celui qui écrit
+// quand un duel s'ouvre.
+const old = mergeDueledSlot(meal(macros(500), 2), { ...meal(macros(600), 2), name: "Saumon grillé" }, u2);
+assert.equal(old.proposedBy, u2);
+assert.deepEqual(old.duel?.vs, recipe("Saumon grillé", 600));
+
+// ---------------------------------------------------------------------------
+// applyDuelResolution — le duel tranché, "a" ou "b".
+// ---------------------------------------------------------------------------
+
+const voted = dueled("Poulet rôti", "Saumon grillé", [
+  { userId: u1, choice: "a" },
+  { userId: u2, choice: "a" },
+]);
+
+// "a" gagne : l'incumbent reste, les champs de duel disparaissent.
+const aWins = applyDuelResolution(voted, "a");
+assert.equal(aWins.name, "Poulet rôti");
+assert.equal(aWins.duel, undefined);
+assert.equal(aWins.duelVotes, undefined);
+assert.equal(aWins.portions, 2); // le créneau reste un repas partagé
+
+// "b" gagne : le challenger devient le repas (recette + auteur), champs levés.
+const bWins = applyDuelResolution(voted, "b");
+assert.equal(bWins.name, "Saumon grillé");
+assert.deepEqual(bWins.macros, macros(400));
+assert.equal(bWins.proposedBy, u2);
+assert.equal(bWins.duel, undefined);
+assert.equal(bWins.duelVotes, undefined);
+
+// ---------------------------------------------------------------------------
+// dueledMealFor — le plat que chaque membre récupère quand le duel se dissout.
+// ---------------------------------------------------------------------------
+
+const split = dueled("Poulet rôti", "Saumon grillé", [
+  { userId: u1, choice: "b" },
+  { userId: u2, choice: "a" },
+]);
+
+// Celui qui a voté "b" repart avec le challenger ; portions et duel retirés,
+// macros gardées telles quelles (à portion seule).
+const forB = dueledMealFor(split, u1);
+assert.equal(forB.name, "Saumon grillé");
+assert.deepEqual(forB.macros, macros(400));
+assert.equal(forB.portions, undefined);
+assert.equal(forB.duel, undefined);
+assert.equal(forB.duelVotes, undefined);
+assert.equal(forB.proposedBy, u2);
+
+// Celui qui a voté "a" garde l'incumbent, même traitement.
+const forA = dueledMealFor(split, u2);
+assert.equal(forA.name, "Poulet rôti");
+assert.equal(forA.portions, undefined);
+assert.equal(forA.duel, undefined);
+assert.equal(forA.duelVotes, undefined);
+
+// Sans vote (par sécurité) : l'incumbent.
+const forNobody = dueledMealFor(split, u3);
+assert.equal(forNobody.name, "Poulet rôti");
+assert.equal(forNobody.duel, undefined);
+
+// ---------------------------------------------------------------------------
+// chifoumiResult — les règles classiques : pierre > ciseaux > papier > pierre.
+// ---------------------------------------------------------------------------
+
+assert.equal(chifoumiResult("pierre", "ciseaux"), "a");
+assert.equal(chifoumiResult("ciseaux", "papier"), "a");
+assert.equal(chifoumiResult("papier", "pierre"), "a");
+assert.equal(chifoumiResult("ciseaux", "pierre"), "b");
+assert.equal(chifoumiResult("papier", "ciseaux"), "b");
+assert.equal(chifoumiResult("pierre", "papier"), "b");
+assert.equal(chifoumiResult("pierre", "pierre"), "draw");
+assert.equal(chifoumiResult("papier", "papier"), "draw");
+assert.equal(chifoumiResult("ciseaux", "ciseaux"), "draw");
+
+console.log("households shared portion + duels ok");

@@ -413,6 +413,7 @@ function systemPrompt(
         .map((slot) => SLOT_LABEL[slot])
         .join(", ")} — ce sont les repas du foyer.
 - Un créneau partagé = UN SEUL plat, généré une fois, qui nourrit deux personnes (portions : 2). Il s'affiche chez les deux, chacun avec sa portion calculée d'après ses cibles. Ne génère jamais deux plats pour un créneau partagé.
+- Un créneau partagé en DUEL (deux plats proposés) reste en attente de la décision du foyer : signale-le, ne propose rien pour ce créneau tant qu'il n'est pas tranché.
 - Les macros d'un repas partagé = celles d'UNE portion, pas du plat entier.
 - Contraintes combinées — les DEUX doivent pouvoir manger le plat (en plus des contraintes de ${user.name} déjà décrites) : allergies de ${household.partnerName} : ${household.partnerAllergies.join(", ") || "aucune"}, aliments exclus : ${household.partnerExcluded.join(", ") || "aucun"}, régime : ${household.partnerDiet ?? "aucun"}.
 - Si les régimes diffèrent (ex. un végétarien et un omnivore), propose l'option la plus maligne sans décider à sa place : 1) un plat végétarien mais bien protéiné (légumineuses, tofu, œufs, fromage selon les régimes), 2) une base végétarienne avec un ajout de protéine animale à côté pour celui qui veut (poulet, poisson, jambon en accompagnement), 3) si vraiment incompatible, des repas séparés sur ce créneau.

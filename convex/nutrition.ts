@@ -11,6 +11,7 @@ import { weekStart } from "./progress";
 import {
   activityLevel,
   macros,
+  mealRecipe,
   mealSlot,
   nutritionGoal,
   nutritionProfile,
@@ -33,6 +34,7 @@ export type Macros = Infer<typeof macros>;
 export type MealSlot = Infer<typeof mealSlot>;
 export type PlannedMeal = Infer<typeof plannedMeal>;
 export type PlanDay = Infer<typeof planDay>;
+export type DuelRecipe = Infer<typeof mealRecipe>;
 
 // ---------------------------------------------------------------------------
 // Pure logic. No ctx, no clock — see nutrition.check.ts.
@@ -141,6 +143,112 @@ export function shoppingListFrom(days: PlanDay[]): { name: string; quantities: s
     }
   }
   return [...lines.values()];
+}
+
+/**
+ * The ingredients a meal needs at the supermarket, challenger included: a slot
+ * in a duel has no chosen dish yet, so the list shows both candidates. A meal
+ * without a duel contributes its own ingredients only.
+ */
+export function allMealIngredients(meal: PlannedMeal): { name: string; quantity: string }[] {
+  return meal.duel ? [...meal.ingredients, ...meal.duel.vs.ingredients] : meal.ingredients;
+}
+
+/**
+ * The recipe-only subset that travels inside `duel.vs`: the incoming dish minus
+ * the plan fields (slot, locked, portions) and the duel fields — no nested
+ * duels, ever.
+ */
+export function duelRecipeOf(meal: PlannedMeal): DuelRecipe {
+  const {
+    slot: _slot,
+    locked: _locked,
+    portions: _portions,
+    proposedBy: _proposedBy,
+    duel: _duel,
+    duelVotes: _duelVotes,
+    duelThrows: _duelThrows,
+    ...recipe
+  } = meal;
+  return recipe;
+}
+
+/**
+ * The per-(date, slot) decision when a Chef saves a week over a foyer week
+ * (see savePlan). Pure — the caller writes the result. For a slot in duel:
+ * - the same dish (normalised name) re-proposed → the incumbent wins and the
+ *   duel is cleared, unless it was the CHALLENGER that came back, in which
+ *   case the duel stands.
+ * - a different dish → a duel starts (incumbent vs incoming), or the pending
+ *   duel's challenger is replaced by the new dish.
+ */
+export function mergeDueledSlot(
+  incumbent: PlannedMeal | null,
+  incoming: PlannedMeal,
+  actorUserId: Id<"users">,
+): PlannedMeal {
+  // Pas d'incumbent : le plat du Chef qui écrit arrive avec son auteur.
+  if (!incumbent) return { ...incoming, proposedBy: actorUserId };
+  // Incumbent verrouillé : le verrou gagne, la proposition tombe.
+  if (incumbent.locked === true) return incumbent;
+  // Même plat des deux côtés : les Chefs s'accordent, l'incumbent reste et un
+  // duel en attente meurt avec l'accord.
+  if (normalizeName(incumbent.name) === normalizeName(incoming.name)) {
+    const {
+      duel: _duel,
+      duelVotes: _duelVotes,
+      duelThrows: _duelThrows,
+      ...rest
+    } = incumbent;
+    return rest;
+  }
+  // L'incoming re-propose le CHALLENGER : le duel reste en l'état.
+  if (incumbent.duel && normalizeName(incumbent.duel.vs.name) === normalizeName(incoming.name)) {
+    return incumbent;
+  }
+  // Un plat différent : on crée le duel, ou on remplace le challenger.
+  const challenger = { vs: duelRecipeOf(incoming), proposedBy: actorUserId };
+  if (incumbent.duel) return { ...incumbent, duel: challenger };
+  return {
+    ...incumbent,
+    proposedBy: incumbent.proposedBy ?? actorUserId,
+    duel: challenger,
+  };
+}
+
+/**
+ * La version « semaine entière » de `mergeDueledSlot` : par (date, créneau),
+ * les incumbents de la semaine foyer rencontrent les propositions entrantes.
+ * Les incumbents verrouillés restent dehors — ils reviennent par le `kept` du
+ * caller (savePlan) et son `mergeDays`.
+ */
+function mergeDueledWeek(
+  incumbentDays: PlanDay[],
+  incomingDays: PlanDay[],
+  actorUserId: Id<"users">,
+): PlanDay[] {
+  const byDate = new Map<string, Map<MealSlot, PlannedMeal>>();
+  for (const day of incumbentDays) {
+    for (const meal of day.meals) {
+      if (meal.locked === true) continue;
+      const slots = byDate.get(day.date) ?? new Map();
+      slots.set(meal.slot, meal);
+      byDate.set(day.date, slots);
+    }
+  }
+  for (const day of incomingDays) {
+    for (const meal of day.meals) {
+      const slots = byDate.get(day.date) ?? new Map();
+      slots.set(meal.slot, mergeDueledSlot(slots.get(meal.slot) ?? null, meal, actorUserId));
+      byDate.set(day.date, slots);
+    }
+  }
+  const days: PlanDay[] = [];
+  for (const [date, slots] of byDate) {
+    const meals = [...slots.values()].sort(bySlot);
+    if (meals.length > 0) days.push({ date, meals });
+  }
+  return days;
 }
 
 const SLOT_ORDER: MealSlot[] = ["petit_dejeuner", "dejeuner", "collation", "diner"];
@@ -342,6 +450,8 @@ export const dashboard = query({
           ...sharedDay.meals.map((meal) => ({
             ...meal,
             // The dish's macros are per portion: mine, never the partner's.
+            // The duel fields (duel, duelVotes) ride the spread as-is: the
+            // client needs both candidates and the votes for a pending duel.
             macros: sharedPortion(
               meal,
               h.myProfile?.targets.calories ?? 0,
@@ -444,7 +554,18 @@ export const savePlan = internalMutation({
         meals: day.meals.filter((m) => m.locked === true),
       }));
 
-      const days = mergeDays(kept, incoming);
+      // Merge par (date, créneau) au lieu d'un remplacement en bloc : un
+      // incumbent garde chaque créneau que le Chef qui écrit n'a pas proposé,
+      // et deux plats différents ouvrent un duel — les deux restent, en
+      // attendant la décision du foyer (mergeDueledSlot). Les incumbents
+      // verrouillés sont sortis d'ici et reviennent par `kept`/`mergeDays`.
+      const incumbents = (foyerWeek?.days ?? []).map((day) => ({
+        ...day,
+        meals: day.meals.filter((m) => m.locked !== true),
+      }));
+      const merged = mergeDueledWeek(incumbents, incoming, user._id);
+
+      const days = mergeDays(kept, merged);
       if (foyerWeek) {
         await ctx.db.patch("householdMealPlans", foyerWeek._id, { days });
       } else if (days.length > 0) {
@@ -684,7 +805,13 @@ export const shoppingList = query({
     // days is enough.
     if (h.household && h.complete) {
       const shared = await householdPlanFor(ctx, h.household._id, args.weekStart);
-      return shoppingListFrom([...(shared?.days ?? []), ...(found?.days ?? [])]);
+      // Un créneau en duel n'a pas de plat choisi : la liste montre les DEUX
+      // candidats (allMealIngredients), chacun peut être acheté.
+      const sharedDays = (shared?.days ?? []).map((day) => ({
+        ...day,
+        meals: day.meals.map((meal) => ({ ...meal, ingredients: allMealIngredients(meal) })),
+      }));
+      return shoppingListFrom([...sharedDays, ...(found?.days ?? [])]);
     }
     return shoppingListFrom(found?.days ?? []);
   },
