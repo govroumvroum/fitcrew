@@ -222,9 +222,8 @@ async function planOrCreate(
   const foyerWeek = h.household ? await householdPlanFor(ctx, h.household._id, week) : null;
   if (!foyerWeek) throw new Error("Aucun plan pour cette semaine");
   const created = await ctx.db.insert("mealPlans", { userId, weekStart: week, days: [] });
-  const plan = await ctx.db.get("mealPlans", created);
-  if (!plan) throw new Error("Aucun plan pour cette semaine");
-  return plan;
+  // A `get` on an id the insert just returned cannot miss — no guard needed.
+  return (await ctx.db.get("mealPlans", created))!;
 }
 
 /** The day's meals, mutable in place — the caller patches `plan.days` back.

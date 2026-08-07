@@ -142,7 +142,9 @@ export const context = internalQuery({
           .unique();
         if (profile) {
           household = {
-            partnerName: dashboard.household.partnerName ?? "ton partenaire",
+            // trim() || : a Clerk name can be an empty string, and `"" ?? x` is
+            // still `""` — an empty partner name must not reach the prompt.
+            partnerName: dashboard.household.partnerName?.trim() || "ton partenaire",
             sharedSlots: dashboard.household.sharedSlots,
             // Constraint fields only — see `HouseholdInChef`.
             partnerDiet: profile.diet ?? null,
