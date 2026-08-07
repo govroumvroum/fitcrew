@@ -31,6 +31,18 @@ export function chifoumiResult(a: ChifoumiThrow, b: ChifoumiThrow): DuelChoice |
   return "b";
 }
 
+/** +1 au compteur du foyer pour le gagnant du chifoumi. Pure, testée. */
+export function addChifoumiWin(
+  score: { userId: Id<"users">; wins: number }[] | undefined,
+  winnerId: Id<"users">,
+): { userId: Id<"users">; wins: number }[] {
+  const next = (score ?? []).map((entry) => ({ ...entry }));
+  const existing = next.find((entry) => entry.userId === winnerId);
+  if (existing) existing.wins += 1;
+  else next.push({ userId: winnerId, wins: 1 });
+  return next;
+}
+
 // ---------------------------------------------------------------------------
 // Pure logic. No ctx, no clock — see households.check.ts.
 // ---------------------------------------------------------------------------
@@ -767,11 +779,15 @@ export const chifoumiThrow = mutation({
       return { resolved: false, tied: true };
     }
 
-    // Le membre dont le geste gagne impose le plat pour lequel il a voté.
+    // Le membre dont le geste gagne impose le plat pour lequel il a voté —
+    // et marque un point au compteur du foyer.
     const winnerMemberId = result === "a" ? partner.userId : user._id;
     const winnerVote = meal.duelVotes.find((vote) => vote.userId === winnerMemberId)?.choice ?? "a";
     day.meals[index] = applyDuelResolution(meal, winnerVote);
     await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+    await ctx.db.patch("households", household._id, {
+      chifoumiScore: addChifoumiWin(household.chifoumiScore, winnerMemberId),
+    });
     return { resolved: true, winner: winnerVote, winnerMemberId };
   },
 });

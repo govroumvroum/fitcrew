@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import type { Id } from "./_generated/dataModel";
 import {
+  addChifoumiWin,
   applyDuelResolution,
   chifoumiResult,
   dueledMealFor,
@@ -238,5 +239,16 @@ assert.equal(chifoumiResult("pierre", "papier"), "b");
 assert.equal(chifoumiResult("pierre", "pierre"), "draw");
 assert.equal(chifoumiResult("papier", "papier"), "draw");
 assert.equal(chifoumiResult("ciseaux", "ciseaux"), "draw");
+
+// ---------------------------------------------------------------------------
+// addChifoumiWin — +1 au gagnant, le compteur vit sur le foyer.
+// ---------------------------------------------------------------------------
+
+assert.deepEqual(addChifoumiWin(undefined, u1), [{ userId: u1, wins: 1 }]);
+assert.deepEqual(addChifoumiWin([{ userId: u1, wins: 3 }], u1), [{ userId: u1, wins: 4 }]);
+assert.deepEqual(addChifoumiWin([{ userId: u1, wins: 3 }, { userId: u2, wins: 1 }], u2), [
+  { userId: u1, wins: 3 },
+  { userId: u2, wins: 2 },
+]);
 
 console.log("households shared portion + duels ok");

@@ -183,6 +183,8 @@ type HouseholdStatus = {
   pendingCode: string | null;
   partnerHasProfile: boolean;
   canShare: boolean;
+  /** Le compteur du chifoumi, une entrée par membre ayant joué. */
+  chifoumiScore: { userId: string; wins: number }[];
 };
 
 /**
@@ -198,6 +200,7 @@ function Household({ household }: { household: HouseholdStatus | null }) {
   const join = useMutation(api.households.join);
   const setSharedSlots = useMutation(api.households.setSharedSlots);
   const leave = useMutation(api.households.leave);
+  const me = useQuery(api.users.me);
 
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState("");
@@ -336,12 +339,26 @@ function Household({ household }: { household: HouseholdStatus | null }) {
 
   // The foyer is complete: pick the slots the two eat together.
   const partnerName = household.partnerName?.trim() || "Ton partenaire";
+  const myWins =
+    household.chifoumiScore.find((entry) => entry.userId === me?._id)?.wins ?? 0;
+  const partnerWins =
+    household.chifoumiScore.find((entry) => entry.userId !== me?._id)?.wins ?? 0;
   return (
     <section className="flex flex-col gap-2.5">
       <div>
         <h2 className="text-[1.05rem] font-bold">Foyer — {partnerName}</h2>
         <p className="text-sm text-muted-foreground">
           Les repas des créneaux cochés se cuisinent une fois pour deux.
+        </p>
+      </div>
+
+      {/* Le compteur du chifoumi : +1 au gagnant à chaque duel tranché. */}
+      <div className="flex items-center justify-between rounded-xl border bg-card px-3 py-2">
+        <p className="eyebrow">Chifoumi</p>
+        <p className="text-xs tabular-nums text-muted-foreground">
+          {me?.name?.split(" ")[0] ?? "Toi"} <span className="font-bold text-foreground">{myWins}</span>
+          <span className="mx-1.5">·</span>
+          {partnerName} <span className="font-bold text-foreground">{partnerWins}</span>
         </p>
       </div>
 

@@ -503,6 +503,8 @@ export const dashboard = query({
               h.household.memberIds.length === 1 ? (h.household.inviteCode ?? null) : null,
             partnerHasProfile: h.complete && h.partnerProfile !== null,
             canShare: h.active,
+            // Le compteur du chifoumi, une entrée par membre ayant joué.
+            chifoumiScore: h.household.chifoumiScore ?? [],
           }
         : null,
     };

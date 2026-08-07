@@ -80,6 +80,7 @@ type HouseholdStatus = {
   pendingCode: string | null;
   partnerHasProfile: boolean;
   canShare: boolean;
+  chifoumiScore: { userId: Id<"users">; wins: number }[];
 };
 
 /** What the dashboard query hands back — see `api.nutrition.dashboard`. */

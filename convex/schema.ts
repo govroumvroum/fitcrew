@@ -351,6 +351,13 @@ export default defineSchema({
     memberIds: v.array(v.id("users")),
     sharedSlots: v.array(mealSlot), // which slots the couple eats together
     inviteCode: v.optional(v.string()), // set while pending, deleted on join
+    // Le compteur du chifoumi : une ligne par membre, +1 au gagnant à chaque
+    // duel de recettes tranché au chifoumi. Donnée partagée du foyer — elle
+    // vit ici et meurt avec la ligne quand le foyer se sépare. Absent sur les
+    // foyers sans partie jouée, lu comme zéro partout.
+    chifoumiScore: v.optional(
+      v.array(v.object({ userId: v.id("users"), wins: v.number() })),
+    ),
   }).index("by_invite_code", ["inviteCode"]),
 
   // ONLY the shared-slot meals of the week, one row per foyer per week. Routing
