@@ -18,7 +18,7 @@ import {
   plannedMeal,
 } from "./schema";
 import { getCurrentUser, requireCurrentUser } from "./users";
-import { householdContext, householdPlanFor, isSharedSlot, sharedPortion } from "./households";
+import { adoptOwnMealsIntoFoyer, householdContext, householdPlanFor, isSharedSlot, sharedPortion } from "./households";
 
 export type NutritionGoal = Infer<typeof nutritionGoal>;
 export type ActivityLevel = Infer<typeof activityLevel>;
@@ -136,29 +136,6 @@ export function shoppingListFrom(days: PlanDay[]): { name: string; quantities: s
   return [...lines.values()];
 }
 
-/**
- * Two shopping lists merged by normalised name, same ponytail as
- * `shoppingListFrom`: first spelling wins as the display name, quantities are
- * concatenated, never summed. The foyer's list and the member's own list are
- * consolidated here so a shared dish appears exactly once.
- */
-export function mergeShoppingLists(
-  a: { name: string; quantities: string[] }[],
-  b: { name: string; quantities: string[] }[],
-): { name: string; quantities: string[] }[] {
-  const lines = new Map<string, { name: string; quantities: string[] }>();
-  for (const list of [a, b]) {
-    for (const line of list) {
-      const key = normalizeName(line.name);
-      if (!key) continue;
-      const existing = lines.get(key);
-      if (existing) existing.quantities.push(...line.quantities);
-      else lines.set(key, { name: line.name, quantities: [...line.quantities] });
-    }
-  }
-  return [...lines.values()];
-}
-
 const SLOT_ORDER: MealSlot[] = ["petit_dejeuner", "dejeuner", "collation", "diner"];
 
 /** Chronological, so a regenerated day doesn't read out of order. */
@@ -263,6 +240,15 @@ export const saveProfile = mutation({
     } else {
       await ctx.db.insert("nutritionProfiles", { userId: user._id, ...fields });
     }
+
+    // A foyer can become shared-active by THIS profile appearing — the second
+    // one to exist (the UI says « … doit compléter son profil »). Adoption moves
+    // the meals already planned on the shared slots into the foyer's week, so
+    // the routing and the display never diverge. No-op outside a live foyer.
+    const h = await householdContext(ctx, user._id);
+    if (h.active && h.household) {
+      await adoptOwnMealsIntoFoyer(ctx, h.household._id, h.household.sharedSlots);
+    }
     return { targets };
   },
 });
@@ -345,7 +331,8 @@ export const dashboard = query({
       hydrationMl: water?.ml ?? 0,
       weekStart: week,
       hasPlan: plan !== null || sharedPlan !== null,
-      // Same shape as `households.status`, on purpose: the two must never drift.
+      // The foyer's shape, as the client and the Chef's prompt read it — its
+      // single definition (see the type in chef.ts).
       household: h.household
         ? {
             householdId: h.household._id,
@@ -638,13 +625,12 @@ export const shoppingList = query({
 
     // A complete foyer: one consolidated list — the foyer's meals and the
     // member's own, merged so a shared dish appears exactly once. Solo or
-    // pending: unchanged behavior.
+    // pending: unchanged behavior. `shoppingListFrom` already merges by
+    // normalised name (foyer first, its spelling wins), so concatenating the
+    // days is enough.
     if (h.household && h.complete) {
       const shared = await householdPlanFor(ctx, h.household._id, args.weekStart);
-      return mergeShoppingLists(
-        shoppingListFrom(shared?.days ?? []),
-        shoppingListFrom(found?.days ?? []),
-      );
+      return shoppingListFrom([...(shared?.days ?? []), ...(found?.days ?? [])]);
     }
     return shoppingListFrom(found?.days ?? []);
   },

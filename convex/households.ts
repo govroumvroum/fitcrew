@@ -1,6 +1,6 @@
 import { type Infer, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { type MutationCtx, type QueryCtx, mutation, query } from "./_generated/server";
+import { type MutationCtx, type QueryCtx, mutation } from "./_generated/server";
 import { macros, mealSlot, planDay, plannedMeal } from "./schema";
 import { requireCurrentUser } from "./users";
 
@@ -365,8 +365,10 @@ async function adoptFoyerWeek(  ctx: MutationCtx,
  * visible meal must never be left behind the routing, which follows the config.
  * Per (date, slot) the locked meal wins, else the first member's. No-op while a
  * profile is missing: a slot only routes to the foyer once it is shared-active.
+ * Also called from `saveProfile`: a foyer can become active by the SECOND
+ * profile appearing, and the same adoption must run then.
  */
-async function adoptOwnMealsIntoFoyer(
+export async function adoptOwnMealsIntoFoyer(
   ctx: MutationCtx,
   householdId: Id<"households">,
   slots: MealSlot[],
