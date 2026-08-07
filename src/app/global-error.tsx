@@ -6,11 +6,13 @@ import "./globals.css";
 
 /**
  * The last resort: `error.tsx` covers every route, but a throw in the ROOT
- * LAYOUT bypasses it, and that layout mounts ClerkProvider,
- * ConvexClientProvider and `<StoreUser />` — which calls `api.users.store`.
- * A stale bundle calling a Convex function that no longer exists would throw
- * exactly there, so leaving this gap open would leave a white screen for the
- * very bug the boundary exists to catch.
+ * LAYOUT bypasses it — so a crash in ClerkProvider, ConvexClientProvider, or
+ * during hydration is still a white screen without this file.
+ *
+ * NOT where the #56 stale-bundle error lands: that one throws from `useQuery`
+ * during a page's render, which `error.tsx` already catches. `<StoreUser />`
+ * is in the layout but fires its mutation with `void store()` in an effect —
+ * a missing function rejects silently there, and no boundary ever sees it.
  *
  * This replaces the root layout, hence its own `<html>`/`<body>` and the
  * stylesheet import. Deliberately dependency-free otherwise: no providers, no
