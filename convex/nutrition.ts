@@ -752,6 +752,24 @@ export const regenerateDay = internalMutation({
     const user = await requireCurrentUser(ctx);
     const h = await householdContext(ctx, user._id);
 
+    // Les créneaux « séparés » (split) sont détectés AVANT les deux branches :
+    // la branche propre les protège (un split est un repas individuel sur un
+    // créneau configuré partagé — ni verrouillé, ni en duel), et la branche
+    // partagée ignore les propositions entrantes pour eux. Seule une
+    // génération complète de semaine (savePlan) re-propose un plat commun.
+    const foyerWeek = h.household
+      ? await householdPlanFor(ctx, h.household._id, args.weekStart)
+      : null;
+    const ownPlan = await planFor(ctx, user._id, args.weekStart);
+    const ownDay = ownPlan?.days.find((d) => d.date === args.date);
+    const foyerDay = foyerWeek?.days.find((d) => d.date === args.date);
+    const foyerSlots = new Set(foyerDay?.meals.map((m) => m.slot) ?? []);
+    const splitSlots = new Set(
+      (ownDay?.meals ?? [])
+        .filter((m) => isSharedSlot(h, m.slot) && !foyerSlots.has(m.slot))
+        .map((m) => m.slot),
+    );
+
     let kept = 0;
     let added = 0;
     // The day is created on demand: a day being regenerated always exists in
@@ -760,10 +778,13 @@ export const regenerateDay = internalMutation({
     const apply = (days: PlanDay[], incoming: PlannedMeal[]) => {
       const day = days.find((d) => d.date === args.date) ?? { date: args.date, meals: [] };
       if (!days.includes(day)) days.push(day);
-      // Un verrou OU un duel en attente : le créneau est protégé. La
+      // Un verrou, un duel en attente ou un créneau SÉPARÉ : protégé. La
       // régénération d'un jour ne tranche ni l'un ni l'autre — les votes et le
-      // challenger d'un duel ne tombent pas avec les repas refaits.
-      const protectedMeals = day.meals.filter((meal) => meal.locked === true || meal.duel);
+      // challenger d'un duel, comme le repas individuel d'un split, ne tombent
+      // pas avec les repas refaits.
+      const protectedMeals = day.meals.filter(
+        (meal) => meal.locked === true || meal.duel || splitSlots.has(meal.slot),
+      );
       const protectedSlots = new Set(protectedMeals.map((meal) => meal.slot));
       const fresh = incoming.filter((meal) => !protectedSlots.has(meal.slot)).map(clampMeal);
       kept += protectedMeals.length;
@@ -781,20 +802,8 @@ export const regenerateDay = internalMutation({
     }
 
     if (sharedIncoming.length > 0 && h.household) {
-      const plan = await householdPlanFor(ctx, h.household._id, args.weekStart);
-      // Un créneau « séparé » (split) affiche le repas individuel : la
-      // régénération d'un JOUR ne le re-partage pas sans le dire — seules une
-      // génération complète de semaine (savePlan) re-propose un plat commun.
-      const ownDay = (await planFor(ctx, user._id, args.weekStart))?.days.find(
-        (d) => d.date === args.date,
-      );
-      const foyerDay = plan?.days.find((d) => d.date === args.date);
-      const ownShared = new Set(
-        (ownDay?.meals ?? []).filter((m) => isSharedSlot(h, m.slot)).map((m) => m.slot),
-      );
-      const foyerSlots = new Set(foyerDay?.meals.map((m) => m.slot) ?? []);
-      const splitSlots = [...ownShared].filter((slot) => !foyerSlots.has(slot));
-      const incoming = sharedIncoming.filter((meal) => !splitSlots.includes(meal.slot));
+      const plan = foyerWeek;
+      const incoming = sharedIncoming.filter((meal) => !splitSlots.has(meal.slot));
       if (incoming.length === 0) return { kept, added };
 
       const days = plan ? plan.days.map((day) => ({ ...day, meals: [...day.meals] })) : [];
