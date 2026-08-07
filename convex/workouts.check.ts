@@ -1,5 +1,6 @@
 /** Self-check for convex/workouts.ts. Run: `bun convex/workouts.check.ts` */
 import assert from "node:assert/strict";
+import { lastInLineage } from "./progress";
 import { sessionOf } from "./workouts";
 
 const row = (id: string, programId?: string, endedAt?: number) => ({ id, programId, endedAt });
@@ -21,5 +22,18 @@ assert.equal(sessionOf([row("import")]), null);
 // …and it must not hide a real séance either, whatever the order.
 assert.equal(sessionOf([row("import"), running]), running);
 assert.equal(sessionOf([row("import"), finished]), finished);
+
+// `start`'s dedupe matches today's séance by LINEAGE, not by exact row id: a
+// séance stamped with version 1's row id still dedupes a start called with
+// version 2's id of the same lineage (a coach swap landed after the card
+// rendered).
+const todayV1 = row("w1", "v1");
+const lineageA = new Set(["v1", "v2"]); // both versions of program A
+assert.equal(lastInLineage([todayV1], lineageA), todayV1);
+
+// …but a DIFFERENT lineage on the same day stays a separate séance: muscu this
+// morning must not swallow the boxe start this evening.
+const lineageB = new Set(["v3"]);
+assert.equal(lastInLineage([todayV1], lineageB), null);
 
 console.log("convex/workouts.ts ok");

@@ -1,8 +1,8 @@
 import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, mutation, query } from "./_generated/server";
-import { latestInLineage, lineageOf, nextDayIndexFor, prefillFor } from "./programs";
-import { recordPrs, statsByExercise } from "./progress";
+import { latestPerLineage, lineageOf, lineageRows, nextDayIndexFor, prefillFor } from "./programs";
+import { lastInLineage, recordPrs, statsByExercise } from "./progress";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 /** A set row belongs to exactly one user; every set mutation routes through this. */
@@ -230,15 +230,35 @@ export const start = mutation({
     const todays = await ctx.db
       .query("workouts")
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.date))
+      .order("desc")
       .take(10);
-    const existing = todays.find((w) => w.programId === args.programId);
+    // "Same program" means same LINEAGE, not same row id: a coach swap committed
+    // after the card rendered leaves the client holding a superseded version's
+    // id, while today's séance is stamped with the version it was started from.
+    // Matching ids exactly would create a duplicate séance. Reading the lineage
+    // range here also keeps the OCC protection `lineageRows` documents, and the
+    // rows feed the `currentProgramId` stamp below. `todays` is newest-first so
+    // a same-lineage duplicate already created before this fix dedupes to the
+    // most recent séance, same preference as `today`. A séance already FINISHED
+    // today for this lineage also matches — deliberate, unchanged: returning
+    // its id lands the user back on the récap instead of a second séance.
+    //
+    // `lineageOf(program)` covers the unbackfilled fallback: a row with no
+    // `lineageId` is its own lineage, and it's the same value as `program._id`.
+    const rows = program
+      ? await lineageRows(ctx, user._id, lineageOf(program) as Id<"programs">)
+      : [];
+    const lineage = new Set<string>([...(program ? [lineageOf(program)] : []), ...rows.map((row) => row._id)]);
+    const existing = program
+      ? lastInLineage(todays, lineage)
+      : todays.find((w) => w.programId === undefined);
     if (existing) return existing._id;
 
     const workoutId = await ctx.db.insert("workouts", {
       userId: user._id,
       ...(program && {
         programId: program._id,
-        dayIndex: await nextDayIndexFor(ctx, program, args.date),
+        dayIndex: await nextDayIndexFor(ctx, program, args.date, lineage),
       }),
       date: args.date,
       startedAt: Date.now(),
@@ -254,11 +274,11 @@ export const start = mutation({
     // days. Stamping the stale row there means a swap that computes
     // `version + 1` from a version that already exists: two rows tie, the older
     // one wins every read (`latestPerLineage` keeps the first at equal version),
-    // and the swap the user just asked for is invisible for good. Reading the
-    // lineage range also puts it in the OCC read set, so a swap racing this
-    // mutation conflicts and the retry sees it.
+    // and the swap the user just asked for is invisible for good. The lineage
+    // range was already read above, which also puts it in the OCC read set, so
+    // a swap racing this mutation conflicts and the retry sees it.
     if (program) {
-      const latest = await latestInLineage(ctx, user._id, lineageOf(program) as Id<"programs">);
+      const latest = latestPerLineage(rows)[0] ?? null;
       // The workout row keeps `program._id`: its set rows were seeded from THAT
       // version's prescription, and `today` renders the day off it.
       await ctx.db.patch("users", user._id, { currentProgramId: latest?._id ?? program._id });
