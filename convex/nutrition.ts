@@ -336,6 +336,9 @@ export const dashboard = query({
       household: h.household
         ? {
             householdId: h.household._id,
+            // The foyer's state, not derived from display strings: the UI
+            // branches on it, and a partner's name can legitimately be empty.
+            complete: h.household.memberIds.length === 2,
             sharedSlots: h.household.sharedSlots,
             partnerName: h.partner?.name ?? null,
             pendingCode:
@@ -556,8 +559,12 @@ export const regenerateDay = internalMutation({
 
     let kept = 0;
     let added = 0;
+    // The day is created on demand: a day being regenerated always exists in
+    // the own plan, but the foyer's week may not have one (or exist at all) —
+    // same on-demand rule as `replaceMeal`.
     const apply = (days: PlanDay[], incoming: PlannedMeal[]) => {
-      const day = requireDay({ days }, args.date);
+      const day = days.find((d) => d.date === args.date) ?? { date: args.date, meals: [] };
+      if (!days.includes(day)) days.push(day);
       const lockedMeals = day.meals.filter((meal) => meal.locked === true);
       const locked = new Set(lockedMeals.map((meal) => meal.slot));
       const fresh = incoming.filter((meal) => !locked.has(meal.slot)).map(clampMeal);
@@ -577,9 +584,17 @@ export const regenerateDay = internalMutation({
 
     if (sharedIncoming.length > 0 && h.household) {
       const plan = await householdPlanFor(ctx, h.household._id, args.weekStart);
-      if (!plan) throw new Error("Aucun plan pour cette semaine");
-      apply(plan.days, sharedIncoming);
-      await ctx.db.patch("householdMealPlans", plan._id, { days: plan.days });
+      const days = plan ? plan.days.map((day) => ({ ...day, meals: [...day.meals] })) : [];
+      apply(days, sharedIncoming);
+      if (plan) {
+        await ctx.db.patch("householdMealPlans", plan._id, { days });
+      } else {
+        await ctx.db.insert("householdMealPlans", {
+          householdId: h.household._id,
+          weekStart: args.weekStart,
+          days,
+        });
+      }
     }
 
     return { kept, added };

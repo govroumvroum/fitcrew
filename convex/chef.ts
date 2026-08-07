@@ -74,6 +74,7 @@ export function toPlannedMeal({ mealPrep, portions, ...rest }: ModelMeal): Plann
 /** What the dashboard's `household` field returns — its single definition. */
 type HouseholdStatus = {
   householdId: Id<"households">;
+  complete: boolean;
   sharedSlots: MealSlot[];
   partnerName: string | null;
   pendingCode: string | null;

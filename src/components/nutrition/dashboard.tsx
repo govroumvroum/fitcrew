@@ -164,6 +164,9 @@ const GOALS = {
  *  subscription rather than a second query: two subscriptions could disagree
  *  mid-render (same rule as the journal's `log` in food-log.tsx). */
 type HouseholdStatus = {
+  /** The foyer's state, not derived from display strings — the UI branches on
+   *  this, and a partner's name can legitimately be empty. */
+  complete: boolean;
   sharedSlots: MealSlot[];
   partnerName: string | null;
   pendingCode: string | null;
@@ -273,7 +276,7 @@ function Household({ household }: { household: HouseholdStatus | null }) {
   // One member, an invite out. The code is only shown to its owner; the
   // code-less variant below exists for the foyer whose invite code was cleared
   // without a join — unreachable through the API, but the cancel is the way out.
-  if (!household.partnerName) {
+  if (!household.complete) {
     return (
       <section className="flex flex-col gap-2.5">
         <div>
@@ -324,7 +327,9 @@ function Household({ household }: { household: HouseholdStatus | null }) {
   return (
     <section className="flex flex-col gap-2.5">
       <div>
-        <h2 className="text-[1.05rem] font-bold">Foyer — {household.partnerName}</h2>
+        <h2 className="text-[1.05rem] font-bold">
+          Foyer — {household.partnerName ?? "Ton partenaire"}
+        </h2>
         <p className="text-sm text-muted-foreground">
           Les repas des créneaux cochés se cuisinent une fois pour deux.
         </p>
