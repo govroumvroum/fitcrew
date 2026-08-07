@@ -45,11 +45,13 @@ if (process.env.NODE_ENV === "production" && "serviceWorker" in navigator) {
   // when programs became lineages — then reads as "the app is broken": the
   // dashboard shows nothing and /programme crashes, until the tab is closed.
   // A PWA tab is never closed. So reload it ourselves.
-  const hadController = Boolean(navigator.serviceWorker.controller);
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    // Not on first install: there was no stale JS to replace.
-    if (hadController) window.location.reload();
-  });
+  // The `if` IS the guard: on a first install there is no stale JS to replace,
+  // so an uncontrolled page never listens.
+  if (navigator.serviceWorker.controller) {
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      window.location.reload();
+    });
+  }
 
   window.addEventListener("load", () => {
     navigator.serviceWorker
