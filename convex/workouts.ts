@@ -230,25 +230,26 @@ export const start = mutation({
     const todays = await ctx.db
       .query("workouts")
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.date))
+      .order("desc")
       .take(10);
     // "Same program" means same LINEAGE, not same row id: a coach swap committed
     // after the card rendered leaves the client holding a superseded version's
     // id, while today's séance is stamped with the version it was started from.
     // Matching ids exactly would create a duplicate séance. Reading the lineage
     // range here also keeps the OCC protection `lineageRows` documents, and the
-    // rows feed the `currentProgramId` stamp below. Order of `todays` is
-    // irrelevant: this dedupe means a lineage has at most one séance per day,
-    // so any match is the match. A séance already FINISHED today for this
-    // lineage also matches — deliberate, unchanged: returning its id lands the
-    // user back on the récap instead of a second séance.
+    // rows feed the `currentProgramId` stamp below. `todays` is newest-first so
+    // a same-lineage duplicate already created before this fix dedupes to the
+    // most recent séance, same preference as `today`. A séance already FINISHED
+    // today for this lineage also matches — deliberate, unchanged: returning
+    // its id lands the user back on the récap instead of a second séance.
+    //
+    // `lineageOf(program)` covers the unbackfilled fallback: a row with no
+    // `lineageId` is its own lineage, and it's the same value as `program._id`.
     const rows = program
       ? await lineageRows(ctx, user._id, lineageOf(program) as Id<"programs">)
       : [];
     const existing = program
-      ? lastInLineage(
-          todays,
-          new Set<string>([lineageOf(program), program._id, ...rows.map((row) => row._id)]),
-        )
+      ? lastInLineage(todays, new Set<string>([lineageOf(program), ...rows.map((row) => row._id)]))
       : todays.find((w) => w.programId === undefined);
     if (existing) return existing._id;
 
