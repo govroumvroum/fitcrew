@@ -17,7 +17,7 @@ export default function CoachPage() {
   return (
     <Suspense fallback={<CoachSkeleton />}>
       <NuqsAdapter>
-        <SidebarProvider className="h-[calc(100dvh-var(--tab-bar))] min-h-0">
+        <SidebarProvider className="h-[calc(100dvh-var(--tab-bar)-var(--safe-top))] min-h-0">
           <ThreadSidebar />
           <SidebarInset className="min-w-0 overflow-hidden">
             <Shell>
@@ -46,7 +46,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function CoachSkeleton() {
   return (
-    <main className="h-[calc(100dvh-var(--tab-bar))]">
+    <main className="h-[calc(100dvh-var(--tab-bar)-var(--safe-top))]">
       <Shell>
         {/* Mirrors the real header down to the 28px avatar coin: without it the
             title shifted sideways the moment the chat mounted. */}
