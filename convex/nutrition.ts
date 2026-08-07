@@ -663,6 +663,26 @@ export const moveMeal = internalMutation({
       );
     }
 
+    // Une destination « séparée » : le couple a décidé de ne pas partager ce
+    // créneau ce soir-là, le repas individuel est ce qu'on VOIT. Déplacer un
+    // repas foyer par-dessus écraserait ce choix sans le dire — même frontière
+    // que ci-dessus, côté split. Seule une génération complète de semaine
+    // (savePlan) re-propose un plat partagé sur un créneau séparé.
+    if (fromFoyer) {
+      const ownPlan = await planFor(ctx, user._id, args.weekStart);
+      const ownHas = ownPlan?.days.some(
+        (day) => day.date === args.to.date && day.meals.some((m) => m.slot === args.to.slot),
+      );
+      const foyerHas = foyerWeek?.days.some(
+        (day) => day.date === args.to.date && day.meals.some((m) => m.slot === args.to.slot),
+      );
+      if (ownHas && !foyerHas) {
+        throw new Error(
+          "Impossible : ce créneau est séparé (le couple a décidé de manger séparément ce soir-là)",
+        );
+      }
+    }
+
     if (fromFoyer && foyerWeek) {
       // The foyer week is sparse — a day exists only where a shared meal does —
       // so both endpoints are created on demand, like the own branch below.
@@ -762,8 +782,23 @@ export const regenerateDay = internalMutation({
 
     if (sharedIncoming.length > 0 && h.household) {
       const plan = await householdPlanFor(ctx, h.household._id, args.weekStart);
+      // Un créneau « séparé » (split) affiche le repas individuel : la
+      // régénération d'un JOUR ne le re-partage pas sans le dire — seules une
+      // génération complète de semaine (savePlan) re-propose un plat commun.
+      const ownDay = (await planFor(ctx, user._id, args.weekStart))?.days.find(
+        (d) => d.date === args.date,
+      );
+      const foyerDay = plan?.days.find((d) => d.date === args.date);
+      const ownShared = new Set(
+        (ownDay?.meals ?? []).filter((m) => isSharedSlot(h, m.slot)).map((m) => m.slot),
+      );
+      const foyerSlots = new Set(foyerDay?.meals.map((m) => m.slot) ?? []);
+      const splitSlots = [...ownShared].filter((slot) => !foyerSlots.has(slot));
+      const incoming = sharedIncoming.filter((meal) => !splitSlots.includes(meal.slot));
+      if (incoming.length === 0) return { kept, added };
+
       const days = plan ? plan.days.map((day) => ({ ...day, meals: [...day.meals] })) : [];
-      apply(days, sharedIncoming);
+      apply(days, incoming);
       if (plan) {
         await ctx.db.patch("householdMealPlans", plan._id, { days });
       } else {
