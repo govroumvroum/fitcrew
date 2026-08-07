@@ -688,7 +688,7 @@ function DuelCard({
 
   const split = () =>
     guard(
-      () => resolveDuel({ weekStart, date: today, slot: meal.slot, mode: "split" }).then(() => ""),
+      () => resolveDuel({ weekStart, date: today, slot: meal.slot }).then(() => ""),
       "Repas séparé — chacun son plat.",
     );
 

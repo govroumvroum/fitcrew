@@ -319,8 +319,7 @@ export const join = mutation({
     // meals already planned on it move into the foyer's week, so a visible meal
     // is never left behind the routing.
     await adoptOwnMealsIntoFoyer(ctx, household._id, household.sharedSlots);
-    const partner = await ctx.db.get("users", partnerId);
-    return { partnerName: partner?.name ?? null };
+    return null;
   },
 });
 
@@ -659,12 +658,17 @@ export const voteDuel = mutation({
  * - chifoumi : une pièce décide ; le gagnant s'applique exactement comme un
  *   vote unanime.
  */
+/**
+ * « Séparer le repas » : le duel se dissout. Le repas sort de la semaine foyer
+ * (les jours vidés tombent) et chacun récupère dans SON plan le plat pour
+ * lequel il a voté — le créneau reste configuré partagé, la prochaine
+ * génération repropose un plat commun.
+ */
 export const resolveDuel = mutation({
   args: {
     weekStart: v.string(),
     date: v.string(),
     slot: mealSlot,
-    mode: v.literal("split"),
   },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
@@ -694,7 +698,7 @@ export const resolveDuel = mutation({
         { date: args.date, meal: dueledMealFor(meal, memberId) },
       ]);
     }
-    return { winner: null };
+    return null;
   },
 });
 

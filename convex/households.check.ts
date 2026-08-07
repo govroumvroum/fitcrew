@@ -117,44 +117,47 @@ const fresh = mergeDueledSlot(null, meal(macros(500)), u1);
 assert.equal(fresh.proposedBy, u1);
 assert.equal(fresh.duel, undefined);
 
-// Même plat (nom normalisé) : l'incumbent gagne, un duel en attente est levé —
-// les deux Chefs s'accordent désormais.
-const agreeing = mergeDueledSlot(
-  dueled("Poulet rôti", "Saumon grillé", [{ userId: u2, choice: "b" }]),
-  { ...meal(macros(500), 2), name: "poulet roti" },
-  u2,
+// Un créneau en duel est GELÉ : quoi que propose la régénération (même plat,
+// même challenger, ou un troisième), le duel attend la décision du couple.
+const duelPending = dueled("Poulet rôti", "Saumon grillé");
+assert.deepEqual(
+  mergeDueledSlot(duelPending, { ...meal(macros(500), 2), name: "poulet roti" }, u2),
+  duelPending,
 );
-assert.equal(agreeing.name, "Poulet rôti");
-assert.equal(agreeing.duel, undefined);
-assert.equal(agreeing.duelVotes, undefined);
-
-// Nom différent : le duel s'ouvre — l'incumbent reste le plat "a", l'incoming
-// devient le challenger "b" avec son auteur, en sous-ensemble recette.
-const created = mergeDueledSlot(dueled("Poulet rôti", "Saumon grillé"), meal(macros(600), 2), u2);
-assert.equal(created.name, "Poulet rôti");
-assert.deepEqual(created.duel?.vs, recipe("Plat du foyer", 600));
-assert.equal(created.duel?.proposedBy, u2);
-
-// L'incoming re-propose le CHALLENGER : le duel reste en l'état.
-const challengerAgain = mergeDueledSlot(created, meal(macros(500), 2), u3);
-assert.deepEqual(challengerAgain, created);
-
-// Un TROISIÈME plat : le challenger est remplacé, l'incumbent intact.
-const replaced = mergeDueledSlot(created, { ...meal(macros(700), 2), name: "Curry de pois chiches" }, u3);
-assert.equal(replaced.name, "Poulet rôti");
-assert.deepEqual(replaced.duel?.vs, recipe("Curry de pois chiches", 700));
-assert.equal(replaced.duel?.proposedBy, u3);
-assert.equal(replaced.proposedBy, u1);
+assert.deepEqual(
+  mergeDueledSlot(duelPending, meal(macros(600), 2), u2),
+  duelPending,
+);
+assert.deepEqual(
+  mergeDueledSlot(duelPending, { ...meal(macros(700), 2), name: "Curry de pois chiches" }, u2),
+  duelPending,
+);
 
 // Un incumbent verrouillé garde la place : la proposition tombe.
 const locked = { ...meal(macros(500), 2), locked: true };
 assert.equal(mergeDueledSlot(locked, meal(macros(600), 2), u2), locked);
 
-// Un incumbent sans auteur (écrit avant la feature) reçoit celui qui écrit
-// quand un duel s'ouvre.
+// Le MÊME Chef re-propose son propre plat (ou un plat sans auteur connu) :
+// remplacement simple, pas de duel entre deux plats du même auteur.
+const own = { ...meal(macros(500), 2), name: "Poulet rôti", proposedBy: u1 };
+const replaced = mergeDueledSlot(own, { ...meal(macros(600), 2), name: "Saumon grillé" }, u1);
+assert.equal(replaced.name, "Saumon grillé");
+assert.equal(replaced.proposedBy, u1);
+assert.equal(replaced.duel, undefined);
+
 const old = mergeDueledSlot(meal(macros(500), 2), { ...meal(macros(600), 2), name: "Saumon grillé" }, u2);
+assert.equal(old.name, "Saumon grillé");
 assert.equal(old.proposedBy, u2);
-assert.deepEqual(old.duel?.vs, recipe("Saumon grillé", 600));
+assert.equal(old.duel, undefined);
+
+// Un plat différent, proposé par l'AUTRE Chef : le duel s'ouvre — l'incumbent
+// reste le plat "a", l'incoming devient le challenger "b" avec son auteur.
+const incumbent = { ...meal(macros(500), 2), name: "Poulet rôti", proposedBy: u1 };
+const created = mergeDueledSlot(incumbent, { ...meal(macros(600), 2), name: "Saumon grillé" }, u2);
+assert.equal(created.name, "Poulet rôti");
+assert.deepEqual(created.duel?.vs, recipe("Saumon grillé", 600));
+assert.equal(created.duel?.proposedBy, u2);
+assert.equal(created.proposedBy, u1);
 
 // ---------------------------------------------------------------------------
 // applyDuelResolution — le duel tranché, "a" ou "b".
