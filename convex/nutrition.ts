@@ -18,7 +18,14 @@ import {
   plannedMeal,
 } from "./schema";
 import { getCurrentUser, requireCurrentUser } from "./users";
-import { adoptOwnMealsIntoFoyer, householdContext, householdPlanFor, isSharedSlot, sharedPortion } from "./households";
+import {
+  type HouseholdContext,
+  adoptOwnMealsIntoFoyer,
+  householdContext,
+  householdPlanFor,
+  isSharedSlot,
+  sharedPortion,
+} from "./households";
 
 export type NutritionGoal = Infer<typeof nutritionGoal>;
 export type ActivityLevel = Infer<typeof activityLevel>;
@@ -193,6 +200,29 @@ const planFor = (ctx: QueryCtx, userId: Id<"users">, week: string) =>
 async function requirePlan(ctx: MutationCtx, week: string) {
   const user = await requireCurrentUser(ctx);
   const plan = await planFor(ctx, user._id, week);
+  if (!plan) throw new Error("Aucun plan pour cette semaine");
+  return plan;
+}
+
+/**
+ * The member's own plan, created on demand when the foyer already has a week
+ * for it — the only way a member can face a week without their own plan (the
+ * partner generated it: the shared dinners are visible and `hasPlan` is true,
+ * so the Chef believes a plan exists). A solo user keeps the historical
+ * behaviour: an absent plan is an error.
+ */
+async function planOrCreate(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  h: HouseholdContext,
+  week: string,
+) {
+  const found = await planFor(ctx, userId, week);
+  if (found) return found;
+  const foyerWeek = h.household ? await householdPlanFor(ctx, h.household._id, week) : null;
+  if (!foyerWeek) throw new Error("Aucun plan pour cette semaine");
+  const created = await ctx.db.insert("mealPlans", { userId, weekStart: week, days: [] });
+  const plan = await ctx.db.get("mealPlans", created);
   if (!plan) throw new Error("Aucun plan pour cette semaine");
   return plan;
 }
@@ -464,15 +494,17 @@ export const replaceMeal = internalMutation({
       return { name: meal.name };
     }
 
-    const plan = await requirePlan(ctx, args.weekStart);
-    const day = requireDay(plan, args.date);
+    const plan = await planOrCreate(ctx, user._id, h, args.weekStart);
+    const days = plan.days.map((day) => ({ ...day, meals: [...day.meals] }));
+    const day = days.find((d) => d.date === args.date) ?? { date: args.date, meals: [] };
+    if (!days.includes(day)) days.push(day);
 
     const index = day.meals.findIndex((m) => m.slot === args.slot);
     if (index >= 0) day.meals[index] = meal;
     else day.meals.push(meal);
     day.meals.sort(bySlot);
 
-    await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
+    await ctx.db.patch("mealPlans", plan._id, { days });
     return { name: meal.name };
   },
 });
@@ -518,9 +550,12 @@ export const moveMeal = internalMutation({
       return { name: moved.name };
     }
 
-    const plan = await requirePlan(ctx, args.weekStart);
-    const from = requireDay(plan, args.from.date);
-    const to = requireDay(plan, args.to.date);
+    const plan = await planOrCreate(ctx, user._id, h, args.weekStart);
+    const days = plan.days.map((day) => ({ ...day, meals: [...day.meals] }));
+    const from = days.find((d) => d.date === args.from.date) ?? { date: args.from.date, meals: [] };
+    if (!days.includes(from)) days.push(from);
+    const to = days.find((d) => d.date === args.to.date) ?? { date: args.to.date, meals: [] };
+    if (!days.includes(to)) days.push(to);
 
     const index = from.meals.findIndex((m) => m.slot === args.from.slot);
     if (index < 0) throw new Error("Aucun repas à déplacer sur ce créneau");
@@ -536,7 +571,7 @@ export const moveMeal = internalMutation({
 
     from.meals.sort(bySlot);
     to.meals.sort(bySlot);
-    await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
+    await ctx.db.patch("mealPlans", plan._id, { days });
     return { name: moved.name };
   },
 });
@@ -577,7 +612,7 @@ export const regenerateDay = internalMutation({
     const sharedIncoming = args.meals.filter((meal) => isSharedSlot(h, meal.slot));
 
     if (ownIncoming.length > 0) {
-      const plan = await requirePlan(ctx, args.weekStart);
+      const plan = await planOrCreate(ctx, user._id, h, args.weekStart);
       apply(plan.days, ownIncoming);
       await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
     }

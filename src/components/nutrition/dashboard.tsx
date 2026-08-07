@@ -324,12 +324,11 @@ function Household({ household }: { household: HouseholdStatus | null }) {
   }
 
   // The foyer is complete: pick the slots the two eat together.
+  const partnerName = household.partnerName?.trim() || "Ton partenaire";
   return (
     <section className="flex flex-col gap-2.5">
       <div>
-        <h2 className="text-[1.05rem] font-bold">
-          Foyer — {household.partnerName ?? "Ton partenaire"}
-        </h2>
+        <h2 className="text-[1.05rem] font-bold">Foyer — {partnerName}</h2>
         <p className="text-sm text-muted-foreground">
           Les repas des créneaux cochés se cuisinent une fois pour deux.
         </p>
@@ -377,7 +376,7 @@ function Household({ household }: { household: HouseholdStatus | null }) {
 
       {!household.partnerHasProfile ? (
         <p className="text-[11px] text-muted-foreground">
-          Ton foyer est prêt, mais {household.partnerName} doit compléter son profil nutrition pour
+          Ton foyer est prêt, mais {partnerName} doit compléter son profil nutrition pour
           que les repas soient partagés.
         </p>
       ) : null}
