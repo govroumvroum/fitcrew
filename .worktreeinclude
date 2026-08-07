@@ -1,0 +1,8 @@
+# Files copied (not symlinked) into each new Orca worktree, so every
+# worktree owns its own copy. Only gitignored paths that exist in the
+# primary checkout are copied; tracked, missing, or non-gitignored paths
+# are skipped. Literal paths only — globs and negation are not supported.
+
+.env
+.env.local
+.clerk/
