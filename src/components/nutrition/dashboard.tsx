@@ -1,15 +1,14 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
+import { IconDumbbell, IconJumpRope, IconYoga } from "@tabler/icons-react";
 import {
   ChevronDownIcon,
   ClockIcon,
   CopyIcon,
-  DumbbellIcon,
   LockIcon,
   LockOpenIcon,
   PlusIcon,
-  StretchHorizontalIcon,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -906,36 +905,12 @@ function ThrowButton({
   );
 }
 
-/** La corde à sauter du chifoumi : un arc de corde et ses deux poignées. Pas
- *  d'icône de corde dans lucide — dessinée à la main, même grammaire visuelle
- *  que les icônes lucide (stroke, currentColor). */
-function RopeIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      className="size-7"
-      aria-hidden
-    >
-      <path d="M4.5 4.5 8.5 7" />
-      <path d="M19.5 4.5 15.5 7" />
-      <path d="M8.5 7c0 7.5 7 7.5 7 0" />
-    </svg>
-  );
-}
-
-/** Pierre, papier, ciseaux en version salle de sport : haltère, yoga, corde. */
+/** Pierre, papier, ciseaux en version salle de sport : haltère, yoga, corde.
+ *  Les trois viennent de @tabler/icons-react — lucide n'a ni yoga ni corde. */
 const CHIFOUMI_GESTURES = [
-  { gesture: "pierre", label: "Pierre", icon: <DumbbellIcon className="size-7" aria-hidden /> },
-  {
-    gesture: "papier",
-    label: "Papier",
-    icon: <StretchHorizontalIcon className="size-7" aria-hidden />,
-  },
-  { gesture: "ciseaux", label: "Ciseaux", icon: <RopeIcon /> },
+  { gesture: "pierre", label: "Pierre", icon: <IconDumbbell className="size-7" aria-hidden /> },
+  { gesture: "papier", label: "Papier", icon: <IconYoga className="size-7" aria-hidden /> },
+  { gesture: "ciseaux", label: "Ciseaux", icon: <IconJumpRope className="size-7" aria-hidden /> },
 ] as const satisfies readonly { gesture: ChifoumiThrow; label: string; icon: ReactNode }[];
 
 /** 2 L: the round number people aim at, not a computed need. */
