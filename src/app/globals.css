@@ -162,6 +162,12 @@
   --tab-bar: calc(4rem + env(safe-area-inset-bottom));
 }
 
+/* Space owed at the top for the status bar / Dynamic Island (black-translucent
+   PWA). Device-driven, so it never zeroes at a breakpoint. Body pads by it. */
+:root {
+  --safe-top: env(safe-area-inset-top);
+}
+
 /* md and up the bar becomes a left rail, so nothing is owed at the bottom. One
    knob: page padding, the séance action bar and /coach's viewport height all
    follow from here — none of them mention the breakpoint. */

@@ -18,7 +18,7 @@ export default function ChefPage() {
   return (
     <Suspense fallback={<ChefSkeleton />}>
       <NuqsAdapter>
-        <SidebarProvider className="h-[calc(100dvh-var(--tab-bar))] min-h-0">
+        <SidebarProvider className="h-[calc(100dvh-var(--tab-bar)-var(--safe-top))] min-h-0">
           <ThreadSidebar agent={CHEF} />
           <SidebarInset className="min-w-0 overflow-hidden">
             <Shell>
@@ -46,7 +46,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function ChefSkeleton() {
   return (
-    <main className="h-[calc(100dvh-var(--tab-bar))]">
+    <main className="h-[calc(100dvh-var(--tab-bar)-var(--safe-top))]">
       <Shell>
         {/* Mirrors the real header down to the 28px coin: without it the title
             shifts sideways the moment the chat mounts. The icon is the real one,

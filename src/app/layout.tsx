@@ -63,7 +63,7 @@ export default function RootLayout({
       {/* pl-18 clears the rail at md+. Padding rather than a flex sibling: the
           rail is fixed, so pages keep their own scrolling and full height, and
           /coach's own fixed sidebar only needs its left edge moved to match. */}
-      <body className="min-h-full flex flex-col md:pl-18">
+      <body className="min-h-full flex flex-col pt-[var(--safe-top)] md:pl-18">
         <ClerkProvider localization={frFR} appearance={{ theme: shadcn }}>
           <ConvexClientProvider>
             <StoreUser />
