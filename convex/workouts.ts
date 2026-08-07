@@ -248,8 +248,9 @@ export const start = mutation({
     const rows = program
       ? await lineageRows(ctx, user._id, lineageOf(program) as Id<"programs">)
       : [];
+    const lineage = new Set<string>([...(program ? [lineageOf(program)] : []), ...rows.map((row) => row._id)]);
     const existing = program
-      ? lastInLineage(todays, new Set<string>([lineageOf(program), ...rows.map((row) => row._id)]))
+      ? lastInLineage(todays, lineage)
       : todays.find((w) => w.programId === undefined);
     if (existing) return existing._id;
 
@@ -257,7 +258,7 @@ export const start = mutation({
       userId: user._id,
       ...(program && {
         programId: program._id,
-        dayIndex: await nextDayIndexFor(ctx, program, args.date),
+        dayIndex: await nextDayIndexFor(ctx, program, args.date, lineage),
       }),
       date: args.date,
       startedAt: Date.now(),

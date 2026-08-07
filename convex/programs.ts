@@ -80,16 +80,16 @@ const recentWorkouts = (ctx: QueryCtx, userId: Id<"users">) =>
 /**
  * Which day of `program` comes next. The single entry point for the rotation:
  * every caller goes through it, so the scoping to the program's own history
- * can't be forgotten at one call site.
+ * can't be forgotten at one call site. `lineage` is the program's row ids —
+ * the caller already read them (they're its dedupe and its OCC guard), so this
+ * doesn't read the range a second time in the same mutation.
  */
 export async function nextDayIndexFor(
   ctx: QueryCtx,
   program: Doc<"programs">,
   date: string,
+  lineage: Set<string>,
 ): Promise<number> {
-  const rows = await lineageRows(ctx, program.userId, lineageOf(program) as Id<"programs">);
-  // `program` itself is in the set even when the backfill hasn't reached it.
-  const lineage = new Set<string>([program._id, ...rows.map((row) => row._id)]);
   return nextDayIndex(
     program.days.length,
     await recentWorkouts(ctx, program.userId),
