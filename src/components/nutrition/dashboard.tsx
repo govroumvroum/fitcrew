@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import { IconDumbbell, IconJumpRope, IconYoga } from "@tabler/icons-react";
+import { IconJumpRope } from "@tabler/icons-react";
 import {
   ChevronDownIcon,
   ClockIcon,
@@ -905,11 +905,62 @@ function ThrowButton({
   );
 }
 
-/** Pierre, papier, ciseaux en version salle de sport : haltère, yoga, corde.
- *  Les trois viennent de @tabler/icons-react — lucide n'a ni yoga ni corde. */
+/** Le tapis de yoga roulé du chifoumi (Streamline Atlas), en currentColor pour
+ *  suivre le thème. */
+function YogaMatIcon() {
+  return (
+    <svg
+      viewBox="-0.5 -0.5 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1}
+      strokeMiterlimit={10}
+      className="size-7"
+      aria-hidden
+    >
+      <path d="M0.9375 12.275a1.7875 1.7875 0 1 0 3.575 0 1.7875 1.7875 0 1 0 -3.575 0" />
+      <path d="M4.51875 2.725a1.79375 1.79375 0 0 0 -3.58125 0" />
+      <path d="m4.51875 4.51875 9.54375 0 0 9.54375 -11.3375 0" />
+      <path d="m4.51875 12.275 0 -7.75625 0 -1.79375" />
+      <path d="m0.9375 2.725 0 9.55" />
+      <path d="m11.675 6.30625 0 5.96875" />
+    </svg>
+  );
+}
+
+/** La kettlebell du chifoumi : corps et poignée en currentColor, trou de
+ *  poignée découpé par masque, reflet conservé tel quel. */
+function KettlebellIcon() {
+  return (
+    <svg viewBox="0 0 100 100" className="size-7" aria-hidden>
+      <defs>
+        <mask id="kettlebell-handle-cutout">
+          <rect x="0" y="0" width="100" height="100" fill="#ffffff" />
+          <rect x="39" y="19" width="22" height="11" rx="4.5" ry="4.5" fill="#000000" />
+        </mask>
+      </defs>
+      <g mask="url(#kettlebell-handle-cutout)">
+        <rect x="31" y="12" width="38" height="28" rx="8" ry="8" fill="currentColor" />
+        <circle cx="50" cy="58" r="33" fill="currentColor" />
+      </g>
+      <path
+        d="M 32,60 A 22 22 0 0 0 47,79"
+        fill="none"
+        stroke="#ffffff"
+        strokeWidth={5.5}
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Pierre, papier, ciseaux en version salle de sport : kettlebell, tapis de
+ *  yoga, corde à sauter. La corde vient de @tabler/icons-react (lucide n'en a
+ *  pas) ; la kettlebell et le tapis sont des SVG maison, plus fidèles que ce
+ *  que les deux libs proposent. */
 const CHIFOUMI_GESTURES = [
-  { gesture: "pierre", label: "Pierre", icon: <IconDumbbell className="size-7" aria-hidden /> },
-  { gesture: "papier", label: "Papier", icon: <IconYoga className="size-7" aria-hidden /> },
+  { gesture: "pierre", label: "Pierre", icon: <KettlebellIcon /> },
+  { gesture: "papier", label: "Papier", icon: <YogaMatIcon /> },
   { gesture: "ciseaux", label: "Ciseaux", icon: <IconJumpRope className="size-7" aria-hidden /> },
 ] as const satisfies readonly { gesture: ChifoumiThrow; label: string; icon: ReactNode }[];
 
