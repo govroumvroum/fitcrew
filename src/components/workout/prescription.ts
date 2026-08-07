@@ -14,6 +14,30 @@ export function defaultReps(spec: string): number {
 }
 
 /**
+ * The set rows `workouts.start` writes for a day: one per prescribed set,
+ * pre-loaded with what that exercise was last done at so a séance opens on real
+ * numbers instead of 0 kg. Unmatched exercise (never trained) → 0 and the
+ * prescription's reps, which is the honest starting point.
+ *
+ * Lives here rather than in the séance screen because the picker seeds one of
+ * these per program now, and two copies of the crossing would drift.
+ */
+export function seedSets(
+  exercises: { name: string; sets: number; reps: string }[],
+  prefill: { name: string; weight: number; reps: number }[],
+): { exerciseName: string; index: number; weight: number; reps: number }[] {
+  return exercises.flatMap((exercise) => {
+    const last = prefill.find((entry) => entry.name === exercise.name);
+    return Array.from({ length: exercise.sets }, (_, index) => ({
+      exerciseName: exercise.name,
+      index,
+      weight: last?.weight ?? 0,
+      reps: last?.reps ?? defaultReps(exercise.reps),
+    }));
+  });
+}
+
+/**
  * The weight × reps the next set of an exercise should default to: what was
  * just lifted this session, else what the rows were seeded with (last
  * session's values), else the prescription.

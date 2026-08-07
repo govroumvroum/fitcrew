@@ -4,6 +4,7 @@ import {
   bestPrs,
   currentStreak,
   epley1rm,
+  lastInLineage,
   nextDayIndex,
   prCandidates,
   statsByExercise,
@@ -130,18 +131,55 @@ assert.deepEqual(
 );
 
 // --- program day rotation ----------------------------------------------------
+// One program, "muscu", made of two versions: v1 was swapped into v2.
+const muscu = new Set(["muscu1", "muscu2"]);
+const boxe = new Set(["boxe1"]);
+const on = (programId: string, date: string, dayIndex?: number) => ({
+  programId,
+  date,
+  ...(dayIndex === undefined ? {} : { dayIndex }),
+});
+
 // No history: the very first séance starts at the top of the program.
-assert.equal(nextDayIndex(3, null, "2026-07-28"), 0);
+assert.equal(nextDayIndex(3, [], muscu, "2026-07-28"), 0);
 // An imported séance carries no dayIndex, so it hands over nothing.
-assert.equal(nextDayIndex(3, { date: "2026-07-27" }, "2026-07-28"), 0);
-assert.equal(nextDayIndex(3, { date: "2026-07-27", dayIndex: 0 }, "2026-07-28"), 1);
+assert.equal(nextDayIndex(3, [on("muscu2", "2026-07-27")], muscu, "2026-07-28"), 0);
+assert.equal(nextDayIndex(3, [on("muscu2", "2026-07-27", 0)], muscu, "2026-07-28"), 1);
 // THE POINT: the last day wraps back to the first instead of falling off the end.
-assert.equal(nextDayIndex(3, { date: "2026-07-27", dayIndex: 2 }, "2026-07-28"), 0);
-assert.equal(nextDayIndex(1, { date: "2026-07-27", dayIndex: 0 }, "2026-07-28"), 0);
+assert.equal(nextDayIndex(3, [on("muscu2", "2026-07-27", 2)], muscu, "2026-07-28"), 0);
+assert.equal(nextDayIndex(1, [on("muscu2", "2026-07-27", 0)], muscu, "2026-07-28"), 0);
 // Today's séance already picked its day — no rotation while it's in progress.
-assert.equal(nextDayIndex(3, { date: "2026-07-28", dayIndex: 2 }, "2026-07-28"), 2);
+assert.equal(nextDayIndex(3, [on("muscu2", "2026-07-28", 2)], muscu, "2026-07-28"), 2);
 // No program days to rotate through.
-assert.equal(nextDayIndex(0, { date: "2026-07-27", dayIndex: 2 }, "2026-07-28"), 0);
+assert.equal(nextDayIndex(0, [on("muscu2", "2026-07-27", 2)], muscu, "2026-07-28"), 0);
+
+// THE OTHER POINT: two programs run in parallel and never nudge each other.
+// `recent` is newest-first, all programs mixed, exactly as the query returns it.
+const mixed = [
+  on("boxe1", "2026-07-28", 1), // boxing today
+  on("muscu2", "2026-07-27", 0), // muscu yesterday, day 0
+];
+assert.equal(nextDayIndex(3, mixed, muscu, "2026-07-29"), 1, "muscu avance sur SON historique");
+assert.equal(nextDayIndex(2, mixed, boxe, "2026-07-29"), 0, "la boxe avance sur le sien");
+// A séance of an older VERSION of the program still counts as that program's.
+assert.equal(nextDayIndex(3, [on("muscu1", "2026-07-27", 1)], muscu, "2026-07-28"), 2);
+// A séance attached to no program (a retroactive log) moves nothing.
+assert.equal(nextDayIndex(3, [{ date: "2026-07-27", dayIndex: 2 }], muscu, "2026-07-28"), 0);
+
+// --- trainedToday ------------------------------------------------------------
+// `programs.list` computes it as `lastInLineage(recent, lineage)?.date === date`.
+// It's what lets the séance screen offer boxe once muscu is finished, instead of
+// sitting on the récap: "already trained" is PER PROGRAM, not per day.
+const trainedToday = (recent: Parameters<typeof nextDayIndex>[1], l: Set<string>, d: string) =>
+  lastInLineage(recent, l)?.date === d;
+
+assert.equal(trainedToday(mixed, boxe, "2026-07-28"), true, "la boxe a été faite aujourd'hui");
+assert.equal(trainedToday(mixed, muscu, "2026-07-28"), false, "la muscu, non — c'était hier");
+assert.equal(trainedToday([], muscu, "2026-07-28"), false);
+// An older VERSION of the program still counts as that program trained today.
+assert.equal(trainedToday([on("muscu1", "2026-07-28", 0)], muscu, "2026-07-28"), true);
+// A séance attached to no program never marks any program as trained.
+assert.equal(trainedToday([{ date: "2026-07-28", dayIndex: 0 }], muscu, "2026-07-28"), false);
 
 // --- weeks -------------------------------------------------------------------
 assert.equal(weekStart("2026-07-28"), "2026-07-27"); // Tuesday -> Monday

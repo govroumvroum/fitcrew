@@ -31,13 +31,22 @@ export function TodaySkeleton() {
 export function Today({ date }: { date: string }) {
   const today = useQuery(api.workouts.today, { date });
   const stats = useQuery(api.home.stats, { date });
+  // Programs run in parallel, so with nothing running there is no single "next
+  // day" to show — there's one per program.
+  const programs = useQuery(api.programs.list, { date });
 
-  if (today === undefined || stats === undefined) return <TodaySkeleton />;
+  if (today === undefined || stats === undefined || programs === undefined) return <TodaySkeleton />;
   if (today === null || stats === null) {
     return <p className="p-6 text-center text-muted-foreground">Profil en cours de création…</p>;
   }
 
   const { day, workout, sets, prefill } = today;
+  const active = programs.filter((program) => program.status === "active");
+  // The home card is a summary: one line per program, and /seance is where you
+  // pick. Only one program is spelled out in the heading.
+  const only = active.length === 1 ? active[0] : null;
+  // Archived everything ≠ never had one: same distinction /seance makes.
+  const none = programs.length === 0;
   const done = sets.filter((set) => set.completed).length;
   const volume = Math.round(
     sets.reduce((total, set) => (set.completed ? total + set.weight * set.reps : total), 0),
@@ -59,13 +68,21 @@ export function Today({ date }: { date: string }) {
                 {/* Just the label. The half that explained the rotation has no
                     calendar was the app describing its own plumbing — that
                     belongs on /programme, which does say it. */}
-                <p className="eyebrow">{day ? "À suivre" : "Programme"}</p>
+                <p className="eyebrow">{day || active.length > 0 ? "À suivre" : "Programme"}</p>
                 {/* Fixed size and clamped, not clamp(): a real day name ("Jour 1 —
                     Haut du corps et puissance (pectoraux, dos, épaules, gainage)")
                     ran to six lines and pushed the button out of the viewport. The
                     full string stays — the muscle list is what you decide on. */}
                 <h2 className="line-clamp-2 font-heading text-[1.375rem] leading-tight font-bold">
-                  {day ? day.name : "Pas encore de programme"}
+                  {day
+                    ? day.name
+                    : only
+                      ? (only.nextDayName ?? only.name)
+                      : active.length > 0
+                        ? "Tes programmes"
+                        : none
+                          ? "Pas encore de programme"
+                          : "Aucun programme actif"}
                 </h2>
               </div>
               {day ? (
@@ -73,13 +90,39 @@ export function Today({ date }: { date: string }) {
                   {day.exercises.length} exercice{day.exercises.length > 1 ? "s" : ""} ·{" "}
                   {setsPlanned} série{setsPlanned > 1 ? "s" : ""}
                 </Badge>
+              ) : active.length > 1 ? (
+                <Badge variant="secondary" className="shrink-0 tabular-nums">
+                  {active.length} en cours
+                </Badge>
               ) : null}
             </div>
 
             {!day ? (
-              <p className="text-sm text-muted-foreground">
-                Le coach t&apos;en écrit un après quelques questions.
-              </p>
+              active.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {none
+                    ? "Le coach t'en écrit un après quelques questions."
+                    : "Réactive-en un pour reprendre, ou demande-en un neuf au coach."}
+                </p>
+              ) : only ? (
+                <p className="text-sm text-muted-foreground">{only.name}</p>
+              ) : (
+                /* One line per program, its next day on the right. The card is a
+                   summary — picking one and starting it is /seance's job. */
+                <ul className="divide-y">
+                  {active.map((program) => (
+                    <li
+                      key={program.lineageId}
+                      className="flex items-center gap-3 py-1.5 text-sm"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{program.name}</span>
+                      <span className="min-w-0 max-w-[55%] shrink-0 truncate text-muted-foreground">
+                        {program.nextDayName ?? `${program.dayCount} jours`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )
             ) : workout?.endedAt ? (
               /* A finished day has no next action, so there is no red button to
                  be the screen's dominant element — the confirmation takes the
@@ -141,14 +184,26 @@ export function Today({ date }: { date: string }) {
             ) : null}
 
             {!day ? (
-              <Cta href="/coach">Fais ton profil avec le coach</Cta>
+              active.length === 0 ? (
+                none ? (
+                  <Cta href="/coach">Fais ton profil avec le coach</Cta>
+                ) : (
+                  <Cta href="/programme">Réactive un programme</Cta>
+                )
+              ) : (
+                <Cta href="/seance">
+                  {only ? "Commencer la séance" : "Choisir une séance"}
+                </Cta>
+              )
             ) : workout?.endedAt ? null : (
               <Cta href="/seance">{running ? "Reprendre la séance" : "Commencer la séance"}</Cta>
             )}
 
-            {day ? (
+            {day || active.length > 0 ? (
               <Button asChild variant="ghost" className="h-11 w-full">
-                <Link href="/programme">Voir le programme entier</Link>
+                <Link href="/programme">
+                  {active.length > 1 ? "Voir mes programmes" : "Voir le programme entier"}
+                </Link>
               </Button>
             ) : null}
           </section>

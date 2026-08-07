@@ -222,9 +222,9 @@ async function candidateExercises(ctx: QueryCtx) {
       .take(1000);
     for (const name of new Set(prs.map((pr) => pr.exerciseName))) bump(name, "logged");
 
-    // ponytail: the current program only, one document per member. Older
-    // versions hold exercises nobody trains this week; read `by_user_and_version`
-    // if "used to do it" ever becomes a signal worth having.
+    // ponytail: the last program trained, one document per member. A member's
+    // other programs and older versions hold exercises nobody trains this week;
+    // read `by_user_and_lineage` if that ever becomes a signal worth having.
     const program = member.currentProgramId
       ? await ctx.db.get("programs", member.currentProgramId)
       : null;

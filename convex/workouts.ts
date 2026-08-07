@@ -1,7 +1,8 @@
 import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, mutation, query } from "./_generated/server";
-import { nextDayIndex, recordPrs, statsByExercise } from "./progress";
+import { latestInLineage, lineageOf, nextDayIndexFor, prefillFor } from "./programs";
+import { recordPrs, statsByExercise } from "./progress";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 /** A set row belongs to exactly one user; every set mutation routes through this. */
@@ -13,9 +14,32 @@ async function ownSet(ctx: MutationCtx, setId: Id<"sets">): Promise<Doc<"sets">>
 }
 
 /**
- * Everything the séance screen needs for one day, in one subscription:
- * the prescription, the session (if started), its set rows, and the
- * weight/reps to prefill from the last time each exercise was done.
+ * The séance the screen is on, out of today's rows (newest first).
+ *
+ * A row with no `programId` — the Coach's retroactive log, a screenshot import —
+ * is never it: there is no prescription to render and nothing ever calls
+ * `finish` on one, so treating it as "in progress" wedges /seance for the rest
+ * of the day. Those rows are history, and `history` shows them.
+ *
+ * Of what's left, an unfinished séance is what the user is doing right now;
+ * otherwise the last one finished today, so the récap and its records survive a
+ * reload.
+ */
+export function sessionOf<T extends { programId?: string; endedAt?: number }>(
+  todays: T[],
+): T | null {
+  const rows = todays.filter((w) => w.programId !== undefined);
+  return rows.find((w) => w.endedAt === undefined) ?? rows[0] ?? null;
+}
+
+/**
+ * The séance in progress, if there is one: its prescription, its set rows, and
+ * the weight/reps to prefill from the last time each exercise was done.
+ *
+ * Programs run in parallel, so there is no "today's séance" to derive from a
+ * selection — `workout: null` means nothing is running and the client picks a
+ * program from `programs.list`. The day shown is the one the RUNNING séance
+ * chose, read back off the row.
  *
  * `date` is an argument, not `Date.now()`, because queries don't rerun as the
  * clock advances — the client owns "today" in its own timezone.
@@ -26,20 +50,17 @@ export const today = query({
     const user = await getCurrentUser(ctx);
     if (!user) return null;
 
-    // Latest session overall: tells us both whether today's exists and which
-    // program day comes next.
-    const last = await ctx.db
+    // Today's séances, newest first — two programs can both be trained in a day.
+    const todays = await ctx.db
       .query("workouts")
-      .withIndex("by_user_and_date", (q) => q.eq("userId", user._id))
+      .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.date))
       .order("desc")
-      .first();
-    const workout = last?.date === args.date ? last : null;
+      .take(10);
+    const workout = sessionOf(todays);
 
-    const program = user.currentProgramId
-      ? await ctx.db.get("programs", user.currentProgramId)
-      : null;
+    const program = workout?.programId ? await ctx.db.get("programs", workout.programId) : null;
 
-    const dayIndex = nextDayIndex(program?.days.length ?? 0, last, args.date);
+    const dayIndex = workout?.dayIndex ?? 0;
     const day = program?.days[dayIndex] ?? null;
 
     const sets = workout
@@ -49,25 +70,9 @@ export const today = query({
           .take(200)
       : [];
 
-    // One lookup per exercise (~8 max per day), each hitting the index.
-    //
-    // An ARRAY, not a map keyed by exercise name: Convex field names must be
-    // non-control ASCII, and every exercise here is French — "Développé couché"
-    // as a key throws at serialisation. Values are fine, keys are not.
-    const prefill: { name: string; weight: number; reps: number }[] = [];
-    for (const exercise of day?.exercises ?? []) {
-      const previous = await ctx.db
-        .query("sets")
-        .withIndex("by_user_and_exercise", (q) =>
-          q.eq("userId", user._id).eq("exerciseName", exercise.name),
-        )
-        .order("desc")
-        .filter((q) => q.eq(q.field("completed"), true))
-        .first();
-      if (previous) {
-        prefill.push({ name: exercise.name, weight: previous.weight, reps: previous.reps });
-      }
-    }
+    // Same lookup `programs.list` seeds the picker with — one helper, so the
+    // running séance and the one about to start can't disagree on the numbers.
+    const prefill = await prefillFor(ctx, user._id, day?.exercises ?? []);
 
     // The records this session broke. They come from the row and not from
     // `finish`'s return value, because the finished screen renders again after a
@@ -84,7 +89,14 @@ export const today = query({
               .take(50)
           ).filter((pr) => pr.workoutId === workout._id && !pr.baseline);
 
-    return { workout, sets, day, dayIndex, prefill, prs };
+    return {
+      workout,
+      sets,
+      day,
+      programName: program?.name ?? null,
+      prefill,
+      prs,
+    };
   },
 });
 
@@ -93,9 +105,9 @@ export const today = query({
 const HISTORY_LIMIT = 30;
 
 /**
- * Past séances, plus the names of the current program's days so the screen can
- * show what comes after today. Separate from `today` because `today` is
- * resubscribed on every set check-off and must not pay for this.
+ * Past séances, each named by the program it followed. Separate from `today`
+ * because `today` is resubscribed on every set check-off and must not pay for
+ * this.
  *
  * `date` is an argument for the same reason as in `today`, and it bounds the
  * list to strictly before it — today's séance is the one being started.
@@ -168,6 +180,7 @@ export const history = query({
         dayName:
           (workout.dayIndex === undefined ? undefined : program?.days[workout.dayIndex]?.name) ??
           null,
+        programName: program?.name ?? null,
         sets: done,
         volume: Math.round(volume),
         pr: prWorkouts.has(workout._id),
@@ -175,19 +188,28 @@ export const history = query({
       });
     }
 
-    const current = user.currentProgramId ? await programFor(user.currentProgramId) : null;
-    return { dayNames: current?.days.map((day) => day.name) ?? [], past };
+    // No `dayNames` any more: "what comes after today" is per program now, and
+    // `programs.list` answers it with each program's own next day.
+    return { past };
   },
 });
 
 /**
- * Starts (or resumes) today's session and writes the prescribed set rows up
- * front, so each check-off afterwards is a single small patch.
+ * Starts (or resumes) a session of ONE program and writes the prescribed set
+ * rows up front, so each check-off afterwards is a single small patch.
+ *
+ * The program is named explicitly — with programs running in parallel, nothing
+ * on the user row could tell us which one this séance is. `dayIndex` is derived
+ * here rather than trusted from the client: it's that program's own rotation,
+ * and there's no reason for two answers to it.
+ *
+ * `programId` absent = a séance attached to no program (a retroactive log, an
+ * import). Those keep no day and don't move any rotation.
  */
 export const start = mutation({
   args: {
     date: v.string(),
-    dayIndex: v.number(),
+    programId: v.optional(v.id("programs")),
     sets: v.array(
       v.object({
         exerciseName: v.string(),
@@ -200,19 +222,47 @@ export const start = mutation({
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
 
-    const existing = await ctx.db
+    const program = args.programId ? await ctx.db.get("programs", args.programId) : null;
+    if (args.programId && program?.userId !== user._id) throw new Error("Programme introuvable");
+
+    // Same day AND same program: training musculation then boxing on a Tuesday
+    // is two séances, not a duplicate.
+    const todays = await ctx.db
       .query("workouts")
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.date))
-      .first();
+      .take(10);
+    const existing = todays.find((w) => w.programId === args.programId);
     if (existing) return existing._id;
 
     const workoutId = await ctx.db.insert("workouts", {
       userId: user._id,
-      programId: user.currentProgramId,
-      dayIndex: args.dayIndex,
+      ...(program && {
+        programId: program._id,
+        dayIndex: await nextDayIndexFor(ctx, program, args.date),
+      }),
       date: args.date,
       startedAt: Date.now(),
     });
+    // Not a selection — the Coach and the crew read it as "what he's training
+    // these days" (see `users.currentProgramId`).
+    //
+    // The LINEAGE's latest row, not the one the client handed us: a coach swap
+    // that landed after the card rendered leaves `args.programId` pointing at a
+    // superseded version, and everything downstream reads this field as "the
+    // program as it stands" — `coach.swapExercise` bases the next version's
+    // number AND its days on it, `consult.coachGrounding` and `crew` read its
+    // days. Stamping the stale row there means a swap that computes
+    // `version + 1` from a version that already exists: two rows tie, the older
+    // one wins every read (`latestPerLineage` keeps the first at equal version),
+    // and the swap the user just asked for is invisible for good. Reading the
+    // lineage range also puts it in the OCC read set, so a swap racing this
+    // mutation conflicts and the retry sees it.
+    if (program) {
+      const latest = await latestInLineage(ctx, user._id, lineageOf(program) as Id<"programs">);
+      // The workout row keeps `program._id`: its set rows were seeded from THAT
+      // version's prescription, and `today` renders the day off it.
+      await ctx.db.patch("users", user._id, { currentProgramId: latest?._id ?? program._id });
+    }
     for (const set of args.sets) {
       await ctx.db.insert("sets", { ...set, workoutId, userId: user._id, completed: false });
     }

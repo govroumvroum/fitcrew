@@ -146,8 +146,18 @@ export function ProgramCard({
       <Header
         icon={<DumbbellIcon className="size-4 text-muted-foreground" />}
         title={input.name}
-        aside={version ? `v${version}` : undefined}
+        // Every generated program is now a new lineage at v1, so the version
+        // badge would say "v1" on every card and mean nothing. It only carries
+        // information once a swap has bumped the program past its first row.
+        aside={version && version > 1 ? `v${version}` : "Nouveau"}
       />
+
+      {/* The tool used to overwrite the one program you had. It doesn't any
+          more, and nothing else on this card says so. */}
+      <p className="text-sm text-muted-foreground">
+        Il s&apos;ajoute à tes programmes, rien n&apos;est remplacé&#8239;: tu peux les suivre en
+        parallèle.
+      </p>
 
       {/* Native <details>: a disclosure without a dependency or a state hook.
           First day open, the rest collapsed — the whole program at once is a wall. */}

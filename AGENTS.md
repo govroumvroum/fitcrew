@@ -22,6 +22,15 @@ Convex agent skills for common tasks can be installed by running
 
 <!-- convex-ai-end -->
 
+# Migrations
+
+Data migrations live in `convex/migrations.ts`, built with `@convex-dev/migrations`.
+The production deploy runs `migrations:runAll` right after `convex deploy` (see
+`buildCommand` in `vercel.json`), so nothing has to be run by hand. A new
+migration is a `migrations.define(...)` plus one line in the `runAll` array —
+don't chain another command onto the deploy. Already-completed migrations are
+skipped, so the list just grows.
+
 # Pull requests
 
 `main` is protected: PR required, squash-only, no force-push. Read

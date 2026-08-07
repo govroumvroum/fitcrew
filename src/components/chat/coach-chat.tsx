@@ -67,8 +67,8 @@ export const COACH: AgentConfig = {
     "tool-generate_program": {
       icon: DumbbellIcon,
       pending: "Je réfléchis à ton programme…",
-      running: "J'écris ton programme…",
-      done: "Programme écrit",
+      running: "J'écris ton nouveau programme…",
+      done: "Nouveau programme écrit",
       failed: "Le programme n'a pas pu être enregistré.",
     },
     "tool-swap_exercise": {

@@ -19,6 +19,7 @@ import type * as exerciseDemos from "../exerciseDemos.js";
 import type * as foodFacts from "../foodFacts.js";
 import type * as home from "../home.js";
 import type * as http from "../http.js";
+import type * as migrations from "../migrations.js";
 import type * as model from "../model.js";
 import type * as nutrition from "../nutrition.js";
 import type * as programs from "../programs.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   foodFacts: typeof foodFacts;
   home: typeof home;
   http: typeof http;
+  migrations: typeof migrations;
   model: typeof model;
   nutrition: typeof nutrition;
   programs: typeof programs;
@@ -89,6 +91,7 @@ export declare const internal: FilterApi<
 >;
 
 export declare const components: {
+  migrations: import("@convex-dev/migrations/_generated/component.js").ComponentApi<"migrations">;
   agent: import("@convex-dev/agent/_generated/component.js").ComponentApi<"agent">;
   chefAgent: import("@convex-dev/agent/_generated/component.js").ComponentApi<"chefAgent">;
 };

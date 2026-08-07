@@ -31,6 +31,12 @@ export const challengeMetric = v.union(
   v.literal("est_1rm"),
 );
 
+export const programStatus = v.union(
+  v.literal("active"),
+  v.literal("archived"),
+  v.literal("completed"),
+);
+
 export const nutritionGoal = v.union(v.literal("perte"), v.literal("maintien"), v.literal("prise"));
 
 export const activityLevel = v.union(
@@ -120,12 +126,28 @@ export default defineSchema({
     avatarUrl: v.optional(v.string()),
     onboarding: v.optional(onboarding),
     tone: v.optional(tone),
+    // ponytail: the program most recently TRAINED, not a selection — programs
+    // run in parallel and are all equally live. It exists so the coach, the crew
+    // and the Chef have a default context to talk about. Stamped by
+    // `workouts.start`; read it as a hint, never as "the" program.
     currentProgramId: v.optional(v.id("programs")),
   }).index("by_token", ["tokenIdentifier"]),
 
+  // A program is a LINEAGE of versioned rows: `generate_program` starts one,
+  // `swap_exercise` appends a version to it. Several lineages run in PARALLEL —
+  // a musculation program and a boxing one are both live, each with its own day
+  // rotation, derived from the séances stamped with one of its rows.
   programs: defineTable({
     userId: v.id("users"),
-    version: v.number(),
+    // The id of the lineage's FIRST row; a root row points at itself.
+    // ponytail: optional so pre-lineage rows keep working. Read it as
+    // `p.lineageId ?? p._id` everywhere — that default IS the contract, and it's
+    // why there's no widen/narrow deploy dance for a four-person app.
+    lineageId: v.optional(v.id("programs")),
+    // ponytail: optional for the same reason, read as `p.status ?? "active"`.
+    // Carried on every row of the lineage; only the latest one is ever read.
+    status: v.optional(programStatus),
+    version: v.number(), // per lineage: a new program starts at 1
     name: v.string(),
     days: v.array(
       v.object({
@@ -135,7 +157,7 @@ export default defineSchema({
     ),
     progressionRules: v.string(),
     deloadEveryWeeks: v.optional(v.number()),
-  }).index("by_user_and_version", ["userId", "version"]),
+  }).index("by_user_and_lineage", ["userId", "lineageId", "version"]),
 
   workouts: defineTable({
     userId: v.id("users"),

@@ -97,22 +97,43 @@ export function prCandidates(
   return out;
 }
 
+export type WorkoutLite = { date: string; dayIndex?: number; programId?: string };
+
 /**
- * Which program day comes next, from the user's newest séance alone.
+ * The newest séance that followed THIS program. Programs run in parallel — a
+ * musculation one and a boxing one — so each advances on its own history.
+ * `recent` is newest-first.
+ */
+export function lastInLineage<T extends { programId?: string }>(
+  recent: T[],
+  lineage: Set<string>,
+): T | null {
+  for (const workout of recent) {
+    if (workout.programId && lineage.has(workout.programId)) return workout;
+  }
+  return null;
+}
+
+/**
+ * Which day of one program comes next.
  *
  * ponytail: program days cycle in order, one per séance, no rest-day calendar.
  * Add a schedule when someone wants fixed weekdays.
  *
- * Today's séance already picked its day, so it answers for itself; otherwise the
- * last one hands over to the following day and wraps past the last. Shared by
- * `workouts.today` and `programs.current` so the two screens can't disagree.
+ * It takes the lineage's row ids rather than a pre-picked "last séance" on
+ * purpose: derived from the user's newest séance overall, finishing a Push day
+ * in the musculation program would advance the boxing program's rotation.
+ * A séance already logged today for THIS program answers for itself; otherwise
+ * the last one hands over to the following day and wraps past the last.
  */
 export function nextDayIndex(
   dayCount: number,
-  last: { date: string; dayIndex?: number } | null,
+  recent: WorkoutLite[],
+  lineage: Set<string>,
   date: string,
 ): number {
   if (!dayCount) return 0;
+  const last = lastInLineage(recent, lineage);
   if (last?.date === date) return last.dayIndex ?? 0;
   // No dayIndex at all: nothing has been followed yet (or the last séance was an
   // import), so start at the top.
