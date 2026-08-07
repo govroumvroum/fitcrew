@@ -194,6 +194,11 @@ export function mergeDueledSlot(
   // Un duel en attente est GELÉ : le couple décide, une régénération n'y
   // touche pas (le prompt le dit au Chef — le code le tient désormais).
   if (incumbent.duel) return incumbent;
+  // Même plat (nom normalisé) des deux côtés : les Chefs s'accordent,
+  // l'incumbent reste, aucun duel entre deux assiettes identiques.
+  if (normalizeName(incumbent.name) === normalizeName(incoming.name)) {
+    return incumbent;
+  }
   // Le même Chef re-propose son propre plat (ou un plat sans auteur connu) :
   // remplacement simple, pas de duel entre deux plats du même auteur.
   if (!incumbent.proposedBy || incumbent.proposedBy === actorUserId) {
@@ -640,11 +645,16 @@ export const moveMeal = internalMutation({
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
     const h = await householdContext(ctx, user._id);
-    // Les deux extrémités suivent le repas VISIBLE, pas seulement la config :
-    // après un split, un créneau partagé peut héberger un repas individuel.
+    // La SOURCE suit le repas visible (présence) ; la DESTINATION suit la
+    // config quand la source est foyer — la semaine foyer est clairsemée et
+    // n'a pas de jour là où le repas doit arriver (le jour est créé à la
+    // demande plus bas). Le cas split reste couvert : source individuelle →
+    // destination individuelle tant que la semaine foyer n'a pas de repas là.
     const foyerWeek = h.household ? await householdPlanFor(ctx, h.household._id, args.weekStart) : null;
     const fromFoyer = mealRealm(h, foyerWeek, args.from.date, args.from.slot) === "foyer";
-    const toFoyer = mealRealm(h, foyerWeek, args.to.date, args.to.slot) === "foyer";
+    const toFoyer = fromFoyer
+      ? isSharedSlot(h, args.to.slot)
+      : mealRealm(h, foyerWeek, args.to.date, args.to.slot) === "foyer";
     // Crossing the foyer boundary would duplicate or orphan the dish: the
     // shared realm and the personal realm never swap meals.
     if (fromFoyer !== toFoyer) {

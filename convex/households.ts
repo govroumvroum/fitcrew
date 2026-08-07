@@ -651,14 +651,6 @@ export const voteDuel = mutation({
 });
 
 /**
- * La résolution du duel quand les votes sont contraires.
- * - split : le plat quitte la semaine du foyer, chaque membre récupère le plat
- *   pour lequel il a voté dans SON plan, macros à portion seule, telles
- *   quelles.
- * - chifoumi : une pièce décide ; le gagnant s'applique exactement comme un
- *   vote unanime.
- */
-/**
  * « Séparer le repas » : le duel se dissout. Le repas sort de la semaine foyer
  * (les jours vidés tombent) et chacun récupère dans SON plan le plat pour
  * lequel il a voté — le créneau reste configuré partagé, la prochaine

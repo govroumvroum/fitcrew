@@ -145,6 +145,17 @@ assert.equal(replaced.name, "Saumon grillé");
 assert.equal(replaced.proposedBy, u1);
 assert.equal(replaced.duel, undefined);
 
+// Même plat (nom normalisé), proposé par l'AUTRE Chef : les Chefs s'accordent,
+// l'incumbent reste — jamais de duel entre deux assiettes identiques.
+const agreed = mergeDueledSlot(
+  { ...meal(macros(500), 2), name: "Poulet rôti", proposedBy: u1 },
+  { ...meal(macros(600), 2), name: "poulet roti" },
+  u2,
+);
+assert.equal(agreed.name, "Poulet rôti");
+assert.equal(agreed.proposedBy, u1);
+assert.equal(agreed.duel, undefined);
+
 const old = mergeDueledSlot(meal(macros(500), 2), { ...meal(macros(600), 2), name: "Saumon grillé" }, u2);
 assert.equal(old.name, "Saumon grillé");
 assert.equal(old.proposedBy, u2);
