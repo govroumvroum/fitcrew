@@ -39,6 +39,20 @@ if (process.env.NEXT_PUBLIC_POSTHOG_KEY) {
 // exists in production output. Registering here rather than from a component
 // keeps it out of the React tree and off the hydration path.
 if (process.env.NODE_ENV === "production" && "serviceWorker" in navigator) {
+  // A new worker claiming this tab (skipWaiting + clientsClaim, see src/sw.ts)
+  // swaps the CACHE but not the JS already running, so the page keeps calling
+  // the previous build's Convex functions. Deleting one — `programs:current`
+  // when programs became lineages — then reads as "the app is broken": the
+  // dashboard shows nothing and /programme crashes, until the tab is closed.
+  // A PWA tab is never closed. So reload it ourselves.
+  // The `if` IS the guard: on a first install there is no stale JS to replace,
+  // so an uncontrolled page never listens.
+  if (navigator.serviceWorker.controller) {
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      window.location.reload();
+    });
+  }
+
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register("/sw.js", { scope: "/", updateViaCache: "none" })
