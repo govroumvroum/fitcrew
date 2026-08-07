@@ -31,6 +31,23 @@ migration is a `migrations.define(...)` plus one line in the `runAll` array —
 don't chain another command onto the deploy. Already-completed migrations are
 skipped, so the list just grows.
 
+# Never delete a Convex function in the PR that stops calling it
+
+`convex deploy` runs before the frontend build, and a phone that had the app
+open keeps running the previous bundle for as long as its tab lives — a PWA tab
+lives forever. So the moment a function disappears, every already-loaded client
+calling it starts throwing `Could not find public function`. That's how removing
+`programs:current` alongside its callers took the dashboard and `/programme`
+down in production.
+
+Two deploys, always: one that moves the callers off the old function, a later
+one that deletes it. Same expand/contract the schema already does — `lineageId`
+and `status` are `v.optional` for exactly this reason, read as `?? _id` and
+`?? "active"` so rows written by the previous version still work.
+
+Renaming or changing an argument counts as deleting. So does tightening a
+validator: old clients send the old shape.
+
 # Pull requests
 
 `main` is protected: PR required, squash-only, no force-push. Read
