@@ -71,7 +71,7 @@ for (const bad of ["0", "-1", "70000", "3001x", ""]) {
 // --- redirect URL ------------------------------------------------------------
 // Must land on an instance domain, with the port that is actually serving.
 assert.equal(buildRedirectUrl(3001), "http://localhost:3001/");
-assert.equal(buildRedirectUrl(3001, "/programme"), "http://localhost:3001/programme");
+assert.equal(buildRedirectUrl(3000), "http://localhost:3000/");
 
 // --- flags -------------------------------------------------------------------
 assert.deepEqual(parseArgs(["--port", "3001", "--identifier", "a@b.c"]), {

@@ -27,6 +27,9 @@ export const DEFAULT_BROWSER_SESSION = "fitcrew";
  */
 export const PROBE_TIMEOUT_MS = 30_000;
 
+/** Ceiling on the CDP cookie import, so a wedged browser fails loudly instead of hanging. */
+export const CDP_TIMEOUT_MS = 10_000;
+
 /** Ports probed when neither --port nor PORT says otherwise. `next dev` lands on 3001 when 3000 is taken. */
 export const CANDIDATE_PORTS = [3000, 3001, 3002, 3003, 3004, 3005];
 
@@ -103,8 +106,8 @@ export function parsePort(value: string | true | undefined): number | undefined 
  * it is consumed — silently enough to look like "the login just didn't work".
  * localhost is a dev-instance domain; the port is the part that has to be right.
  */
-export function buildRedirectUrl(port: number, path = "/"): string {
-  return new URL(path, `http://localhost:${port}`).toString();
+export function buildRedirectUrl(port: number): string {
+  return new URL("/", `http://localhost:${port}`).toString();
 }
 
 async function probePort(port: number, timeoutMs: number): Promise<boolean> {
@@ -267,6 +270,9 @@ async function importCookies(cdpUrl: string, cookies: JarCookie[]): Promise<void
     ws.onopen = () => resolve();
     ws.onerror = () => reject(new Error("Could not connect to the browser's CDP socket."));
   });
+  // A socket that errors or closes after onopen but before the id:1 reply would
+  // otherwise leave this pending forever, hanging the script with no message.
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const done = new Promise<void>((resolve, reject) => {
     ws.onmessage = (event) => {
       const msg = JSON.parse(String(event.data)) as { id?: number; error?: { message: string } };
@@ -274,6 +280,12 @@ async function importCookies(cdpUrl: string, cookies: JarCookie[]): Promise<void
       if (msg.error) reject(new Error(`Cookie import failed: ${msg.error.message}`));
       else resolve();
     };
+    ws.onerror = () => reject(new Error("The browser's CDP socket errored during the cookie import."));
+    ws.onclose = () => reject(new Error("The browser's CDP socket closed before the cookie import finished."));
+    timer = setTimeout(
+      () => reject(new Error("Timed out waiting for the browser to accept the imported cookies.")),
+      CDP_TIMEOUT_MS,
+    );
   });
   ws.send(
     JSON.stringify({
@@ -296,6 +308,7 @@ async function importCookies(cdpUrl: string, cookies: JarCookie[]): Promise<void
   try {
     await done;
   } finally {
+    clearTimeout(timer);
     ws.close();
   }
 }
@@ -309,7 +322,9 @@ async function waitForSignedIn(sessionName: string, timeoutMs = 20_000): Promise
     const result = await agentBrowser(sessionName, ["eval", probe]);
     const match = result.match(/in:([^"'\s]+)/);
     if (match) return match[1];
-    if (result.includes("out")) return null;
+    // Deliberately no short-circuit on 'out': clerk-js can report loaded with a
+    // null user for a beat while it resolves the session from the imported
+    // cookie. Bailing on the first probe would call a good import signed-out.
     await new Promise((r) => setTimeout(r, 1000));
   }
   return null;
@@ -339,14 +354,8 @@ async function main(): Promise<void> {
 
   const explicitPort = parsePort(args.port) ?? parsePort(process.env.PORT);
   const port = await resolvePort(explicitPort);
-  const path = typeof args.path === "string" ? args.path : "/";
-  const redirectUrl = buildRedirectUrl(port, path);
-
-  const durationRaw = typeof args.duration === "string" ? Number(args.duration) : undefined;
-  const sessionMaxDurationInSeconds =
-    durationRaw !== undefined && Number.isFinite(durationRaw) && durationRaw > 0
-      ? Math.floor(durationRaw)
-      : DEFAULT_SESSION_SECONDS;
+  const redirectUrl = buildRedirectUrl(port);
+  const sessionMaxDurationInSeconds = DEFAULT_SESSION_SECONDS;
 
   const task = await clerk.agentTasks.create({
     onBehalfOf: { identifier },
@@ -384,8 +393,9 @@ async function main(): Promise<void> {
   process.stderr.write(`Ticket consumed; ${localhostCookies.length} localhost cookies to import.\n`);
 
   await agentBrowser(sessionName, ["open", "about:blank"]);
+  // `agent-browser get cdp-url` already answers a ws:// URL; no rewriting needed.
   const cdpUrl = await agentBrowser(sessionName, ["get", "cdp-url"]);
-  await importCookies(cdpUrl.replace(/^[^w]*ws/, "ws"), localhostCookies);
+  await importCookies(cdpUrl, localhostCookies);
   await agentBrowser(sessionName, ["open", redirectUrl]);
 
   const email = await waitForSignedIn(sessionName);
