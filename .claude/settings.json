@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun run agent-login:*)",
+      "Bash(bun scripts/agent-login.ts:*)",
+      "Bash(bun scripts/agent-login.check.ts)"
+    ]
+  }
+}
