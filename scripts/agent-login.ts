@@ -333,7 +333,7 @@ async function main(): Promise<void> {
     process.env.AGENT_LOGIN_IDENTIFIER;
   if (!identifier) {
     throw new Error(
-      "No user to sign in as. Set AGENT_LOGIN_IDENTIFIER to the dev user's email, or pass --identifier <email>.",
+      "No user to sign in as. Set AGENT_LOGIN_IDENTIFIER to your own email on the Clerk dev instance, or pass --identifier <email>.",
     );
   }
 

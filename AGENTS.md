@@ -86,8 +86,11 @@ verifies the page reports a signed-in user before exiting 0, and revokes the tas
 - The port is detected by probing for a running `next dev` (3000–3005), because
   the dev server does land on 3001 when something else holds 3000. Override with
   `--port 3007` or `PORT=3007` if it listens elsewhere.
-- Set `AGENT_LOGIN_IDENTIFIER` to the dev user's email in `.env.local`, or pass
-  `--identifier <email>`. Sessions last 2 h, long enough for a screenshot run.
+- Set `AGENT_LOGIN_IDENTIFIER` to **your own** account's email on the Clerk dev
+  instance, in your `.env.local` (which is per-developer and never committed), or
+  pass `--identifier <email>`. There is no shared default on purpose: the session
+  is minted as whoever you name, so name yourself and you get your own data.
+  Sessions last 2 h, long enough for a screenshot run.
 - **Stale saved session:** if a page shows the sign-in screen (or redirects to
   `/sign-in`) even though `--session-name fitcrew` is set, the saved session has
   lapsed. Run `bun run agent-login -- --browser` again — don't debug the "not
