@@ -44,6 +44,13 @@ export const zPlannedMeal = z.object({
   steps: z.array(z.string()).min(1).describe("Étapes courtes, à l'impératif"),
   prepMinutes: z.number().int().min(0).max(240),
   macros: zMacros,
+  portions: z
+    .number()
+    .int()
+    .min(1)
+    .max(8)
+    .nullable()
+    .describe("Nombre de portions que fait la recette. Pour un repas partagé du foyer : 2. Sinon null"),
   mealPrep: z
     .string()
     .nullable()

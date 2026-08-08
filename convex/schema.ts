@@ -61,8 +61,12 @@ export const macros = v.object({
   fat: v.number(),
 });
 
-export const plannedMeal = v.object({
-  slot: mealSlot,
+// The recipe part of a meal — what makes a dish a dish, minus the plan fields
+// (slot, locked, portions) and the duel fields. Shared by `plannedMeal`
+// (inline) and by `plannedMeal.duel.vs`: the challenger recipe is duplicated
+// on purpose to keep the incumbent flat, validated at write time in
+// nutrition.ts.
+export const mealRecipe = v.object({
   name: v.string(),
   // An array, not a record keyed by the ingredient: a Convex field name must be
   // non-control ASCII and every one of these names is French.
@@ -70,8 +74,40 @@ export const plannedMeal = v.object({
   steps: v.array(v.string()),
   prepMinutes: v.number(),
   macros,
-  locked: v.optional(v.boolean()),
   mealPrep: v.optional(v.string()), // "se prépare la veille", when relevant
+});
+
+// One partner's vote in a duel: dish "a" (the incumbent) or "b" (the
+// challenger). Bounded — a foyer has exactly two members, so two votes max.
+export const duelVote = v.object({
+  userId: v.id("users"),
+  choice: v.union(v.literal("a"), v.literal("b")),
+});
+
+export const plannedMeal = v.object({
+  slot: mealSlot,
+  ...mealRecipe.fields,
+  locked: v.optional(v.boolean()),
+  // Number of portions the recipe makes. ONLY set on a shared foyer meal
+  // (always 2 there): a solo user's plan is byte-identical and carries nothing.
+  // Read everywhere as `meal.portions ?? 2` — that default IS the contract.
+  portions: v.optional(v.number()),
+  // Whose Chef proposed this dish — the incumbent AND the challenger both carry
+  // it. Absent on meals written before the duel feature, read as unknown.
+  proposedBy: v.optional(v.id("users")),
+  // The challenger dish when the slot is in a duel: the meal itself is dish
+  // "a", `duel.vs` is dish "b". ONLY ever set on foyer shared meals. `vs` is
+  // the recipe-only subset of plannedMeal, duplicated on purpose to keep the
+  // incumbent flat (validated at write time in nutrition.ts) — it never
+  // carries slot/locked/portions, and never nests another duel.
+  duel: v.optional(v.object({ vs: mealRecipe, proposedBy: v.id("users") })),
+  // Each partner's vote on a pending duel, bounded (2 members).
+  duelVotes: v.optional(v.array(duelVote)),
+  // Each partner's chifoumi throw, bounded (2 members). Set only while a duel
+  // is being settled by chifoumi — cleared when the duel dies.
+  duelThrows: v.optional(
+    v.array(v.object({ userId: v.id("users"), throw: v.union(v.literal("pierre"), v.literal("papier"), v.literal("ciseaux")) })),
+  ),
 });
 
 export const planDay = v.object({ date: v.string(), meals: v.array(plannedMeal) });
@@ -131,6 +167,12 @@ export default defineSchema({
     // and the Chef have a default context to talk about. Stamped by
     // `workouts.start`; read it as a hint, never as "the" program.
     currentProgramId: v.optional(v.id("programs")),
+    // The foyer row, when the user is in a couple ("un foyer"). Set together
+    // with the row's `memberIds` — the invariant is: a user has a householdId
+    // iff a `households` row lists them among its members. Indexed here because
+    // Convex indexes compare an array field as a WHOLE (not element-wise), so
+    // "which row contains me" cannot be answered from `households.memberIds`.
+    householdId: v.optional(v.id("households")),
   }).index("by_token", ["tokenIdentifier"]),
 
   // A program is a LINEAGE of versioned rows: `generate_program` starts one,
@@ -297,6 +339,35 @@ export default defineSchema({
     weekStart: v.string(), // YYYY-MM-DD Monday, produced by monday()
     days: v.array(planDay),
   }).index("by_user_and_week", ["userId", "weekStart"]),
+
+  // A couple sharing meals ("un foyer"). One row per foyer, no join table: the
+  // bounded `memberIds` array IS the membership — 1 while an invite is pending,
+  // exactly 2 once joined, and a third person would be a different feature.
+  // A solo user has no row at all: nothing in their day changes until the
+  // second member joins. "Which row contains me" is answered through the
+  // `users.householdId` pointer, not by querying this array (see the users
+  // table comment).
+  households: defineTable({
+    memberIds: v.array(v.id("users")),
+    sharedSlots: v.array(mealSlot), // which slots the couple eats together
+    inviteCode: v.optional(v.string()), // set while pending, deleted on join
+    // Le compteur du chifoumi : une ligne par membre, +1 au gagnant à chaque
+    // duel de recettes tranché au chifoumi. Donnée partagée du foyer — elle
+    // vit ici et meurt avec la ligne quand le foyer se sépare. Absent sur les
+    // foyers sans partie jouée, lu comme zéro partout.
+    chifoumiScore: v.optional(
+      v.array(v.object({ userId: v.id("users"), wins: v.number() })),
+    ),
+  }).index("by_invite_code", ["inviteCode"]),
+
+  // ONLY the shared-slot meals of the week, one row per foyer per week. Routing
+  // invariant: a meal in a shared slot lives here, every other meal lives in the
+  // member's own `mealPlans` — never both, so a meal is never generated twice.
+  householdMealPlans: defineTable({
+    householdId: v.id("households"),
+    weekStart: v.string(), // YYYY-MM-DD Monday, produced by monday()
+    days: v.array(planDay),
+  }).index("by_household_and_week", ["householdId", "weekStart"]),
 
   foodLog: defineTable({
     userId: v.id("users"),
