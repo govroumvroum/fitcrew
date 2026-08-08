@@ -264,15 +264,35 @@ async function agentBrowser(sessionName: string, args: string[]): Promise<string
  * Import the localhost cookies over CDP, rewritten to SameSite=Lax so Chrome
  * keeps them on http://localhost. Values travel over the local CDP socket only.
  */
-async function importCookies(cdpUrl: string, cookies: JarCookie[]): Promise<void> {
+export async function importCookies(
+  cdpUrl: string,
+  cookies: JarCookie[],
+  timeoutMs = CDP_TIMEOUT_MS,
+): Promise<void> {
   const ws = new WebSocket(cdpUrl);
-  await new Promise<void>((resolve, reject) => {
-    ws.onopen = () => resolve();
-    ws.onerror = () => reject(new Error("Could not connect to the browser's CDP socket."));
-  });
-  // A socket that errors or closes after onopen but before the id:1 reply would
-  // otherwise leave this pending forever, hanging the script with no message.
+  // One ceiling over both phases. A wedged browser wedges at connect first: its
+  // TCP listener still accepts (kernel accept queue) while the WebSocket upgrade
+  // never completes, so there is no onopen and no onerror to settle on either.
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("Timed out talking to the browser's CDP socket.")),
+      timeoutMs,
+    );
+  });
+  try {
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = () => reject(new Error("Could not connect to the browser's CDP socket."));
+      }),
+      expired,
+    ]);
+  } catch (error) {
+    clearTimeout(timer);
+    ws.close();
+    throw error;
+  }
   const done = new Promise<void>((resolve, reject) => {
     ws.onmessage = (event) => {
       const msg = JSON.parse(String(event.data)) as { id?: number; error?: { message: string } };
@@ -282,10 +302,6 @@ async function importCookies(cdpUrl: string, cookies: JarCookie[]): Promise<void
     };
     ws.onerror = () => reject(new Error("The browser's CDP socket errored during the cookie import."));
     ws.onclose = () => reject(new Error("The browser's CDP socket closed before the cookie import finished."));
-    timer = setTimeout(
-      () => reject(new Error("Timed out waiting for the browser to accept the imported cookies.")),
-      CDP_TIMEOUT_MS,
-    );
   });
   ws.send(
     JSON.stringify({
@@ -306,7 +322,7 @@ async function importCookies(cdpUrl: string, cookies: JarCookie[]): Promise<void
     }),
   );
   try {
-    await done;
+    await Promise.race([done, expired]);
   } finally {
     clearTimeout(timer);
     ws.close();

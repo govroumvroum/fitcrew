@@ -1,5 +1,7 @@
 /** Self-check for the pure parts of agent-login.ts. Run: `bun scripts/agent-login.check.ts` */
 import assert from "node:assert/strict";
+import { createServer } from "node:net";
+import type { AddressInfo } from "node:net";
 import {
   assertDevSecretKey,
   buildRedirectUrl,
@@ -7,6 +9,7 @@ import {
   cookieHeaderFor,
   DEFAULT_BROWSER_SESSION,
   DEFAULT_SESSION_SECONDS,
+  importCookies,
   jarApply,
   type JarCookie,
   looksLikeNextServer,
@@ -141,5 +144,22 @@ assert.equal(parseSetCookie("no-equals-sign", "localhost"), null);
 // Clerk defaults to 1800s, which expired mid-run in #47.
 assert.ok(DEFAULT_SESSION_SECONDS > 1800);
 assert.equal(DEFAULT_SESSION_SECONDS, 7200);
+
+// --- the CDP import must never hang -----------------------------------------
+// A wedged browser still accepts the TCP connection (kernel accept queue) while
+// the WebSocket upgrade never completes: no onopen, no onerror, nothing to
+// settle on. Both phases share one ceiling, so this must fail, not freeze.
+{
+  const wedged = createServer(() => {}); // accepts, then never speaks
+  await new Promise<void>((ready) => wedged.listen(0, "127.0.0.1", ready));
+  const { port } = wedged.address() as AddressInfo;
+  const started = Date.now();
+  await assert.rejects(
+    importCookies(`ws://127.0.0.1:${port}/devtools/page/wedged`, [], 300),
+    /Timed out talking to the browser's CDP socket|Could not connect/,
+  );
+  assert.ok(Date.now() - started < 5000, "the wedged-socket import should fail fast, not hang");
+  wedged.close();
+}
 
 console.log("agent-login: ok");
