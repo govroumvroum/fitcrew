@@ -52,6 +52,50 @@ and `status` are `v.optional` for exactly this reason, read as `?? _id` and
 Renaming or changing an argument counts as deleting. So does tightening a
 validator: old clients send the old shape.
 
+# Signing in to the local app (agents)
+
+Every route is behind Clerk and the dev instance signs in with Google OAuth, so a
+browser run stops dead on the sign-in screen. Don't improvise around it — mint a
+Clerk Agent Task URL, which signs you in when opened:
+
+```sh
+bun run agent-login -- --browser   # signs the agent-browser session "fitcrew" in, end to end
+```
+
+Then drive `agent-browser --session-name fitcrew` as usual. The session name makes
+`agent-browser` persist cookies, so run this only when the saved session has lapsed.
+`--browser <name>` targets a different session name.
+
+Do **not** try `agent-browser open <task-url>` instead: Chrome silently drops
+Clerk's handshake cookies on `http://localhost` (they're `SameSite=None` without
+`Secure`), and the page loops back to signed-out. `--browser` consumes the ticket
+inside the script with a SameSite-blind HTTP client and imports the resulting
+cookies into the browser as `SameSite=Lax`, which Chrome keeps. The script
+verifies the page reports a signed-in user before exiting 0, and revokes the task.
+
+- Without `--browser` the script prints the task URL on stdout — that URL is a
+  **live credential**. Never paste it into a transcript, a log, a commit, or a PR
+  comment, and never write it to a file. Everything on stderr is safe to read;
+  stdout is not. (With `--browser`, nothing secret is printed at all.)
+- Revoke an unconsumed URL when you're done: `bun run agent-login -- --revoke
+  <agentTaskId>` (stderr prints the id and the exact command). `--browser`
+  revokes its own task automatically.
+- Never `cat .env.local` or echo any part of `CLERK_SECRET_KEY`. The script reads
+  it from the environment, and refuses to run unless it's an `sk_test_` dev key —
+  minting against production is not a thing we do.
+- The port is detected by probing for a running `next dev` (3000–3005), because
+  the dev server does land on 3001 when something else holds 3000. Override with
+  `--port 3007` or `PORT=3007` if it listens elsewhere.
+- Set `AGENT_LOGIN_IDENTIFIER` to the dev user's email in `.env.local`, or pass
+  `--identifier <email>`. Sessions last 2 h, long enough for a screenshot run.
+- **Stale saved session:** if a page shows the sign-in screen (or redirects to
+  `/sign-in`) even though `--session-name fitcrew` is set, the saved session has
+  lapsed. Run `bun run agent-login -- --browser` again — don't debug the "not
+  signed in" screen.
+- Agent Tasks are beta at Clerk, so keep this out of CI for now.
+
+Self-check: `bun scripts/agent-login.check.ts`.
+
 # Pull requests
 
 `main` is protected: PR required, squash-only, no force-push. Read
