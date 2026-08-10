@@ -462,7 +462,8 @@ function ProgramSection({
           reversible decision and must not compete with the day list above it.
           Sharing joins them in the same register — short labels, four fit at
           390px because none of them earns more weight than the day list. */}
-      <div className="flex justify-end gap-1">
+      {/* flex-wrap: shared, this row holds 4 buttons and overflows 390px otherwise. */}
+      <div className="flex flex-wrap justify-end gap-1">
         {shareCode ? (
           <>
             <Button

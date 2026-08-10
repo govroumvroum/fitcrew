@@ -73,8 +73,10 @@ function SharedProgram({ params }: { params: Promise<{ code: string }> }) {
               <section key={day.name} className="rounded-lg border bg-card/55 px-3 pb-3">
                 <h2 className="flex min-h-11 items-center text-sm font-medium">{day.name}</h2>
                 <ul className="divide-y">
-                  {day.exercises.map((exercise) => (
-                    <li key={exercise.name} className="min-h-11 py-2.5">
+                  {day.exercises.map((exercise, i) => (
+                    // Index key: a day can legitimately repeat an exercise
+                    // ("Course facile" twice in a run day), so the name isn't unique.
+                    <li key={`${exercise.name}-${i}`} className="min-h-11 py-2.5">
                       <p className="truncate text-sm font-medium">{exercise.name}</p>
                       <p className="text-sm text-muted-foreground">
                         <span className="font-semibold tabular-nums text-foreground">
