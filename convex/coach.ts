@@ -26,7 +26,7 @@ import {
 } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
 import { languageModel } from "./model";
-import { latestPerLineage } from "./programs";
+import { latestPerLineage, lineageOf, userPrograms } from "./programs";
 import { programExercise } from "./schema";
 import { searchWeb } from "./search";
 import { zGenerateProgram, zLogWorkout, zSaveOnboarding, zSwapExercise } from "./toolSchemas";
@@ -233,6 +233,109 @@ export const exerciseContext = internalQuery({
 });
 
 // ---------------------------------------------------------------------------
+// Program history — pure selection, exported for convex/coach.check.ts
+// ---------------------------------------------------------------------------
+
+type HistoryRow = {
+  _id: string;
+  _creationTime: number;
+  lineageId?: string;
+  version: number;
+  name: string;
+  status?: "active" | "archived" | "completed";
+};
+
+/** How many lineages a list result may carry back to the model. */
+const HISTORY_LIST_LIMIT = 20;
+
+/**
+ * Picks a program version out of the user's rows. Discriminated results on
+ * purpose: "ambiguous" lists the candidates instead of silently picking one,
+ * "version_not_found" says which versions DO exist, and "not_found" lists what
+ * the user has — no hallucination-friendly empty strings.
+ */
+export function lookupHistory<T extends HistoryRow>(
+  rows: T[],
+  selector: { name?: string; lineageId?: string; version?: number },
+) {
+  const latest = latestPerLineage(rows);
+  const summary = (p: T) => ({
+    lineageId: lineageOf(p),
+    name: p.name,
+    status: p.status ?? "active",
+    latestVersion: p.version,
+  });
+
+  let candidates = latest;
+  if (selector.lineageId !== undefined) {
+    candidates = latest.filter((p) => lineageOf(p) === selector.lineageId);
+  } else if (selector.name !== undefined) {
+    const needle = selector.name.toLowerCase().trim();
+    candidates = latest.filter((p) => p.name.toLowerCase().trim() === needle);
+    // Exact first; substring only as a fallback, so « Full Body » still finds
+    // « Full Body 3 jours » without shadowing an exact match.
+    if (candidates.length === 0) {
+      candidates = latest.filter((p) => p.name.toLowerCase().includes(needle));
+    }
+  }
+
+  if (candidates.length === 0) {
+    return {
+      result: "not_found" as const,
+      programs: latest.slice(0, HISTORY_LIST_LIMIT).map(summary),
+    };
+  }
+  if (candidates.length > 1) {
+    return {
+      result: "ambiguous" as const,
+      candidates: candidates.slice(0, HISTORY_LIST_LIMIT).map(summary),
+    };
+  }
+
+  const head = candidates[0];
+  const key = lineageOf(head);
+  const members = rows
+    .filter((row) => lineageOf(row) === key)
+    .sort((a, b) => a.version - b.version);
+  const versions = members.map((m) => m.version);
+  const row =
+    selector.version === undefined ? head : members.find((m) => m.version === selector.version);
+  if (!row) {
+    return { result: "version_not_found" as const, ...summary(head), availableVersions: versions };
+  }
+  return { result: "found" as const, ...summary(head), row, versions };
+}
+
+/**
+ * Read-only history for the coach's `lookup_program_history` tool. Everything
+ * is scoped to the authenticated user before any selector the model sent is
+ * applied — a foreign lineageId can only ever match nothing. Bounded by
+ * `userPrograms`' 500-row cap; returns ONE rendered version, never all of them.
+ */
+export const programHistory = internalQuery({
+  args: {
+    // v.string(), not v.id: the model types this and garbage must come back as
+    // "not_found", not a validator throw that aborts the coach's turn.
+    lineageId: v.optional(v.string()),
+    name: v.optional(v.string()),
+    version: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const rows = await userPrograms(ctx, user._id);
+    const found = lookupHistory(rows, args);
+    if (found.result !== "found") return found;
+    const { row, ...rest } = found;
+    return {
+      ...rest,
+      version: row.version,
+      isLatestVersion: row.version === found.latestVersion,
+      program: renderProgram(row, false),
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Tools
 // ---------------------------------------------------------------------------
 
@@ -285,6 +388,31 @@ function coachTools(today: string) {
           to: { ...rest, ...(notes ? { notes } : {}) },
         });
       },
+    }),
+
+    lookup_program_history: createTool({
+      description:
+        "Consulte l'historique des programmes du user : anciennes versions d'un programme actif, programmes archivés ou terminés. Lecture seule — rien n'est restauré. Pour recréer un ancien programme, repasse par generate_program.",
+      inputSchema: z.object({
+        name: z
+          .string()
+          .optional()
+          .describe("Nom (ou morceau de nom) du programme dont le user parle"),
+        lineageId: z
+          .string()
+          .optional()
+          .describe("lineageId renvoyé par un appel précédent, pour lever une ambiguïté"),
+        version: z
+          .number()
+          .optional()
+          .describe("Numéro de version précis ; sans lui, la dernière version"),
+      }),
+      execute: async (ctx: ToolCtx, { name, lineageId, version }) =>
+        await ctx.runQuery(internal.coach.programHistory, {
+          ...(name !== undefined ? { name } : {}),
+          ...(lineageId !== undefined ? { lineageId } : {}),
+          ...(version !== undefined ? { version } : {}),
+        }),
     }),
 
     explain_exercise: createTool({
@@ -499,6 +627,7 @@ RÈGLES PROGRAMME (quand tu appelles generate_program)
 
 AUTRES OUTILS
 - \`swap_exercise\` dès qu'il déteste ou ne peut pas faire un exercice. Propose un remplaçant équivalent, ne demande pas 3 fois confirmation. Il agit sur le programme le plus récemment travaillé : si l'exercice appartient à un autre, dis-le-lui plutôt que de le faire au mauvais endroit.
+- \`lookup_program_history\` dès qu'il parle d'une ANCIENNE version d'un programme, d'un programme archivé ou terminé, ou veut comparer avec avant. Tu ne vois au-dessus que la dernière version active de chaque programme : ne prétends jamais ne pas avoir accès au reste, va le chercher. Si l'outil renvoie plusieurs candidats, demande-lui lequel. Lecture seule : pour lui « refaire » un ancien programme, tu le recrées via \`generate_program\` (un NOUVEAU programme), tu ne restaures rien.
 - \`explain_exercise\` avant d'expliquer un exercice de son programme : ça te donne son historique réel.
 - \`log_workout\` seulement pour une séance passée qu'il te raconte. Une séance en cours se loge dans l'écran Séance, pas ici.
 - \`extract_screenshot\` dès qu'une capture est jointe à son message. Si l'outil renvoie des entrées, dis-lui juste de vérifier et valider la fiche affichée — tu n'enregistres rien toi-même. Si il renvoie une liste vide, NE LUI PARLE PAS de fiche à valider : il n'y en a aucune à l'écran. Dis-lui ce que tu vois sur la capture et ce qui manque (une pesée a besoin du poids réel, pas du poids idéal ni de la masse musculaire), et propose-lui de te donner le chiffre directement.
