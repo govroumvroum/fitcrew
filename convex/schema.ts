@@ -159,6 +159,17 @@ export default defineSchema({
     deloadEveryWeeks: v.optional(v.number()),
   }).index("by_user_and_lineage", ["userId", "lineageId", "version"]),
 
+  // A share link for a program. Keyed by the LINEAGE, not a row id, so the link
+  // survives exercise swaps by construction. Deleting the row revokes the link.
+  programShares: defineTable({
+    lineageId: v.id("programs"), // the lineage root id (row.lineageId ?? row._id)
+    userId: v.id("users"), // owner who shared
+    code: v.string(),
+  })
+    .index("by_code", ["code"])
+    .index("by_lineage", ["lineageId"])
+    .index("by_user", ["userId"]),
+
   workouts: defineTable({
     userId: v.id("users"),
     programId: v.optional(v.id("programs")),
