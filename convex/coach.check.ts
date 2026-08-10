@@ -110,6 +110,18 @@ if (r.result === "ambiguous") {
   assert.equal(r.candidates.length, 2);
   assert.deepEqual(new Set(r.candidates.map((c) => c.lineageId)), new Set(["fb1", "fb9"]));
 }
+// Ambiguity doesn't drop the shadowed siblings either: « Full Body » here is
+// two exact twins AND a longer-named third program.
+r = lookupHistory([...twins, row("fbx", "Full Body 3 jours express", 1, "fbx")], {
+  name: "Full Body 3 jours",
+});
+assert.equal(r.result, "ambiguous");
+if (r.result === "ambiguous") {
+  assert.deepEqual(
+    r.otherMatches.map((m) => m.name),
+    ["Full Body 3 jours express"],
+  );
+}
 // …and disambiguated by lineageId.
 r = lookupHistory(twins, { lineageId: "fb9" });
 assert.equal(r.result, "found");

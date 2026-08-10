@@ -294,6 +294,11 @@ export function lookupHistory<T extends HistoryRow>(
     }
   }
 
+  // Carried by every answer that got a hit. A name the exact match shadowed is
+  // the one the user meant often enough that neither "voici le programme" nor
+  // "cette version n'existe pas" may be said without it.
+  const otherMatches = siblings.slice(0, HISTORY_LIST_LIMIT).map(summary);
+
   if (candidates.length === 0) {
     return {
       result: "not_found" as const,
@@ -304,14 +309,11 @@ export function lookupHistory<T extends HistoryRow>(
     return {
       result: "ambiguous" as const,
       candidates: candidates.slice(0, HISTORY_LIST_LIMIT).map(summary),
+      otherMatches,
     };
   }
 
   const head = candidates[0];
-  // Every single-candidate answer carries them: "cette version n'existe pas"
-  // is a claim about the whole request, and the version asked for may well live
-  // in the sibling the exact match shadowed.
-  const otherMatches = siblings.slice(0, HISTORY_LIST_LIMIT).map(summary);
   const key = lineageOf(head);
   const members = rows.filter((row) => lineageOf(row) === key);
   const row =
