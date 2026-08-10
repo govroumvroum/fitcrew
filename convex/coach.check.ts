@@ -88,6 +88,16 @@ if (r.result === "found") {
     ["Boxe explosivité"],
   );
 }
+// …including when the version asked for doesn't exist: it may well live in the
+// sibling the exact match shadowed.
+r = lookupHistory(sibling, { name: "Boxe", version: 2 });
+assert.equal(r.result, "version_not_found");
+if (r.result === "version_not_found") {
+  assert.deepEqual(
+    r.otherMatches.map((m) => m.name),
+    ["Boxe explosivité"],
+  );
+}
 // …and a lone exact hit carries no siblings.
 r = lookupHistory(rows, { name: "Full Body 3 jours" });
 if (r.result === "found") assert.deepEqual(r.otherMatches, []);

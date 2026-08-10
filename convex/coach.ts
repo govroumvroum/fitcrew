@@ -308,17 +308,16 @@ export function lookupHistory<T extends HistoryRow>(
   }
 
   const head = candidates[0];
+  // Every single-candidate answer carries them: "cette version n'existe pas"
+  // is a claim about the whole request, and the version asked for may well live
+  // in the sibling the exact match shadowed.
+  const otherMatches = siblings.slice(0, HISTORY_LIST_LIMIT).map(summary);
   const key = lineageOf(head);
   const members = rows.filter((row) => lineageOf(row) === key);
   const row =
     selector.version === undefined ? head : members.find((m) => m.version === selector.version);
-  if (!row) return { result: "version_not_found" as const, ...summary(head) };
-  return {
-    result: "found" as const,
-    ...summary(head),
-    row,
-    otherMatches: siblings.slice(0, HISTORY_LIST_LIMIT).map(summary),
-  };
+  if (!row) return { result: "version_not_found" as const, ...summary(head), otherMatches };
+  return { result: "found" as const, ...summary(head), row, otherMatches };
 }
 
 /**
