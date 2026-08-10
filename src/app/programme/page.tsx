@@ -92,11 +92,10 @@ function Programme({ date }: { date: string }) {
 
   // Share then copy in one tap: the code is the mutation's return value, so
   // there's nothing to wait for a subscription on.
-  const shareProgram = (program: Program) => {
-    void share({ lineageId: program.lineageId })
+  const shareProgram = (program: Program) =>
+    share({ lineageId: program.lineageId })
       .then(copyLink)
       .catch(() => toast.error("Partage impossible, réessaie."));
-  };
 
   const unshareProgram = (program: Program) => {
     void unshare({ lineageId: program.lineageId })
@@ -208,13 +207,16 @@ function ProgramSection({
   demoUrlFor: (name: string) => string | null;
   onStatus: (program: Program, status: Status) => void;
   shareCode: string | null;
-  onShare: (program: Program) => void;
+  onShare: (program: Program) => Promise<unknown>;
   onUnshare: (program: Program) => void;
   onCopyLink: (code: string) => void;
 }) {
   // Which day is expanded — the only state here. The program is the coach's
   // document: no draft, no dirty flag, no save.
   const [opened, setOpened] = useState<number | null>(null);
+  // A double-tap on Partager is two mints; the second one would be a second live
+  // link for the same program. One tap at a time.
+  const [sharing, setSharing] = useState(false);
 
   const { days, nextDayIndex } = program;
   const openDay = opened ?? nextDayIndex;
@@ -485,7 +487,11 @@ function ProgramSection({
           <Button
             variant="ghost"
             className="h-11 px-3 text-muted-foreground active:scale-[0.98]"
-            onClick={() => onShare(program)}
+            disabled={sharing}
+            onClick={() => {
+              setSharing(true);
+              void onShare(program).finally(() => setSharing(false));
+            }}
           >
             Partager
           </Button>

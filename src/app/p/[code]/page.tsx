@@ -1,6 +1,6 @@
 "use client";
 
-import { Show } from "@clerk/nextjs";
+import { Show, useAuth } from "@clerk/nextjs";
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -38,15 +38,21 @@ export default function SharedProgramPage({ params }: { params: Promise<{ code: 
 
 function SharedProgram({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
+  const { isSignedIn } = useAuth();
   const program = useQuery(api.shares.shared, { code });
   const copy = useMutation(api.shares.copyShared);
   const router = useRouter();
   const [copying, setCopying] = useState(false);
 
   return (
-    // -ml-18 cancels the body's rail offset: a signed-out visitor has no rail,
-    // and this page must not sit 72px right of centre for them.
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col p-4 pb-[var(--tab-bar)] md:-ml-18">
+    // -ml-18 cancels the body's md:pl-18 rail offset, but ONLY signed-out: the
+    // rail exists at md+ for a signed-in visitor, and cancelling it for them
+    // would push this page 72px left of where every other page centres.
+    <main
+      className={`mx-auto flex w-full max-w-md flex-1 flex-col p-4 pb-[var(--tab-bar)] ${
+        isSignedIn === false ? "md:-ml-18" : ""
+      }`}
+    >
       {program === undefined ? (
         <Skeleton className="h-64" />
       ) : program === null ? (

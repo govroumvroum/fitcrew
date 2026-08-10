@@ -53,11 +53,15 @@ async function requireOwnedLineage(
   return latest;
 }
 
+// .first(), not .unique(): if two concurrent `share` calls ever did land two rows
+// on one lineage, .unique() would throw from then on and the owner could never
+// revoke. Reading the first and deleting them all in `unshare` makes that
+// impossible to wedge.
 const shareByLineage = (ctx: QueryCtx, lineageId: Id<"programs">) =>
   ctx.db
     .query("programShares")
     .withIndex("by_lineage", (q) => q.eq("lineageId", lineageId))
-    .unique();
+    .first();
 
 /** Share a program: returns its code, minting one on first call (idempotent). */
 export const share = mutation({
@@ -92,8 +96,12 @@ export const unshare = mutation({
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
     await requireOwnedLineage(ctx, user._id, args.lineageId);
-    const existing = await shareByLineage(ctx, args.lineageId);
-    if (existing) await ctx.db.delete("programShares", existing._id);
+    // Every row, not just the first: revoking has to kill every live link.
+    const rows = await ctx.db
+      .query("programShares")
+      .withIndex("by_lineage", (q) => q.eq("lineageId", args.lineageId))
+      .collect();
+    for (const row of rows) await ctx.db.delete("programShares", row._id);
     return null;
   },
 });
