@@ -259,23 +259,38 @@ export function lookupHistory<T extends HistoryRow>(
   selector: { name?: string; lineageId?: string; version?: number },
 ) {
   const latest = latestPerLineage(rows);
+  const versionsOf = (p: T) =>
+    rows
+      .filter((row) => lineageOf(row) === lineageOf(p))
+      .map((row) => row.version)
+      .sort((a, b) => a - b);
+  // Every summary carries the lineage's whole version list, so picking an old
+  // version out of an ambiguous list is one more call, not two.
   const summary = (p: T) => ({
     lineageId: lineageOf(p),
     name: p.name,
     status: p.status ?? "active",
-    latestVersion: p.version,
+    versions: versionsOf(p),
   });
 
   let candidates = latest;
+  let siblings: T[] = [];
   if (selector.lineageId !== undefined) {
     candidates = latest.filter((p) => lineageOf(p) === selector.lineageId);
   } else if (selector.name !== undefined) {
     const needle = selector.name.toLowerCase().trim();
     candidates = latest.filter((p) => p.name.toLowerCase().trim() === needle);
     // Exact first; substring only as a fallback, so « Full Body » still finds
-    // « Full Body 3 jours » without shadowing an exact match.
+    // « Full Body 3 jours » without shadowing an exact match. But the exact hit
+    // is reported WITH its longer-named siblings: the coach's context only
+    // lists active programs, so « Boxe » is also how it asks for an archived
+    // « Boxe explosivité » it can't see and can't name.
     if (candidates.length === 0) {
       candidates = latest.filter((p) => p.name.toLowerCase().includes(needle));
+    } else {
+      siblings = latest.filter(
+        (p) => !candidates.includes(p) && p.name.toLowerCase().includes(needle),
+      );
     }
   }
 
@@ -294,16 +309,16 @@ export function lookupHistory<T extends HistoryRow>(
 
   const head = candidates[0];
   const key = lineageOf(head);
-  const members = rows
-    .filter((row) => lineageOf(row) === key)
-    .sort((a, b) => a.version - b.version);
-  const versions = members.map((m) => m.version);
+  const members = rows.filter((row) => lineageOf(row) === key);
   const row =
     selector.version === undefined ? head : members.find((m) => m.version === selector.version);
-  if (!row) {
-    return { result: "version_not_found" as const, ...summary(head), availableVersions: versions };
-  }
-  return { result: "found" as const, ...summary(head), row, versions };
+  if (!row) return { result: "version_not_found" as const, ...summary(head) };
+  return {
+    result: "found" as const,
+    ...summary(head),
+    row,
+    otherMatches: siblings.slice(0, HISTORY_LIST_LIMIT).map(summary),
+  };
 }
 
 /**
@@ -329,7 +344,7 @@ export const programHistory = internalQuery({
     return {
       ...rest,
       version: row.version,
-      isLatestVersion: row.version === found.latestVersion,
+      isLatestVersion: row.version === found.versions.at(-1),
       program: renderProgram(row, false),
     };
   },
@@ -627,7 +642,7 @@ RÈGLES PROGRAMME (quand tu appelles generate_program)
 
 AUTRES OUTILS
 - \`swap_exercise\` dès qu'il déteste ou ne peut pas faire un exercice. Propose un remplaçant équivalent, ne demande pas 3 fois confirmation. Il agit sur le programme le plus récemment travaillé : si l'exercice appartient à un autre, dis-le-lui plutôt que de le faire au mauvais endroit.
-- \`lookup_program_history\` dès qu'il parle d'une ANCIENNE version d'un programme, d'un programme archivé ou terminé, ou veut comparer avec avant. Tu ne vois au-dessus que la dernière version active de chaque programme : ne prétends jamais ne pas avoir accès au reste, va le chercher. Si l'outil renvoie plusieurs candidats, demande-lui lequel. Lecture seule : pour lui « refaire » un ancien programme, tu le recrées via \`generate_program\` (un NOUVEAU programme), tu ne restaures rien.
+- \`lookup_program_history\` dès qu'il parle d'une ANCIENNE version d'un programme, d'un programme archivé ou terminé, ou veut comparer avec avant. Tu ne vois au-dessus que la dernière version active de chaque programme : ne prétends jamais ne pas avoir accès au reste, va le chercher. Si l'outil renvoie plusieurs candidats, ou un résultat avec des \`otherMatches\`, demande-lui lequel plutôt que de choisir à sa place. Lecture seule : pour lui « refaire » un ancien programme, tu le recrées via \`generate_program\` (un NOUVEAU programme), tu ne restaures rien.
 - \`explain_exercise\` avant d'expliquer un exercice de son programme : ça te donne son historique réel.
 - \`log_workout\` seulement pour une séance passée qu'il te raconte. Une séance en cours se loge dans l'écran Séance, pas ici.
 - \`extract_screenshot\` dès qu'une capture est jointe à son message. Si l'outil renvoie des entrées, dis-lui juste de vérifier et valider la fiche affichée — tu n'enregistres rien toi-même. Si il renvoie une liste vide, NE LUI PARLE PAS de fiche à valider : il n'y en a aucune à l'écran. Dis-lui ce que tu vois sur la capture et ce qui manque (une pesée a besoin du poids réel, pas du poids idéal ni de la masse musculaire), et propose-lui de te donner le chiffre directement.

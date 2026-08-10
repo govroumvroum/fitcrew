@@ -36,7 +36,6 @@ assert.equal(r.result, "found");
 if (r.result === "found") {
   assert.equal(r.row._id, "fb2");
   assert.equal(r.status, "active");
-  assert.equal(r.latestVersion, 3);
   assert.deepEqual(r.versions, [1, 2, 3]);
 }
 
@@ -74,7 +73,24 @@ if (r.result === "found") assert.equal(r.row._id, "bx1");
 // Missing version: explicit, with what DOES exist.
 r = lookupHistory(rows, { name: "Boxe explosivité", version: 7 });
 assert.equal(r.result, "version_not_found");
-if (r.result === "version_not_found") assert.deepEqual(r.availableVersions, [1, 2]);
+if (r.result === "version_not_found") assert.deepEqual(r.versions, [1, 2]);
+
+// An exact hit does NOT bury its longer-named siblings: the coach's context
+// only lists active programs, so « Boxe » is how it asks for an archived
+// « Boxe explosivité » it can't see and can't name.
+const sibling = [...rows, row("bxa", "Boxe", 1, "bxa")];
+r = lookupHistory(sibling, { name: "Boxe" });
+assert.equal(r.result, "found");
+if (r.result === "found") {
+  assert.equal(r.row._id, "bxa");
+  assert.deepEqual(
+    r.otherMatches.map((m) => m.name),
+    ["Boxe explosivité"],
+  );
+}
+// …and a lone exact hit carries no siblings.
+r = lookupHistory(rows, { name: "Full Body 3 jours" });
+if (r.result === "found") assert.deepEqual(r.otherMatches, []);
 
 // Ambiguous name: two lineages named the same — candidates listed, none picked.
 const twins = [...rows, row("fb9", "Full Body 3 jours", 1, "fb9", "archived")];
