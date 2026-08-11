@@ -27,6 +27,7 @@ import type * as progress from "../progress.js";
 import type * as screenshots from "../screenshots.js";
 import type * as search from "../search.js";
 import type * as sentinels from "../sentinels.js";
+import type * as shares from "../shares.js";
 import type * as toolSchemas from "../toolSchemas.js";
 import type * as users from "../users.js";
 import type * as vision from "../vision.js";
@@ -58,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   screenshots: typeof screenshots;
   search: typeof search;
   sentinels: typeof sentinels;
+  shares: typeof shares;
   toolSchemas: typeof toolSchemas;
   users: typeof users;
   vision: typeof vision;

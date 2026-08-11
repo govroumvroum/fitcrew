@@ -6,6 +6,8 @@ const isPublic = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/__clerk(.*)",
+  // Shared program pages: the whole point is to be readable signed-out.
+  "/p(.*)",
   // Must be reachable signed-out, or the service worker precaches the
   // sign-in redirect as the offline fallback.
   "/~offline",

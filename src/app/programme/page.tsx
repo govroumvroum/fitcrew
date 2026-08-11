@@ -42,6 +42,11 @@ export default function ProgrammePage() {
 function Programme({ date }: { date: string }) {
   const programs = useQuery(api.programs.list, { date });
   const setStatus = useMutation(api.programs.setStatus);
+  const share = useMutation(api.shares.share);
+  const unshare = useMutation(api.shares.unshare);
+  // lineageId → code, for labelling which programs already have a live link.
+  const shares = useQuery(api.shares.mine, {});
+  const shareCodes = new Map(shares?.map((row) => [row.lineageId, row.code]));
 
   // Unconditional (hook rules). ponytail: resolves every name of every program
   // at once instead of per open day — resolution is cached per name server-side,
@@ -78,6 +83,26 @@ function Programme({ date }: { date: string }) {
     );
   };
 
+  const copyLink = (code: string) => {
+    void navigator.clipboard
+      .writeText(`${location.origin}/p/${code}`)
+      .then(() => toast.success("Lien copié"))
+      .catch(() => toast.error("Copie impossible, réessaie."));
+  };
+
+  // Share then copy in one tap: the code is the mutation's return value, so
+  // there's nothing to wait for a subscription on.
+  const shareProgram = (program: Program) =>
+    share({ lineageId: program.lineageId })
+      .then(copyLink)
+      .catch(() => toast.error("Partage impossible, réessaie."));
+
+  const unshareProgram = (program: Program) => {
+    void unshare({ lineageId: program.lineageId })
+      .then(() => toast.success("Lien révoqué"))
+      .catch(() => toast.error("Pas révoqué, réessaie."));
+  };
+
   const active = programs.filter((program) => program.status === "active");
   const past = programs.filter((program) => program.status !== "active");
 
@@ -105,6 +130,10 @@ function Programme({ date }: { date: string }) {
             program={program}
             demoUrlFor={demoUrlFor}
             onStatus={change}
+            shareCode={shareCodes.get(program.lineageId) ?? null}
+            onShare={shareProgram}
+            onUnshare={unshareProgram}
+            onCopyLink={copyLink}
           />
         ))
       )}
@@ -169,14 +198,25 @@ function ProgramSection({
   program,
   demoUrlFor,
   onStatus,
+  shareCode,
+  onShare,
+  onUnshare,
+  onCopyLink,
 }: {
   program: Program;
   demoUrlFor: (name: string) => string | null;
   onStatus: (program: Program, status: Status) => void;
+  shareCode: string | null;
+  onShare: (program: Program) => Promise<unknown>;
+  onUnshare: (program: Program) => void;
+  onCopyLink: (code: string) => void;
 }) {
   // Which day is expanded — the only state here. The program is the coach's
   // document: no draft, no dirty flag, no save.
   const [opened, setOpened] = useState<number | null>(null);
+  // A double-tap on Partager is two mints; the second one would be a second live
+  // link for the same program. One tap at a time.
+  const [sharing, setSharing] = useState(false);
 
   const { days, nextDayIndex } = program;
   const openDay = opened ?? nextDayIndex;
@@ -421,8 +461,41 @@ function ProgramSection({
       </div>
 
       {/* Two ghost words, right-aligned: putting a program away is a rare,
-          reversible decision and must not compete with the day list above it. */}
-      <div className="flex justify-end gap-1">
+          reversible decision and must not compete with the day list above it.
+          Sharing joins them in the same register — short labels, four fit at
+          390px because none of them earns more weight than the day list. */}
+      {/* flex-wrap: shared, this row holds 4 buttons and overflows 390px otherwise. */}
+      <div className="flex flex-wrap justify-end gap-1">
+        {shareCode ? (
+          <>
+            <Button
+              variant="ghost"
+              className="h-11 px-3 text-muted-foreground active:scale-[0.98]"
+              onClick={() => onCopyLink(shareCode)}
+            >
+              Copier le lien
+            </Button>
+            <Button
+              variant="ghost"
+              className="h-11 px-3 text-muted-foreground active:scale-[0.98]"
+              onClick={() => onUnshare(program)}
+            >
+              Ne plus partager
+            </Button>
+          </>
+        ) : (
+          <Button
+            variant="ghost"
+            className="h-11 px-3 text-muted-foreground active:scale-[0.98]"
+            disabled={sharing}
+            onClick={() => {
+              setSharing(true);
+              void onShare(program).finally(() => setSharing(false));
+            }}
+          >
+            Partager
+          </Button>
+        )}
         <Button
           variant="ghost"
           className="h-11 px-3 text-muted-foreground active:scale-[0.98]"
