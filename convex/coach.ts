@@ -158,31 +158,80 @@ async function loadContext(ctx: QueryCtx) {
     .query("programs")
     .withIndex("by_user_and_lineage", (q) => q.eq("userId", user._id))
     .take(500);
-  const programs = latestPerLineage(rows).filter((p) => (p.status ?? "active") === "active");
-  return { user, programs, currentProgramId: user.currentProgramId ?? null };
+  return { user, programs: activeLineages(rows), currentProgramId: user.currentProgramId ?? null };
 }
 
 /**
- * Adds what the user did outside the gym. Fixed counts rather than a date
- * window: a query can't read the clock, and "the last few" is what the coach
- * needs anyway. Not in `loadContext` — `exerciseContext` would pay for reads it
- * never uses.
+ * What the user did outside the gym. Fixed counts rather than a date window: a
+ * query can't read the clock, and "the last few" is what the coach needs anyway.
+ */
+async function outsideOf(ctx: QueryCtx, userId: Id<"users">) {
+  const cardio = await ctx.db
+    .query("cardio")
+    .withIndex("by_user_and_date", (q) => q.eq("userId", userId))
+    .order("desc")
+    .take(5);
+  const weights = await ctx.db
+    .query("bodyweight")
+    .withIndex("by_user_and_date", (q) => q.eq("userId", userId))
+    .order("desc")
+    .take(1);
+  return { cardio, weight: weights[0] ?? null };
+}
+
+/**
+ * Kept as it was even though the prompt now only reads `user` from it: an older
+ * bundle may still be calling it (see AGENTS.md on expand/contract).
  */
 export const context = internalQuery({
   args: {},
   handler: async (ctx) => {
     const base = await loadContext(ctx);
-    const cardio = await ctx.db
-      .query("cardio")
-      .withIndex("by_user_and_date", (q) => q.eq("userId", base.user._id))
-      .order("desc")
-      .take(5);
-    const weights = await ctx.db
-      .query("bodyweight")
-      .withIndex("by_user_and_date", (q) => q.eq("userId", base.user._id))
-      .order("desc")
-      .take(1);
-    return { ...base, cardio, weight: weights[0] ?? null };
+    return { ...base, ...(await outsideOf(ctx, base.user._id)) };
+  },
+});
+
+/**
+ * The coach's `read_cardio_and_bodyweight` tool. The provenance and the scale's
+ * margin travel WITH the numbers: they used to sit next to them in the prompt,
+ * and a caveat left behind in a prompt that no longer holds the data is a caveat
+ * the model never sees.
+ */
+export const outsideTraining = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireCurrentUser(ctx);
+    const { cardio, weight } = await outsideOf(ctx, user._id);
+    if (cardio.length === 0 && !weight) {
+      return {
+        result: "empty" as const,
+        note: "Aucun cardio ni aucune pesée enregistrés. Ne suppose rien, demande-lui.",
+      };
+    }
+    return {
+      result: "found" as const,
+      provenance:
+        "Importé de ses captures d'écran — il ne te l'a pas raconté, ne fais pas semblant du contraire.",
+      usage:
+        "Tiens-en compte pour la fatigue et le volume jambes, mais n'en parle que si c'est pertinent.",
+      cardio: cardio.map((c) => ({
+        date: c.date,
+        kind: c.kind,
+        durationMin: c.durationMin ?? null,
+        distanceKm: c.distanceKm ?? null,
+        avgHr: c.avgHr ?? null,
+      })),
+      bodyweight: weight
+        ? {
+            date: weight.date,
+            weightKg: weight.weightKg ?? null,
+            bodyFatPct: weight.bodyFatPct ?? null,
+            muscleKg: weight.muscleKg ?? null,
+            caveat:
+              "Une balance à impédance se trompe de 3 à 5 % dans l'absolu : commente la tendance, jamais le chiffre exact.",
+          }
+        : null,
+    };
   },
 });
 
@@ -247,6 +296,22 @@ type HistoryRow = {
 
 /** How many lineages a list result may carry back to the model. */
 const HISTORY_LIST_LIMIT = 20;
+
+/**
+ * How many active programs `read_programs` renders IN FULL. A rendered program
+ * is 20-60 lines, so this is the one list that can't use HISTORY_LIST_LIMIT.
+ * ponytail: nobody runs 5 programs at once; raise it if someone does.
+ */
+const ACTIVE_RENDER_LIMIT = 5;
+
+/**
+ * The programs the user is currently running — latest version of each lineage,
+ * archived and completed ones dropped. Plural on purpose: a musculation program
+ * and a boxing one are both live at once.
+ */
+export function activeLineages<T extends HistoryRow>(rows: T[]): T[] {
+  return latestPerLineage(rows).filter((p) => (p.status ?? "active") === "active");
+}
 
 /**
  * Picks a program version out of the user's rows. Discriminated results on
@@ -335,11 +400,34 @@ export const programHistory = internalQuery({
     lineageId: v.optional(v.string()),
     name: v.optional(v.string()),
     version: v.optional(v.number()),
+    /** `read_programs`' mode: every ACTIVE program, rendered in full. */
+    list: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
     const rows = await userPrograms(ctx, user._id);
-    const found = lookupHistory(rows, args);
+
+    const { list, ...selector } = args;
+    if (list) {
+      const active = activeLineages(rows);
+      return {
+        result: "active_programs" as const,
+        count: active.length,
+        truncated: active.length > ACTIVE_RENDER_LIMIT,
+        programs: active.slice(0, ACTIVE_RENDER_LIMIT).map((p) => ({
+          lineageId: lineageOf(p),
+          name: p.name,
+          version: p.version,
+          lastTrained: p._id === user.currentProgramId,
+          program: renderProgram(p, p._id === user.currentProgramId),
+        })),
+        note: active.length
+          ? "Ils tournent EN PARALLÈLE, chacun avance sa propre rotation de jours. Tu ne reçois ici que la DERNIÈRE version de chaque programme actif : pour une version antérieure, un programme archivé ou terminé, appelle `lookup_program_history`."
+          : "Aucun programme en cours. Ne fais pas semblant du contraire et n'en invente pas : propose de lui en générer un.",
+      };
+    }
+
+    const found = lookupHistory(rows, selector);
     if (found.result !== "found") return found;
     const { row, ...rest } = found;
     return {
@@ -358,6 +446,11 @@ export const programHistory = internalQuery({
 /**
  * `today` is closed over rather than asked of the model: it's the one value the
  * model can't know and would happily invent.
+ *
+ * It must NOT reach any tool DESCRIPTION, though. Tool definitions are part of
+ * the prefix the provider caches, so a date-stamped description invalidates the
+ * cache every midnight just as surely as a date-stamped system prompt. Inside
+ * `execute` it is invisible to the model, which is where every use below is.
  */
 function coachTools(today: string) {
   return {
@@ -406,9 +499,24 @@ function coachTools(today: string) {
       },
     }),
 
+    read_programs: createTool({
+      description:
+        "Les programmes que le user suit ACTUELLEMENT, rendus en entier : jours, exercices, séries × reps, repos, règles de progression, deload. Ils ne sont pas dans ton prompt — appelle cet outil avant toute réponse qui parle de son programme, de sa prochaine séance ou d'un exercice qu'il suit, et avant swap_exercise.",
+      inputSchema: z.object({}),
+      execute: async (ctx: ToolCtx) =>
+        await ctx.runQuery(internal.coach.programHistory, { list: true }),
+    }),
+
+    read_cardio_and_bodyweight: createTool({
+      description:
+        "Les derniers cardios du user et sa dernière pesée (poids, masse grasse, muscle). Ils ne sont pas dans ton prompt — appelle cet outil dès que la fatigue, le volume jambes, le poids ou la composition corporelle entrent dans la conversation.",
+      inputSchema: z.object({}),
+      execute: async (ctx: ToolCtx) => await ctx.runQuery(internal.coach.outsideTraining, {}),
+    }),
+
     lookup_program_history: createTool({
       description:
-        "Consulte l'historique des programmes du user : anciennes versions d'un programme actif, programmes archivés ou terminés. Lecture seule — rien n'est restauré. Pour recréer un ancien programme, repasse par generate_program.",
+        "Consulte l'historique des programmes du user : anciennes versions d'un programme actif, programmes archivés ou terminés. Pour les programmes en cours, c'est read_programs. Lecture seule — rien n'est restauré. Pour recréer un ancien programme, repasse par generate_program.",
       inputSchema: z.object({
         name: z
           .string()
@@ -454,7 +562,11 @@ function coachTools(today: string) {
       description:
         "Enregistre APRÈS COUP une séance déjà faite (ex: « j'ai fait 5x5 à 80kg hier »). Jamais pour une séance en cours : le user a un écran dédié pour ça.",
       inputSchema: zLogWorkout.extend({
-        date: z.string().describe(`YYYY-MM-DD. Aujourd'hui = ${today}`),
+        // No date interpolated here: this description is part of the cached
+        // prefix. The actual date is at the END of the system prompt.
+        date: z
+          .string()
+          .describe("YYYY-MM-DD. La date d'aujourd'hui est donnée à la fin de ton system prompt"),
       }),
       execute: async (ctx: ToolCtx, input) => {
         // ponytail: reuses the live logger's mutations, so it's 2 writes per set
@@ -495,7 +607,7 @@ function coachTools(today: string) {
 
     ask_chef: createTool({
       description:
-        "Consulte « Le Chef », l'assistant nutrition, quand la réponse dépend VRAIMENT de l'alimentation (quoi manger autour d'une séance, si ses apports collent à son objectif). Jamais pour ce qui est déjà dans ton contexte. Il n'a aucun outil et ne peut pas te reconsulter : une question, une réponse.",
+        "Consulte « Le Chef », l'assistant nutrition, quand la réponse dépend VRAIMENT de l'alimentation (quoi manger autour d'une séance, si ses apports collent à son objectif). Jamais pour ce que tes propres outils de lecture savent déjà. Il n'a aucun outil et ne peut pas te reconsulter : une question, une réponse.",
       inputSchema: z.object({
         question: z.string().describe("Une seule question, précise, sur la nutrition"),
         context: z
@@ -512,7 +624,7 @@ function coachTools(today: string) {
 
     search_web: createTool({
       description:
-        "Cherche sur le web (SearXNG) ce que tu ne peux pas savoir : recommandations actuelles, un complément ou un terme dont le user te parle, la technique d'un exercice précis. Jamais pour ce qui est déjà dans ton contexte.",
+        "Cherche sur le web (SearXNG) ce que tu ne peux pas savoir : recommandations actuelles, un complément ou un terme dont le user te parle, la technique d'un exercice précis. Jamais pour l'état du user lui-même : ça, ce sont read_programs, read_cardio_and_bodyweight, explain_exercise et lookup_program_history.",
       inputSchema: z.object({
         query: z.string().describe("Requête courte, 2 à 6 mots, dans la langue du sujet"),
       }),
@@ -563,21 +675,21 @@ ${program.days
 Progression : ${program.progressionRules}
 Deload : ${program.deloadEveryWeeks ? `toutes les ${program.deloadEveryWeeks} semaines` : "non défini"}`;
 
-function systemPrompt(
-  user: Doc<"users">,
-  programs: Doc<"programs">[],
-  currentProgramId: Id<"programs"> | null,
-  today: string,
-  cardio: Doc<"cardio">[] = [],
-  weight: Doc<"bodyweight"> | null = null,
-) {
+/**
+ * Everything volatile — the rendered programs, the cardio, the weigh-in — left
+ * this string for the read tools, because a cache hit needs a byte-identical
+ * prefix and those blocks changed on every logged set. What stays is the persona,
+ * the tone, and the onboarding profile: small, and rewritten about twice a year.
+ *
+ * `today` is the ONE dynamic value left, and it sits at the very END on purpose
+ * (see the comment above the return). Do not move it back up.
+ */
+function systemPrompt(user: Doc<"users">, today: string) {
   const onboarding = user.onboarding;
 
   return `Tu es le coach sportif de ${user.name} dans l'app FitCrew. Tu parles français, tu tutoies, tu es bref : c'est une conversation sur un téléphone, pas un article de blog. 2-6 phrases par message, sauf quand tu présentes un programme.
 
 TON : ${user.tone ? TONE[user.tone] : "Chaleureux et simple, en attendant que le user choisisse son ton."}
-
-Nous sommes le ${today}.
 
 ${
   onboarding
@@ -600,40 +712,15 @@ ${QUESTIONS}
 - Appelle alors \`save_onboarding\`, puis propose de générer son programme.`
 }
 
-${
-  programs.length
-    ? `PROGRAMMES EN COURS (${programs.length}) — ils tournent EN PARALLÈLE, chacun avance sa propre rotation de jours.
-${programs.map((p) => renderProgram(p, p._id === currentProgramId)).join("\n\n")}`
-    : "PROGRAMMES EN COURS : aucun."
-}
-
-${
-  cardio.length > 0 || weight
-    ? `HORS MUSCU (importé de ses captures — il ne te l'a pas raconté, ne fais pas semblant du contraire)
-${cardio
-  .map(
-    (c) =>
-      `- ${c.date} : ${c.kind}${c.durationMin ? ` ${c.durationMin} min` : ""}${c.distanceKm ? ` ${c.distanceKm} km` : ""}${c.avgHr ? ` FC ${c.avgHr}` : ""}`,
-  )
-  .join("\n")}${
-        weight
-          ? `\n- Dernière mesure (${weight.date}) : ${[
-              weight.weightKg !== undefined && `${weight.weightKg} kg`,
-              weight.bodyFatPct !== undefined && `${weight.bodyFatPct} % de masse grasse`,
-              weight.muscleKg !== undefined && `${weight.muscleKg} kg de muscle`,
-            ]
-              .filter(Boolean)
-              .join(
-                ", ",
-              )}\n  Une balance à impédance se trompe de 3 à 5 % dans l'absolu : commente la tendance, jamais le chiffre exact.`
-          : ""
-      }
-Tiens-en compte pour la fatigue et le volume jambes, mais n'en parle que si c'est pertinent.`
-    : ""
-}
+CE PROMPT NE CONTIENT PAS SES DONNÉES — TU VAS LES CHERCHER
+Ses programmes, son cardio et ses pesées ne sont PAS écrits ici. Tu y as accès, mais par outil, et un outil qu'on n'appelle pas ne renvoie rien.
+- \`read_programs\` : ses programmes en cours, en entier (jours, exercices, séries × reps, repos, progression). Appelle-le AVANT toute réponse qui parle de son programme, de sa prochaine séance ou d'un exercice qu'il suit, et avant \`swap_exercise\`.
+- \`read_cardio_and_bodyweight\` : ses derniers cardios et sa dernière pesée. Appelle-le dès que la fatigue, le volume jambes, le poids ou la composition corporelle entrent dans la conversation.
+- Ne dis JAMAIS que tu n'as pas accès à ces données, et n'invente jamais un exercice, un jour, une charge ou un chiffre de pesée : tout ça se lit.
+- Ce que tu as déjà lu dans cette conversation reste valable : n'appelle pas deux fois le même outil pour la même chose. Mais après une écriture (\`generate_program\`, \`swap_exercise\`, \`log_workout\`) ou si le user dit avoir changé quelque chose dans l'app, relis avant de commenter.
 
 RÈGLES PROGRAMME (quand tu appelles generate_program)
-- \`generate_program\` crée un NOUVEAU programme, en plus de ceux du dessus. Il ne remplace rien. Le user peut en mener plusieurs de front (muscu + boxe, par exemple) et chacun a sa propre rotation.
+- \`generate_program\` crée un NOUVEAU programme, en plus de ceux qu'il suit déjà (\`read_programs\` te les donne). Il ne remplace rien. Le user peut en mener plusieurs de front (muscu + boxe, par exemple) et chacun a sa propre rotation.
 - Pour MODIFIER un programme existant (durée des séances, nombre de jours, exercices qui ne passent pas), ne le régénère pas : ça en créerait un deuxième. Utilise \`swap_exercise\`, ou dis-lui clairement que tu vas en créer un nouveau et demande si c'est bien ce qu'il veut.
 - Un jour = un focus clair, nommé "Jour N — Focus (muscles)".
 - L'ÉCHAUFFEMENT N'EST JAMAIS UN EXERCICE de la liste. Pas de ligne "Échauffement", "Mobilité" ou "Cardio d'échauffement" dans \`exercises\`. Si tu veux en parler, mets-le dans \`progressionRules\` ou dans ton message.
@@ -642,15 +729,23 @@ RÈGLES PROGRAMME (quand tu appelles generate_program)
 - Après \`generate_program\`, résume le programme jour par jour dans ton message : le user ne voit que ce que tu écris.
 
 AUTRES OUTILS
-- \`swap_exercise\` dès qu'il déteste ou ne peut pas faire un exercice. Propose un remplaçant équivalent, ne demande pas 3 fois confirmation. Il agit sur le programme le plus récemment travaillé : si l'exercice appartient à un autre, dis-le-lui plutôt que de le faire au mauvais endroit.
-- \`lookup_program_history\` dès qu'il parle d'une ANCIENNE version d'un programme, d'un programme archivé ou terminé, ou veut comparer avec avant. Tu ne vois au-dessus que la dernière version active de chaque programme : ne prétends jamais ne pas avoir accès au reste, va le chercher. Si l'outil renvoie plusieurs candidats, ou un résultat avec des \`otherMatches\`, demande-lui lequel plutôt que de choisir à sa place. Lecture seule : pour lui « refaire » un ancien programme, tu le recrées via \`generate_program\` (un NOUVEAU programme), tu ne restaures rien.
+- \`swap_exercise\` dès qu'il déteste ou ne peut pas faire un exercice. Propose un remplaçant équivalent, ne demande pas 3 fois confirmation. Il agit sur le programme le plus récemment travaillé — celui que \`read_programs\` marque \`lastTrained\` : si l'exercice appartient à un autre, dis-le-lui plutôt que de le faire au mauvais endroit.
+- \`lookup_program_history\` dès qu'il parle d'une ANCIENNE version d'un programme, d'un programme archivé ou terminé, ou veut comparer avec avant. \`read_programs\` ne te donne que la dernière version de chaque programme ACTIF : ne prétends jamais ne pas avoir accès au reste, va le chercher ici. Si l'outil renvoie plusieurs candidats, ou un résultat avec des \`otherMatches\`, demande-lui lequel plutôt que de choisir à sa place. Lecture seule : pour lui « refaire » un ancien programme, tu le recrées via \`generate_program\` (un NOUVEAU programme), tu ne restaures rien.
 - \`explain_exercise\` avant d'expliquer un exercice de son programme : ça te donne son historique réel.
 - \`log_workout\` seulement pour une séance passée qu'il te raconte. Une séance en cours se loge dans l'écran Séance, pas ici.
 - \`extract_screenshot\` dès qu'une capture est jointe à son message. Si l'outil renvoie des entrées, dis-lui juste de vérifier et valider la fiche affichée — tu n'enregistres rien toi-même. Si il renvoie une liste vide, NE LUI PARLE PAS de fiche à valider : il n'y en a aucune à l'écran. Dis-lui ce que tu vois sur la capture et ce qui manque (une pesée a besoin du poids réel, pas du poids idéal ni de la masse musculaire), et propose-lui de te donner le chiffre directement.
 - \`ask_chef\` seulement quand la réponse dépend vraiment de son alimentation (quoi manger autour d'une séance, si ses apports servent son objectif). Une seule question, avec le minimum de contexte : le Chef ne voit pas votre conversation. Ce n'est pas ton domaine : tu relaies sa réponse, tu ne la corriges pas, et tu rappelles que ses chiffres sont des estimations. La nutrition d'une pathologie ne se règle ni avec lui ni avec toi : c'est un professionnel de santé.
-- \`search_web\` seulement pour ce que tu ne peux pas savoir : une recommandation à jour, un complément ou un terme dont il te parle, la technique d'un exercice précis. Jamais pour ce qui est déjà écrit au-dessus (son profil, son programme, ses records, son cardio) et jamais pour du conseil d'entraînement générique que tu connais déjà — une recherche inutile, c'est de l'attente et des tokens pour rien.
+- \`search_web\` seulement pour ce que tu ne peux pas savoir : une recommandation à jour, un complément ou un terme dont il te parle, la technique d'un exercice précis. Jamais pour l'état du user : son profil est ci-dessus, et son programme, ses records et son cardio se lisent avec \`read_programs\`, \`explain_exercise\` et \`read_cardio_and_bodyweight\`. Jamais non plus pour du conseil d'entraînement générique que tu connais déjà — une recherche inutile, c'est de l'attente et des tokens pour rien.
 - Quand tu t'appuies sur une recherche, cite tes sources dans ta réponse (le nom du site ou le lien) pour qu'il puisse vérifier. Si l'outil renvoie une erreur ou zéro résultat, dis-lui simplement que la recherche ne marche pas là et continue avec ce que tu sais.
-- TU N'ES PAS MÉDECIN. Douleur, blessure, symptôme, médicament : tu dis clairement que ça demande un professionnel (médecin, kiné) et tu ne présentes JAMAIS un résultat de recherche comme un diagnostic ou un protocole de soin. Tu peux adapter le programme pour ménager la zone, c'est tout.`;
+- TU N'ES PAS MÉDECIN. Douleur, blessure, symptôme, médicament : tu dis clairement que ça demande un professionnel (médecin, kiné) et tu ne présentes JAMAIS un résultat de recherche comme un diagnostic ou un protocole de soin. Tu peux adapter le programme pour ménager la zone, c'est tout.
+
+DATE
+Nous sommes le ${today}.`;
+  // ^ Deliberately the LAST line of the prompt. It's the only value that changes
+  // from one turn to the next, and the provider's prompt cache matches on a
+  // prefix: anything after the first differing byte is refused a cache hit. At
+  // the end it costs one uncached line instead of the whole prompt. It cannot
+  // leave the prompt entirely — a model doing calendar arithmetic invents dates.
 }
 
 // ---------------------------------------------------------------------------
@@ -709,10 +804,11 @@ export const thread = query({
     const latest = threads.page[0];
     if (!latest) return { threadId: null };
 
-    // One conversation per day. Continuity lives in the database — profile and
-    // programs are rebuilt into the system prompt on every call, PRs are fetched
-    // on demand by `explain_exercise` — so yesterday's transcript is cost
-    // without value. Returning null makes the
+    // One conversation per day. Continuity lives in the database, not in the
+    // transcript: the profile is rebuilt into the system prompt on every call and
+    // everything else — programs, PRs, cardio, pesées — is fetched on demand by
+    // the read tools. So yesterday's transcript is cost without value. Returning
+    // null makes the
     // client open a fresh thread, and the coach greets you for the new day.
     // ponytail: a chat spanning midnight splits in two. Nobody will notice.
     return { threadId: latest._creationTime >= args.dayStart ? latest._id : null };
@@ -859,10 +955,11 @@ async function stream(
     | { prompt: string; messages?: { role: "user"; content: string }[] }
     | { messages: { role: "user"; content: string }[] },
 ) {
-  const { user, programs, currentProgramId, cardio, weight } = await ctx.runQuery(
-    internal.coach.context,
-    {},
-  );
+  // Only `user` is read: the programs and the cardio the prompt used to inject
+  // are now fetched by `read_programs` / `read_cardio_and_bodyweight`.
+  // ponytail: still one query rather than a narrower new one — it's the reads
+  // this turn already did, and `context` stays callable for older bundles.
+  const { user } = await ctx.runQuery(internal.coach.context, {});
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
   if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);
@@ -872,7 +969,7 @@ async function stream(
     { userId: user._id, threadId },
     {
       ...promptArgs,
-      system: systemPrompt(user, programs, currentProgramId, today, cardio, weight),
+      system: systemPrompt(user, today),
       tools: coachTools(today),
       // A tool call must be followed by the coach's own words, so one step is
       // never enough (the AI SDK default).

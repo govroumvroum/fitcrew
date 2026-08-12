@@ -114,10 +114,15 @@ const SLOT_LABEL = {
  * `today` is closed over rather than asked of the model, and `weekStart` is
  * derived from it here: a plan filed under a Tuesday is invisible to every
  * reader, and a model doing calendar arithmetic is a bug factory.
+ *
+ * Neither date may reach a tool DESCRIPTION, though. Tool definitions are part of
+ * the prefix the provider caches, so a date-stamped description invalidates the
+ * cache every midnight just as surely as a date-stamped system prompt. Inside
+ * `execute` they are invisible to the model, which is where every use below is;
+ * the dates the model needs to WRITE are at the end of the system prompt.
  */
 function chefTools(today: string) {
   const monday = weekStart(today);
-  const sunday = shift(monday, 6);
   const week = { weekStart: monday };
 
   return {
@@ -137,8 +142,78 @@ function chefTools(today: string) {
         }),
     }),
 
+    read_today: createTool({
+      description:
+        "L'état de la journée du user : repas prévus au plan (avec leur verrou), ce qu'il a déjà loggué, les totaux du jour, ce qu'il reste sur ses cibles, et son hydratation. Rien de tout ça n'est dans ton prompt — appelle cet outil avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou avant de proposer un repas pour aujourd'hui.",
+      inputSchema: z.object({}),
+      execute: async (ctx: ToolCtx) => {
+        const { dashboard } = await ctx.runQuery(internal.chef.context, { today });
+        const p = dashboard.profile;
+        if (!p) {
+          return {
+            result: "no_profile" as const,
+            note: "Pas encore de profil nutrition : aucune cible, donc rien de « restant » à annoncer. Déroule le questionnaire et appelle save_nutrition_profile.",
+          };
+        }
+        return {
+          result: "ok" as const,
+          date: today,
+          weekStart: dashboard.weekStart,
+          hasPlanThisWeek: dashboard.hasPlan,
+          plannedMeals: dashboard.todayMeals.map((m) => ({
+            slot: SLOT_LABEL[m.slot],
+            name: m.name,
+            macros: m.macros,
+            prepMinutes: m.prepMinutes,
+            // `regenerate_day` skips locked slots, so the flag has to come back
+            // with the meals or the model proposes into a slot it can't write.
+            locked: m.locked === true,
+          })),
+          loggedMeals: dashboard.log.map((e) => ({
+            slot: SLOT_LABEL[e.slot],
+            name: e.name,
+            quantity: e.quantity ?? null,
+            macros: e.macros,
+          })),
+          // Summed and subtracted server-side on purpose: a model doing this
+          // arithmetic is a known bug class.
+          consumed: dashboard.consumed,
+          remaining: {
+            calories: p.targets.calories - dashboard.consumed.calories,
+            protein: p.targets.protein - dashboard.consumed.protein,
+            carbs: p.targets.carbs - dashboard.consumed.carbs,
+            fat: p.targets.fat - dashboard.consumed.fat,
+          },
+          hydrationMl: dashboard.hydrationMl,
+          hints:
+            "Une liste vide veut dire « rien », pas « je ne sais pas » : ne complète pas de mémoire. Les totaux et le restant sont déjà calculés, ne refais pas les soustractions. Tous ces chiffres sont des estimations.",
+        };
+      },
+    }),
+
+    read_inventory: createTool({
+      description:
+        "Ce que le user a dans son frigo et ses placards. Ce n'est pas dans ton prompt — appelle cet outil avant de proposer de cuisiner avec ce qu'il a, avant suggest_recipes_from_ingredients, et avant de lui dire qu'il lui manque quelque chose.",
+      inputSchema: z.object({}),
+      execute: async (ctx: ToolCtx) => {
+        const { inventory } = await ctx.runQuery(internal.chef.context, { today });
+        if (inventory.length === 0) {
+          return {
+            result: "empty" as const,
+            note: "Inventaire vide — ça veut dire qu'il n'a rien saisi, pas qu'il n'a rien chez lui. Demande-lui, ou propose analyze_fridge.",
+          };
+        }
+        return {
+          result: "found" as const,
+          items: inventory.map((i) => ({ name: i.name, quantity: i.quantity ?? null })),
+          note: "Saisi par le user ou par une photo validée : ça peut être incomplet ou périmé.",
+        };
+      },
+    }),
+
     generate_meal_plan: createTool({
-      description: `Génère et enregistre les repas de la semaine en cours (lundi ${monday} → dimanche ${sunday}). Les dates doivent être dans cette plage. Écrase le plan existant de la semaine.`,
+      description:
+        "Génère et enregistre les repas de la semaine EN COURS. Chaque date doit tomber entre le lundi et le dimanche de cette semaine — les deux sont écrits à la fin de ton system prompt. Écrase le plan existant de la semaine.",
       inputSchema: zGenerateMealPlan,
       execute: async (ctx: ToolCtx, { days }) =>
         await ctx.runMutation(internal.nutrition.savePlan, {
@@ -191,7 +266,9 @@ function chefTools(today: string) {
       description:
         "Enregistre ce que le user a mangé quand ce n'était pas le repas prévu. Pour un produit industriel ou une marque, appelle lookup_food AVANT pour avoir de vrais chiffres.",
       inputSchema: zAddFoodLogEntry.extend({
-        date: z.string().describe(`YYYY-MM-DD. Aujourd'hui = ${today}`),
+        date: z
+          .string()
+          .describe("YYYY-MM-DD. La date d'aujourd'hui est donnée à la fin de ton system prompt"),
       }),
       execute: async (ctx: ToolCtx, { quantity, ...rest }) =>
         await ctx.runMutation(api.nutrition.addLogEntry, {
@@ -205,7 +282,9 @@ function chefTools(today: string) {
       description:
         "« J'ai mangé ce qui était prévu » : recopie le repas du plan dans le journal, tel quel.",
       inputSchema: zLogPlannedMeal.extend({
-        date: z.string().describe(`YYYY-MM-DD. Aujourd'hui = ${today}`),
+        date: z
+          .string()
+          .describe("YYYY-MM-DD. La date d'aujourd'hui est donnée à la fin de ton system prompt"),
       }),
       execute: async (ctx: ToolCtx, { date, slot }) =>
         await ctx.runMutation(api.nutrition.logPlannedMeal, { ...week, date, slot }),
@@ -303,7 +382,7 @@ function chefTools(today: string) {
 
     ask_coach: createTool({
       description:
-        "Consulte le coach sportif quand la réponse dépend VRAIMENT de l'entraînement (quelle séance arrive, son intensité, les muscles travaillés). Jamais pour ce qui est déjà dans ton contexte. Il n'a aucun outil et ne peut pas te reconsulter : une question, une réponse.",
+        "Consulte le coach sportif quand la réponse dépend VRAIMENT de l'entraînement (quelle séance arrive, son intensité, les muscles travaillés). Jamais pour ce que tes propres outils de lecture savent déjà. Il n'a aucun outil et ne peut pas te reconsulter : une question, une réponse.",
       inputSchema: zAskCoach,
       execute: async (ctx: ToolCtx, { question, context: consultContext }) =>
         await ctx.runAction(internal.consult.askCoach, {
@@ -333,17 +412,25 @@ const QUESTIONS = `1. Objectif (perte de poids, maintien, prise de masse)
 
 const GOAL_LABEL = { perte: "perte de poids", maintien: "maintien", prise: "prise de masse" };
 
-function systemPrompt(
-  user: Doc<"users">,
-  dashboard: Dashboard,
-  inventory: Doc<"inventory">[],
-  today: string,
-) {
-  const p = dashboard.profile;
+/**
+ * The volatile blocks — today's planned meals, today's log, hydration, the fridge
+ * — left this string for `read_today` / `read_inventory`, because a cache hit
+ * needs a byte-identical prefix and those changed on every logged bite.
+ *
+ * ALLERGIES, EXCLUDED FOODS and the daily targets stay INJECTED, deliberately.
+ * The hard-constraint rule below is only enforceable because the lists are right
+ * here; behind a tool, honouring an allergy would depend on the model remembering
+ * to call it. That is a health risk, not a token trade — and both lists are tiny
+ * and near-immutable, so they cost the cache nothing. Do not move them.
+ *
+ * The dates are the only dynamic values left and they sit at the very END (see
+ * the comment above the return).
+ */
+function systemPrompt(user: Doc<"users">, profile: Doc<"nutritionProfiles"> | null, today: string) {
+  const p = profile;
+  const monday = weekStart(today);
 
   return `Tu es « Le Chef », l'assistant nutrition de ${user.name} dans l'app FitCrew. Tu parles français, tu tutoies, tu es bref : c'est une conversation sur un téléphone, pas un article de blog. 2-6 phrases par message, sauf quand tu présentes un menu.
-
-Nous sommes le ${today}. La semaine en cours commence le lundi ${dashboard.weekStart}.
 
 ${
   p
@@ -368,17 +455,13 @@ ${QUESTIONS}
 - Une fois validé, appelle \`save_nutrition_profile\`, annonce ses cibles en précisant que ce sont des estimations, puis propose de générer sa semaine de repas.`
 }
 
-PLAN DE LA SEMAINE : ${dashboard.hasPlan ? "il en existe un." : "aucun pour cette semaine."}
-REPAS PRÉVUS AUJOURD'HUI :
-${dashboard.todayMeals.map((m) => `- ${SLOT_LABEL[m.slot]} : ${m.name} — ~${m.macros.calories} kcal, ${m.macros.protein} g P / ${m.macros.carbs} g G / ${m.macros.fat} g L, ${m.prepMinutes} min${m.locked ? " [VERROUILLÉ par le user]" : ""}`).join("\n") || "(rien de prévu)"}
-
-DÉJÀ MANGÉ AUJOURD'HUI :
-${dashboard.log.map((e) => `- ${SLOT_LABEL[e.slot]} : ${e.name}${e.quantity ? ` (${e.quantity})` : ""} — ~${e.macros.calories} kcal, ${e.macros.protein} g P`).join("\n") || "(rien de loggé)"}
-Total du jour : ${dashboard.consumed.calories} kcal, ${dashboard.consumed.protein} g P / ${dashboard.consumed.carbs} g G / ${dashboard.consumed.fat} g L${p ? ` — reste ${p.targets.calories - dashboard.consumed.calories} kcal sur la cible` : ""}.
-Hydratation : ${dashboard.hydrationMl} ml aujourd'hui.
-
-FRIGO / PLACARDS :
-${inventory.map((i) => `- ${i.name}${i.quantity ? ` (${i.quantity})` : ""}`).join("\n") || "(inventaire vide)"}
+CE PROMPT NE CONTIENT PAS SA JOURNÉE — TU VAS LA CHERCHER
+Ses repas prévus, ce qu'il a déjà mangé, ses totaux du jour, son hydratation et son frigo ne sont PAS écrits ici. Tu y as accès, mais par outil, et un outil qu'on n'appelle pas ne renvoie rien.
+- \`read_today\` : repas prévus (avec leur verrou), journal du jour, totaux, ce qu'il reste sur ses cibles, hydratation, et s'il existe un plan cette semaine. Appelle-le avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou de proposer un repas pour aujourd'hui.
+- \`read_inventory\` : son frigo et ses placards. Appelle-le avant de proposer de cuisiner avec ce qu'il a.
+- Les totaux et le restant arrivent DÉJÀ calculés : ne refais pas les additions ni les soustractions.
+- Ne dis JAMAIS que tu n'as pas accès à sa journée, et n'invente ni un repas prévu, ni un chiffre du journal : tout ça se lit.
+- Ce que tu as déjà lu dans cette conversation reste valable : n'appelle pas deux fois le même outil pour la même chose. Mais après une écriture (\`add_food_log_entry\`, \`log_planned_meal\`, \`generate_meal_plan\`, \`replace_meal\`, \`move_meal\`, \`regenerate_day\`, \`update_inventory\`) ou s'il dit avoir validé quelque chose dans l'app, relis avant de commenter.
 
 RÈGLES NON NÉGOCIABLES
 - LES ALLERGIES ET LES ALIMENTS EXCLUS SONT DES CONTRAINTES DURES. Une proposition qui en contient un est un bug, pas un choix de style. Vérifie chaque ingrédient de chaque repas avant de le proposer, y compris les ingrédients cachés (le beurre contient du lactose, la sauce soja contient du blé).
@@ -387,7 +470,7 @@ RÈGLES NON NÉGOCIABLES
 - Tu ne fixes jamais un objectif de poids ni un déficit agressif de toi-même. Les cibles viennent du calcul ci-dessus.
 
 RÈGLES PLAN (quand tu appelles generate_meal_plan)
-- Les dates sont celles de la semaine en cours, du lundi ${dashboard.weekStart} au dimanche ${shift(dashboard.weekStart, 6)}. Ne calcule aucune autre semaine.
+- Les dates sont celles de la semaine en cours, entre le lundi et le dimanche donnés dans la section DATES en fin de prompt. Ne calcule aucune autre semaine.
 - ${p ? `${p.mealsPerDay} repas par jour` : "Le nombre de repas de son profil"}, et le total journalier tourne autour de ses cibles. Pas au kcal près : c'est une estimation.
 - Respecte le temps de cuisine et le budget. Réutilise les mêmes ingrédients sur plusieurs repas — c'est moins cher et ça évite le gaspillage. Utilise \`mealPrep\` quand un plat se prépare la veille ou en double.
 - Sers son entraînement : plus de glucides autour des séances, protéines réparties sur la journée.
@@ -395,12 +478,21 @@ RÈGLES PLAN (quand tu appelles generate_meal_plan)
 
 AUTRES OUTILS
 - \`lookup_food\` AVANT d'estimer un produit industriel, une marque ou un code-barres. Préfère toujours ces chiffres à ton estimation, et dis qu'ils viennent d'Open Food Facts. Jamais pour un plat maison : il n'y est pas. Si l'outil renvoie une erreur ou zéro résultat, estime et dis que c'est une estimation.
-- \`replace_meal\` dès qu'il n'aime pas un repas ou n'a pas les ingrédients. \`move_meal\` pour un imprévu d'agenda. \`regenerate_day\` pour refaire une journée entière — les repas verrouillés restent, ne propose rien pour leurs créneaux.
+- \`replace_meal\` dès qu'il n'aime pas un repas ou n'a pas les ingrédients. \`move_meal\` pour un imprévu d'agenda. \`regenerate_day\` pour refaire une journée entière — les repas verrouillés restent, ne propose rien pour leurs créneaux. Pour aujourd'hui, \`read_today\` te dit lesquels sont verrouillés ; pour un autre jour, tu ne le sais pas, alors demande-lui avant de tout refaire.
 - \`add_food_log_entry\` quand il te raconte ce qu'il a mangé hors plan. \`log_planned_meal\` quand il a mangé ce qui était prévu.
-- \`shopping_list\` pour ses courses, \`update_inventory\` pour ce qu'il a en stock, \`suggest_recipes_from_ingredients\` pour cuisiner avec ce qui reste.
+- \`shopping_list\` pour ses courses, \`read_inventory\` pour voir ce qu'il a en stock, \`update_inventory\` pour le mettre à jour, \`suggest_recipes_from_ingredients\` pour cuisiner avec ce qui reste (lis l'inventaire d'abord).
 - Une PHOTO est jointe à son message : choisis l'outil selon ce qu'il décrit — une assiette ou un plat → \`analyze_plate\` ; un frigo ou un placard → \`analyze_fridge\` ; une étiquette ou un emballage → \`read_nutrition_label\` ; des courses ou un ticket → \`analyze_groceries\`. Si tu ne peux pas trancher, demande-lui ce que c'est plutôt que de deviner.
 - AUCUNE analyse de photo n'est enregistrée par toi. Dis-lui juste de vérifier et valider la fiche affichée. Si l'outil renvoie une liste vide, NE LUI PARLE PAS de fiche à valider : il n'y en a aucune à l'écran. Dis ce que tu vois, ce qui manque, et propose une meilleure photo ou les chiffres à la main.
-- \`ask_coach\` seulement quand la réponse dépend vraiment de l'entraînement (quelle séance arrive, son intensité). Jamais pour ce qui est déjà écrit au-dessus. Une seule question à la fois, avec le minimum de contexte : il ne voit pas votre conversation.`;
+- \`ask_coach\` seulement quand la réponse dépend vraiment de l'entraînement (quelle séance arrive, son intensité). Jamais pour son profil, qui est ci-dessus, ni pour sa journée ou son frigo, que \`read_today\` et \`read_inventory\` te donnent. Une seule question à la fois, avec le minimum de contexte : il ne voit pas votre conversation.
+
+DATES
+Nous sommes le ${today}. La semaine en cours va du lundi ${monday} au dimanche ${shift(monday, 6)}.`;
+  // ^ Deliberately the LAST lines of the prompt. They're the only values that
+  // change from one turn to the next, and the provider's prompt cache matches on
+  // a prefix: anything after the first differing byte is refused a cache hit. At
+  // the end that costs two uncached lines instead of the whole prompt. They can't
+  // leave the prompt entirely — a model doing calendar arithmetic is a bug
+  // factory, and a plan filed under the wrong week is invisible to every reader.
 }
 
 // ---------------------------------------------------------------------------
@@ -464,9 +556,10 @@ export const thread = query({
     if (!latest) return { threadId: null };
 
     // One conversation per day, same reasoning as the coach: the chef's real
-    // state — profile, targets, this week's plan, today's log — is rebuilt into
-    // the system prompt on every call, so yesterday's transcript is cost without
-    // value.
+    // state lives in the database, not in the transcript — profile and targets are
+    // rebuilt into the system prompt on every call, and this week's plan, today's
+    // log and the fridge are fetched on demand by `read_today` / `read_inventory`.
+    // So yesterday's transcript is cost without value.
     return { threadId: latest._creationTime >= args.dayStart ? latest._id : null };
   },
 });
@@ -615,7 +708,11 @@ async function stream(
     | { prompt: string; messages?: { role: "user"; content: string }[] }
     | { messages: { role: "user"; content: string }[] },
 ) {
-  const { user, dashboard, inventory } = await ctx.runQuery(internal.chef.context, { today });
+  // Only the user and the profile are read: today's meals, the log, hydration and
+  // the fridge are now fetched by `read_today` / `read_inventory`.
+  // ponytail: still the one existing query rather than a narrower new one — these
+  // are reads the turn already did, and `context` stays callable for older bundles.
+  const { user, dashboard } = await ctx.runQuery(internal.chef.context, { today });
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
   if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);
@@ -625,7 +722,7 @@ async function stream(
     { userId: user._id, threadId },
     {
       ...promptArgs,
-      system: systemPrompt(user, dashboard, inventory, today),
+      system: systemPrompt(user, dashboard.profile, today),
       tools: chefTools(today),
       // A tool call must be followed by the chef's own words, so one step is
       // never enough (the AI SDK default).

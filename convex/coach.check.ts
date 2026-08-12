@@ -1,6 +1,9 @@
-/** Self-check for `lookupHistory` in convex/coach.ts. Run: `bun convex/coach.check.ts` */
+/**
+ * Self-check for the pure selection in convex/coach.ts — `lookupHistory` and
+ * `activeLineages`. Run: `bun convex/coach.check.ts`
+ */
 import assert from "node:assert/strict";
-import { lookupHistory } from "./coach";
+import { activeLineages, lookupHistory } from "./coach";
 
 type Status = "active" | "archived" | "completed";
 let t = 0;
@@ -147,4 +150,23 @@ assert.equal(r.result, "not_found");
 r = lookupHistory(rows, {});
 assert.equal(r.result, "ambiguous");
 
-console.log("convex/coach.ts lookupHistory ok");
+// ---------------------------------------------------------------------------
+// activeLineages — what `read_programs` renders, now that the prompt doesn't.
+// ---------------------------------------------------------------------------
+
+// One row per lineage, latest version only, archived and completed dropped. The
+// legacy row (no status) counts as active — that's the `?? "active"` contract.
+const active = activeLineages(rows);
+assert.deepEqual(
+  active.map((p) => `${p.name} v${p.version}`),
+  ["Programme historique v1", "Full Body 3 jours v3"],
+);
+
+// An empty lineage list is an empty result, never a fallback to "everything":
+// `read_programs` says "aucun programme" and the coach must not invent one.
+assert.deepEqual(activeLineages([]), []);
+
+// Every row archived: still empty, and in particular NOT the archived rows.
+assert.deepEqual(activeLineages(boxe), []);
+
+console.log("convex/coach.ts lookupHistory + activeLineages ok");
