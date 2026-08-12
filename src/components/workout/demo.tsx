@@ -57,8 +57,8 @@ export function ExerciseDemo({ name, gifUrl }: { name: string; gifUrl: string })
 
   return (
     <Sheet>
-      <SheetTrigger asChild>
-        {reduce ? (
+      <SheetTrigger
+        render={reduce ? (
           <Button
             variant="outline"
             className="size-11 shrink-0 active:scale-[0.96] [&_svg]:size-4"
@@ -92,7 +92,7 @@ export function ExerciseDemo({ name, gifUrl }: { name: string; gifUrl: string })
             />
           </Button>
         )}
-      </SheetTrigger>
+      />
       <SheetContent side="bottom" className="gap-3 rounded-t-xl p-4">
         <SheetHeader className="p-0 pr-10">
           <SheetTitle>{name}</SheetTitle>
