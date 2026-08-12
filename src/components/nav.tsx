@@ -137,7 +137,22 @@ export function TabBar() {
       <div className="mx-auto flex w-full max-w-md">
         {TABS.map((tab) =>
           isGroup(tab) ? (
-            <TabGroup key={tab.label} tab={tab} pathname={pathname} />
+            // Keyed by the route, so a route change REMOUNTS the group and its
+            // `open` starts false again. React's own answer to "reset state when
+            // something changes", and here it's the only one that both closes the
+            // drawer and forgets it was open.
+            //
+            // Three cheaper-looking options are all wrong. A bare boolean never
+            // closes: this bar never unmounts, because cacheComponents keeps
+            // routes under <Activity>, hidden rather than destroyed. An effect
+            // (`setOpen(false)` on pathname) is rejected by the React Compiler —
+            // EffectSetState, cascading renders. And deriving `open` from the
+            // route it was opened on closes but never forgets: Base UI's
+            // onOpenChange doesn't fire when a controlled `open` flips, so
+            // openedOn kept a stale route and coming back to it — browser
+            // forward, or any of the three « parler au coach » deep links —
+            // popped the drawer open over the new page, locking scroll.
+            <TabGroup key={`${tab.label}:${pathname}`} tab={tab} pathname={pathname} />
           ) : (
             <Link
               key={tab.href}
@@ -161,9 +176,9 @@ export function TabBar() {
  * popup exists — there's no href, so those are the whole accessible story, and
  * the label is its accessible name (the icon is aria-hidden).
  *
- * Controlled `open` on purpose — see the state below for why a boolean wasn't
- * enough. thread-sidebar.tsx has the same problem and solves it imperatively with
- * setOpenMobile(false) after picking a thread.
+ * `open` is local state, kept honest by the `key` its parent gives it — see
+ * TabBar. thread-sidebar.tsx has the same "the nav never unmounts" problem and
+ * solves it imperatively, with setOpenMobile(false) after picking a thread.
  */
 function TabGroup({
   tab,
@@ -177,22 +192,13 @@ function TabGroup({
     tab.items.map((item) => item.href),
   );
 
-  // Which route the drawer was opened on, rather than a boolean. Any route change
-  // therefore closes it by derivation — no effect, so no setState-in-effect and no
-  // cascading render (the React Compiler rejects that, rightly).
-  //
-  // It has to close on more than its own links being tapped: Android's hardware
-  // back, iOS swipe-back, and a deep link from behind it (nutrition's « Changer »
-  // goes to /chef) all change the route without passing through them. And `open`
-  // could not just live in local state — the nav never unmounts, since
-  // cacheComponents keeps routes under <Activity>, hidden rather than destroyed.
-  // The onClick below still earns its place: tapping a link to the route you are
-  // already on changes no pathname, so nothing would close it.
-  const [openedOn, setOpenedOn] = useState<string | null>(null);
-  const open = openedOn === pathname;
+  // A plain boolean, reset by the `key` on this component in TabBar — see there.
+  // The onClick below is still needed: tapping a link to the route you are already
+  // on changes no pathname, so nothing remounts and nothing would close it.
+  const [open, setOpen] = useState(false);
 
   return (
-    <Drawer open={open} onOpenChange={(next) => setOpenedOn(next ? pathname : null)}>
+    <Drawer open={open} onOpenChange={setOpen}>
       <DrawerTrigger className={cn(TAB, active ? ACTIVE : "text-muted-foreground")}>
         <tab.Icon className="size-5" aria-hidden />
         {tab.label}
@@ -206,7 +212,7 @@ function TabGroup({
             <Link
               key={href}
               href={href}
-              onClick={() => setOpenedOn(null)}
+              onClick={() => setOpen(false)}
               aria-current={isActive(pathname, [href]) ? "page" : undefined}
               className={cn(
                 "flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm transition-colors hover:bg-accent hover:text-accent-foreground",

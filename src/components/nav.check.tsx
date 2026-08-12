@@ -20,20 +20,45 @@ import { isActive, RAIL_TABS, TABS } from "./nav";
 import { Drawer, DrawerTrigger } from "./ui/drawer";
 
 /**
- * --- The drawer closes on ANY route change, not just its own links.
+ * --- A route change closes the drawer AND makes it forget.
  *
- * `open` is derived as `openedOn === pathname` rather than held as a boolean,
- * which is what makes Android back, iOS swipe-back and a deep link tapped from
- * behind the drawer close it too — none of those run the links' onClick, and the
- * nav never unmounts to reset a boolean for us. Mirrored here as pure logic
- * because the component's state isn't reachable without a renderer.
+ * Modelled as a walk over a session rather than as one predicate, because the bug
+ * this replaces was invisible to a predicate. The first version of this check
+ * mirrored `open = openedOn === pathname` — which is the implementation, so it
+ * asserted the implementation was right, passed the one-way close, and was
+ * structurally blind to the return trip that broke it.
+ *
+ * The component holds a boolean and is keyed by the pathname, so a route change
+ * remounts it and the boolean starts false again. That is what this walks: `nav`
+ * to a route (remount → closed), `tap` the trigger (open).
  */
-const drawerOpen = (openedOn: string | null, pathname: string) => openedOn === pathname;
-assert.equal(drawerOpen("/coach", "/coach"), true, "opened here, still here → open");
-assert.equal(drawerOpen("/coach", "/chef"), false, "route changed → closed, whatever caused it");
-assert.equal(drawerOpen(null, "/coach"), false, "never opened → closed");
-// The literal regression fouine found: a deep link away from the page it opened on.
-assert.equal(drawerOpen("/nutrition", "/chef"), false, "« Changer » → /chef must not leave it up");
+type Session = { open: boolean; route: string };
+const nav = (s: Session, route: string): Session =>
+  route === s.route ? s : { route, open: false }; // remount resets `open`
+const tap = (s: Session): Session => ({ ...s, open: !s.open });
+
+const at = (route: string): Session => ({ open: false, route });
+
+assert.equal(tap(at("/coach")).open, true, "tapping the trigger opens it");
+assert.equal(nav(tap(at("/coach")), "/chef").open, false, "any route change closes it");
+
+// The regression fouine found on the second pass: closing is not forgetting.
+// Open on /coach, leave (Android back), then come back — via browser forward, or
+// any of the three existing « parler au coach » deep links. It must NOT reopen.
+const roundTrip = nav(nav(tap(at("/coach")), "/programme"), "/coach");
+assert.equal(roundTrip.open, false, "revenir sur la route d'ouverture ne doit PAS rouvrir");
+
+// Tapping a link to the route you are already on changes no route, so the remount
+// never happens — that case is the onClick's, and it is why it stays.
+assert.equal(nav(tap(at("/coach")), "/coach").open, true, "same route → no remount, onClick closes");
+
+// The key is what makes all of the above true; assert it is really derived from
+// the pathname, since the walk above is only a model of it.
+assert.match(
+  readFileSync(new URL("./nav.tsx", import.meta.url), "utf8"),
+  /<TabGroup\s+key=\{`\$\{tab\.label\}:\$\{pathname\}`\}/,
+  "TabGroup must be keyed by the pathname, or nothing resets `open`",
+);
 
 // --- Six entries in the bar, two of them groups; eight flat links in the rail.
 assert.equal(TABS.length, 6, `TABS has ${TABS.length} entries`);
