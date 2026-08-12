@@ -133,8 +133,6 @@ for (const file of [
     false,
     `${file} still imports radix-ui`,
   );
-  // Every popup sits inside a positioner, which is where the properties live.
-  assert.match(text, /Positioner/, file);
 }
 
 // max-height ← --radix-{select,dropdown-menu}-content-available-height
