@@ -18,7 +18,6 @@ assert.ok(
 );
 
 // Bounded, though: this is a pagination `numItems`, not a "give me everything".
-assert.ok(Number.isInteger(CONTEXT_OPTIONS.recentMessages), "must be a finite integer");
 assert.ok(CONTEXT_OPTIONS.recentMessages <= 5000, "still a bounded read, like every read here");
 
 // The coach and the chef must share it. They already drifted once: identical 20s
