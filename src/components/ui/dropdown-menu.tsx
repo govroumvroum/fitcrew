@@ -132,7 +132,11 @@ function DropdownMenuItem({
       onClick={(event) => {
         onClick?.(event)
         onSelect?.(event.nativeEvent)
-        if (event.nativeEvent.defaultPrevented) {
+        // Gated on `onSelect` existing, so this reads a preventDefault() made by
+        // THAT handler. Ungated, a consumer's own onClick calling preventDefault
+        // for an unrelated reason (stopping a submit, say) would keep the menu
+        // open, where Radix closed it.
+        if (onSelect && event.nativeEvent.defaultPrevented) {
           event.preventBaseUIHandler()
         }
       }}

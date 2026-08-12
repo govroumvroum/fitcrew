@@ -67,9 +67,23 @@ function TooltipTrigger({
  * `instant-open` — so those three classes were what actually animated a hover
  * tooltip in, and `data-open:` matched nothing. Base UI writes `data-open`, so
  * the identical `data-open:animate-in fade-in-0 zoom-in-95` already on the
- * string now does that job. `data-instant:animate-none` restores the other half
- * of Radix's split: no animation when the tooltip appears without waiting
- * (keyboard focus, or a dismiss), which was `instant-open`.
+ * string now does that job.
+ *
+ * `data-instant:animate-none` covers PART of what `instant-open` did, and it is
+ * worth being exact about which part, because the obvious reading is wrong.
+ * Base UI sets `instantType` to `'focus'` on a keyboard-focus open and
+ * `'dismiss'` on an Escape or trigger-press close, and to **undefined for every
+ * hover open, whatever the delay**. So:
+ *
+ * - a keyboard-focus open is instant, as before;
+ * - a `delay={0}` HOVER open now fades in over 100ms where Radix animated
+ *   nothing (`ai-elements/message.tsx` sets `TooltipProvider delay={0}`, so the
+ *   chat tooltips are the live case). Accepted: a 100ms fade on a tooltip that
+ *   was already appearing instantly is a nicer default than a hard cut, and
+ *   chasing exact parity would mean re-deriving "was there a delay" in CSS,
+ *   which the attribute simply doesn't encode;
+ * - Escape and trigger-press closes skip the exit animation, where Radix
+ *   animated every close. Same trade, other direction.
  */
 function TooltipContent({
   className,
