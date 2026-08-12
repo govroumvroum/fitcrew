@@ -66,6 +66,12 @@ const interop = renderToStaticMarkup(
 );
 
 assert.match(interop, /data-slot="sidebar-menu-button"[^>]*>Ma séance</, interop);
+// Exactly two buttons: the menu one and `SidebarMenuButton`. This is the only
+// assertion here that catches a regressed `children: undefined` guard — Base UI
+// would then merge the trigger's props onto the OUTER element and render the
+// child again inside, so every attribute assertion below still passes with a
+// nested <button> sitting in the markup.
+assert.equal(interop.match(/<button/g)?.length, 2, interop);
 // The menu's own trigger props landed on our button. `data-slot` becomes
 // `dropdown-menu-trigger`, because `{...props}` is spread last — that was already
 // true with `Slot`, and `data-sidebar` is the attribute the CSS actually keys on.
