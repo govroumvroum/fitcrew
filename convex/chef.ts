@@ -40,7 +40,7 @@ import {
   zUpdateInventory,
 } from "./chefToolSchemas";
 import { foodByBarcode, isBarcode, searchFood } from "./foodFacts";
-import { languageModel } from "./model";
+import { CONTEXT_OPTIONS, languageModel } from "./model";
 import type { Macros, PlannedMeal } from "./nutrition";
 import { shift, weekStart } from "./progress";
 import { KICKOFF, CHEF_ATTACHMENTS, isSentinel } from "./sentinels";
@@ -636,11 +636,7 @@ async function stream(
     },
     {
       saveStreamDeltas: true,
-      // The component default is 100 recent messages, re-sent on every turn.
-      // 20 is plenty: the chef's actual state — profile, targets, this week's
-      // plan, today's log — lives in Convex and is rebuilt into the system prompt
-      // each call, so old transcript is chatter, not memory.
-      contextOptions: { recentMessages: 20 },
+      contextOptions: CONTEXT_OPTIONS,
     },
   );
   await result.consumeStream();
