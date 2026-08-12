@@ -7,8 +7,8 @@ import {
   ClipboardListIcon,
   DumbbellIcon,
   HouseIcon,
-  MegaphoneIcon,
   MessageCircleIcon,
+  TargetIcon,
   TrophyIcon,
   UtensilsCrossedIcon,
 } from "lucide-react";
@@ -60,10 +60,11 @@ const TABS: Tab[] = [
   { href: "/", label: "Accueil", Icon: HouseIcon },
   { href: "/seance", label: "Séance", Icon: DumbbellIcon },
   {
-    // MegaphoneIcon because a whistle isn't in lucide and the obvious
-    // MessageCircleIcon is already the group's own "Discuter" row.
+    // Lucide has no whistle. TargetIcon for the objectif the coach writes the
+    // plan against — MessageCircleIcon is the group's own "Discuter" row,
+    // DumbbellIcon is Séance, TrophyIcon is Crew.
     label: "Le Coach",
-    Icon: MegaphoneIcon,
+    Icon: TargetIcon,
     items: [
       {
         href: "/programme",
@@ -160,11 +161,9 @@ export function TabBar() {
  * popup exists — there's no href, so those are the whole accessible story, and
  * the label is its accessible name (the icon is aria-hidden).
  *
- * Controlled `open` on purpose. The nav never unmounts — cacheComponents keeps
- * routes under <Activity>, hidden rather than destroyed, and this bar is
- * persistent by construction — so clicking a link inside the drawer navigates
- * *behind* it unless we close it by hand. Same reflex as thread-sidebar.tsx,
- * which calls setOpenMobile(false) after picking a thread.
+ * Controlled `open` on purpose — see the state below for why a boolean wasn't
+ * enough. thread-sidebar.tsx has the same problem and solves it imperatively with
+ * setOpenMobile(false) after picking a thread.
  */
 function TabGroup({
   tab,
@@ -173,14 +172,27 @@ function TabGroup({
   tab: Extract<Tab, { items: Destination[] }>;
   pathname: string;
 }) {
-  const [open, setOpen] = useState(false);
   const active = isActive(
     pathname,
     tab.items.map((item) => item.href),
   );
 
+  // Which route the drawer was opened on, rather than a boolean. Any route change
+  // therefore closes it by derivation — no effect, so no setState-in-effect and no
+  // cascading render (the React Compiler rejects that, rightly).
+  //
+  // It has to close on more than its own links being tapped: Android's hardware
+  // back, iOS swipe-back, and a deep link from behind it (nutrition's « Changer »
+  // goes to /chef) all change the route without passing through them. And `open`
+  // could not just live in local state — the nav never unmounts, since
+  // cacheComponents keeps routes under <Activity>, hidden rather than destroyed.
+  // The onClick below still earns its place: tapping a link to the route you are
+  // already on changes no pathname, so nothing would close it.
+  const [openedOn, setOpenedOn] = useState<string | null>(null);
+  const open = openedOn === pathname;
+
   return (
-    <Drawer open={open} onOpenChange={setOpen}>
+    <Drawer open={open} onOpenChange={(next) => setOpenedOn(next ? pathname : null)}>
       <DrawerTrigger className={cn(TAB, active ? ACTIVE : "text-muted-foreground")}>
         <tab.Icon className="size-5" aria-hidden />
         {tab.label}
@@ -194,7 +206,7 @@ function TabGroup({
             <Link
               key={href}
               href={href}
-              onClick={() => setOpen(false)}
+              onClick={() => setOpenedOn(null)}
               aria-current={isActive(pathname, [href]) ? "page" : undefined}
               className={cn(
                 "flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm transition-colors hover:bg-accent hover:text-accent-foreground",

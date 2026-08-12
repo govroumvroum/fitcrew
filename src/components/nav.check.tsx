@@ -19,6 +19,22 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { isActive, RAIL_TABS, TABS } from "./nav";
 import { Drawer, DrawerTrigger } from "./ui/drawer";
 
+/**
+ * --- The drawer closes on ANY route change, not just its own links.
+ *
+ * `open` is derived as `openedOn === pathname` rather than held as a boolean,
+ * which is what makes Android back, iOS swipe-back and a deep link tapped from
+ * behind the drawer close it too — none of those run the links' onClick, and the
+ * nav never unmounts to reset a boolean for us. Mirrored here as pure logic
+ * because the component's state isn't reachable without a renderer.
+ */
+const drawerOpen = (openedOn: string | null, pathname: string) => openedOn === pathname;
+assert.equal(drawerOpen("/coach", "/coach"), true, "opened here, still here → open");
+assert.equal(drawerOpen("/coach", "/chef"), false, "route changed → closed, whatever caused it");
+assert.equal(drawerOpen(null, "/coach"), false, "never opened → closed");
+// The literal regression fouine found: a deep link away from the page it opened on.
+assert.equal(drawerOpen("/nutrition", "/chef"), false, "« Changer » → /chef must not leave it up");
+
 // --- Six entries in the bar, two of them groups; eight flat links in the rail.
 assert.equal(TABS.length, 6, `TABS has ${TABS.length} entries`);
 const groups = TABS.filter((tab) => "items" in tab);
@@ -72,7 +88,9 @@ const routes = ["/"].concat(
     .filter((e) => e.isDirectory() && !OUTSIDE_NAV.has(e.name))
     .map((e) => `/${e.name}`),
 );
-assert.equal(routes.length, 8, routes.join(" "));
+// ponytail: no `routes.length === 8`. The loop below already fails on any route
+// that isn't covered, which is the guarantee — a count is a second, vaguer
+// failure for the same cause, and one more number to bump by hand.
 for (const route of routes) {
   const lit = TABS.filter((tab) => isActive(route, hrefsOf(tab)));
   assert.equal(lit.length, 1, `${route} lights ${lit.length} tabs, want 1`);
