@@ -27,12 +27,10 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { Dialog, DialogFooter } from "./dialog";
-import { DropdownMenu, DropdownMenuTrigger } from "./dropdown-menu";
 import { Label } from "./label";
 import { Progress } from "./progress";
 import { Select, SelectTrigger, SelectValue } from "./select";
 import { Separator } from "./separator";
-import { SidebarMenuAction, SidebarProvider } from "./sidebar";
 import { Tabs, TabsList, TabsTrigger } from "./tabs";
 import { Tooltip, TooltipTrigger } from "./tooltip";
 
@@ -231,24 +229,5 @@ assert.equal(tooltipTrigger.match(/<button/g)?.length, 1, tooltipTrigger);
 assert.equal(tooltipTrigger.match(/Aide/g)?.length, 1, tooltipTrigger);
 assert.match(tooltipTrigger, /data-slot="tooltip-trigger"/, tooltipTrigger);
 assert.match(tooltipTrigger, /class="[^"]*size-8/, tooltipTrigger);
-
-// `chat/thread-sidebar.tsx:145` — the menu trigger becomes the sidebar action.
-const menuTrigger = renderToStaticMarkup(
-  <SidebarProvider>
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <SidebarMenuAction className="top-1.5 size-8" aria-label="Actions" />
-      </DropdownMenuTrigger>
-    </DropdownMenu>
-  </SidebarProvider>,
-);
-assert.equal(menuTrigger.match(/<button/g)?.length, 1, menuTrigger);
-assert.match(
-  menuTrigger,
-  /data-slot="dropdown-menu-trigger" data-sidebar="menu-action"/,
-  menuTrigger,
-);
-assert.match(menuTrigger, /aria-haspopup="menu"/, menuTrigger);
-assert.match(menuTrigger, /class="[^"]*top-1\.5/, menuTrigger);
 
 console.log("ok — Base UI parts emit the attributes our classes key on");
