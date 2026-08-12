@@ -152,6 +152,15 @@ export function TabBar() {
             // openedOn kept a stale route and coming back to it — browser
             // forward, or any of the three « parler au coach » deep links —
             // popped the drawer open over the new page, locking scroll.
+            //
+            // Known and accepted cost: the remount destroys the popup instantly,
+            // so the drawer SNAPS away on navigation instead of sliding down. The
+            // exit machinery in drawer.tsx (`--closed-transform`, the
+            // swipe-scaled duration) now only plays on backdrop tap, Escape and
+            // drag-dismiss. That's deliberate — snapping away from a page you are
+            // leaving reads fine, and it is the price of having no window in which
+            // a fast return could reopen the drawer. Don't "fix" the snap by
+            // reintroducing a delay: that window is the bug this replaced.
             <TabGroup key={`${tab.label}:${pathname}`} tab={tab} pathname={pathname} />
           ) : (
             <Link

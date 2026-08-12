@@ -48,9 +48,17 @@ assert.equal(nav(tap(at("/coach")), "/chef").open, false, "any route change clos
 const roundTrip = nav(nav(tap(at("/coach")), "/programme"), "/coach");
 assert.equal(roundTrip.open, false, "revenir sur la route d'ouverture ne doit PAS rouvrir");
 
-// Tapping a link to the route you are already on changes no route, so the remount
-// never happens — that case is the onClick's, and it is why it stays.
-assert.equal(nav(tap(at("/coach")), "/coach").open, true, "same route → no remount, onClick closes");
+// Tapping a link to the route you are already on changes no route, so no remount
+// happens and the walk above cannot close it — that case has exactly one
+// mechanism, the link's onClick, so it gets pinned to the source like the key
+// does. Asserting `nav(…, sameRoute).open === true` instead would only restate
+// this model's own definition: it would keep passing with the onClick deleted,
+// while the drawer stayed open over the page in the app.
+assert.match(
+  readFileSync(new URL("./nav.tsx", import.meta.url), "utf8"),
+  /onClick=\{\(\) => setOpen\(false\)\}/,
+  "the drawer links must close it themselves — a same-route tap remounts nothing",
+);
 
 // The key is what makes all of the above true; assert it is really derived from
 // the pathname, since the walk above is only a model of it.
