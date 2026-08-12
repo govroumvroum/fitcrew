@@ -436,9 +436,10 @@ export const programHistory = internalQuery({
     if (list) {
       const active = activeLineages(rows);
       return {
+        // ponytail: no `count`/`truncated` fields. `activeProgramsNote` already
+        // says both numbers in prose, which is the channel the model actually
+        // reads — a field it has no instruction to check is dead output.
         result: "active_programs" as const,
-        count: active.length,
-        truncated: active.length > ACTIVE_RENDER_LIMIT,
         programs: active.slice(0, ACTIVE_RENDER_LIMIT).map((p) => ({
           lineageId: lineageOf(p),
           name: p.name,
