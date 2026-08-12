@@ -179,4 +179,35 @@ assert.equal(
   "plus d'interdits que vérifiables doit refuser, pas ignorer les derniers",
 );
 
+// Fouine on #76: the count check used to run AFTER the needles were built, so a
+// list of 41 where the first 40 are blank tokenised to nothing, hit the
+// empty-needle exit, and reported "clear" — the exact case the bound exists for.
+const blankThenReal = [...Array.from({ length: 40 }, () => "  "), "oeuf"];
+assert.equal(
+  forbiddenHits([dish("Omelette", ["oeufs"])], blankThenReal).length,
+  1,
+  "40 entrées vides puis un vrai interdit doit refuser, pas passer par la sortie 'aucun interdit'",
+);
+
+// Same fail-open one level down: `foodTokens` used to slice long names, so an
+// allergen past the cap was reported clear. Now an unverifiable name refuses.
+const buried = `${"x ".repeat(70)}oeuf`; // > 120 chars, allergen at the end
+assert.equal(
+  forbiddenHits([dish("Mystère", [buried])], ["oeuf"]).length,
+  1,
+  "un nom trop long doit refuser plutôt que d'être scanné en partie",
+);
+assert.match(forbiddenHits([dish("Mystère", [buried])], ["oeuf"])[0].forbidden, /trop long/);
+// An unverifiable FORBIDDEN entry refuses too — same reasoning, other side.
+assert.equal(forbiddenHits([dish("Poulet riz", ["poulet"])], [buried]).length, 1);
+
+// A normal long-ish name is still scanned, not refused: the cap is for absurd
+// input, not for "filet de poulet fermier élevé en plein air label rouge".
+assert.deepEqual(
+  hitNames([dish("Plat", ["filet de poulet fermier élevé en plein air label rouge des Landes"])], [
+    "oeuf",
+  ]),
+  [],
+);
+
 console.log("nutrition targets + shopping list + allergy guard ok");

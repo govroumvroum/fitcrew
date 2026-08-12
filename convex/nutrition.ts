@@ -123,9 +123,14 @@ export function normalizeName(name: string): string {
 // confidence in the half of the space it doesn't know. This guard checks what
 // the model actually wrote down, nothing more.
 
-/** Ingredient lists and exclusion lists are user/model data — everything is bounded. */
+/**
+ * Ingredient lists and exclusion lists are user/model data — everything is
+ * bounded. Every one of these is a SCAN cap, not a truncation: past any of them
+ * the guard refuses instead of checking a prefix and calling it clear. A name is
+ * usually 2-4 words, so a 24-word one is a model gone strange, not a recipe.
+ */
 const MAX_NAME_CHARS = 120;
-const MAX_TOKENS = 12;
+const MAX_TOKENS = 24;
 const MAX_INGREDIENTS = 60;
 const MAX_FORBIDDEN = 40;
 
@@ -143,7 +148,6 @@ const MAX_FORBIDDEN = 40;
  */
 function foodTokens(name: string): string[] {
   return name
-    .slice(0, MAX_NAME_CHARS)
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
@@ -151,9 +155,18 @@ function foodTokens(name: string): string[] {
     .replace(/æ/g, "ae")
     .split(/[^a-z0-9]+/)
     .filter(Boolean)
-    .slice(0, MAX_TOKENS)
     .map((word) => (word.length >= 4 && word.endsWith("s") ? word.slice(0, -1) : word));
 }
+
+/**
+ * A name we cannot honestly claim to have checked. `foodTokens` used to slice
+ * here, which meant an allergen past the cap was silently reported clear — the
+ * same fail-open the count checks below were written to prevent, one level down.
+ * The length test comes first and `||` short-circuits, so tokenising only ever
+ * runs on a name already under 120 chars: bounded work, no truncation.
+ */
+const unscannable = (name: string): boolean =>
+  name.length > MAX_NAME_CHARS || foodTokens(name).length > MAX_TOKENS;
 
 /** `needle` as a contiguous run of whole words in `haystack` — so "fruits de mer" matches
  *  "Fruits de mer surgelés" but "mer" alone never matches "amer". */
@@ -190,14 +203,9 @@ export function forbiddenHits(
   meals: { name: string; ingredients: { name: string }[] }[],
   forbidden: string[],
 ): ForbiddenHit[] {
-  const needles = forbidden
-    .slice(0, MAX_FORBIDDEN)
-    .map((item) => ({ label: item.trim(), tokens: foodTokens(item) }))
-    .filter((needle) => needle.tokens.length > 0);
-  if (needles.length === 0) return [];
-
-  const hits: ForbiddenHit[] = [];
-  // More restrictions than we can check means we cannot claim any meal is safe.
+  // Counted BEFORE the needles are built, and before the empty-needle exit: with
+  // the order reversed, 40 blank entries followed by one real allergy tokenised to
+  // nothing, returned "clear", and never reached this refusal.
   if (forbidden.length > MAX_FORBIDDEN) {
     return meals.map((meal) => ({
       meal: meal.name,
@@ -205,6 +213,20 @@ export function forbiddenHits(
       forbidden: `plus de ${MAX_FORBIDDEN} interdits : liste trop longue pour être vérifiée`,
     }));
   }
+  const unscannableNeedle = forbidden.find(unscannable);
+  if (unscannableNeedle !== undefined) {
+    return meals.map((meal) => ({
+      meal: meal.name,
+      ingredient: `interdit de ${unscannableNeedle.length} caractères`,
+      forbidden: "un interdit trop long pour être vérifié",
+    }));
+  }
+  const needles = forbidden
+    .map((item) => ({ label: item.trim(), tokens: foodTokens(item) }))
+    .filter((needle) => needle.tokens.length > 0);
+  if (needles.length === 0) return [];
+
+  const hits: ForbiddenHit[] = [];
   for (const meal of meals) {
     if (meal.ingredients.length > MAX_INGREDIENTS) {
       hits.push({
@@ -215,6 +237,14 @@ export function forbiddenHits(
       continue;
     }
     for (const ingredient of meal.ingredients) {
+      if (unscannable(ingredient.name)) {
+        hits.push({
+          meal: meal.name,
+          ingredient: ingredient.name.slice(0, 40).trim(),
+          forbidden: "nom d'ingrédient trop long pour être vérifié",
+        });
+        continue;
+      }
       const words = foodTokens(ingredient.name);
       for (const needle of needles) {
         if (containsWords(words, needle.tokens)) {
