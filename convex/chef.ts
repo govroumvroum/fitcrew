@@ -99,6 +99,24 @@ export const context = internalQuery({
   },
 });
 
+/**
+ * What `stream` actually injects, and nothing more: the user and the nutrition
+ * profile. Today's meals, the log, hydration and the fridge are read by
+ * `read_today` / `read_inventory` when the model asks for them, so a plain turn
+ * no longer pays for them.
+ *
+ * Return type spelled out for the same circularity reason as `context` above.
+ */
+export const streamContext = internalQuery({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<{ user: Doc<"users">; profile: Doc<"nutritionProfiles"> | null }> => ({
+    user: await requireCurrentUser(ctx),
+    profile: await ctx.runQuery(api.nutrition.profile, {}),
+  }),
+});
+
 // ---------------------------------------------------------------------------
 // Tools
 // ---------------------------------------------------------------------------
@@ -147,14 +165,9 @@ function chefTools(today: string) {
         "L'état de la journée du user : repas prévus au plan (avec leur verrou), ce qu'il a déjà loggué, les totaux du jour, ce qu'il reste sur ses cibles, et son hydratation. Rien de tout ça n'est dans ton prompt — appelle cet outil avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou avant de proposer un repas pour aujourd'hui.",
       inputSchema: z.object({}),
       execute: async (ctx: ToolCtx) => {
-        const { dashboard } = await ctx.runQuery(internal.chef.context, { today });
+        // Only the dashboard: the fridge is `read_inventory`'s business.
+        const dashboard: Dashboard = await ctx.runQuery(api.nutrition.dashboard, { today });
         const p = dashboard.profile;
-        if (!p) {
-          return {
-            result: "no_profile" as const,
-            note: "Pas encore de profil nutrition : aucune cible, donc rien de « restant » à annoncer. Déroule le questionnaire et appelle save_nutrition_profile.",
-          };
-        }
         return {
           result: "ok" as const,
           date: today,
@@ -178,13 +191,22 @@ function chefTools(today: string) {
           // Summed and subtracted server-side on purpose: a model doing this
           // arithmetic is a known bug class.
           consumed: dashboard.consumed,
-          remaining: {
-            calories: p.targets.calories - dashboard.consumed.calories,
-            protein: p.targets.protein - dashboard.consumed.protein,
-            carbs: p.targets.carbs - dashboard.consumed.carbs,
-            fat: p.targets.fat - dashboard.consumed.fat,
-          },
+          // The profile is the only thing `remaining` needs, so it's the only
+          // thing that goes null without one. The rest of the day is real
+          // without a profile — `addLogEntry` never required one, and hiding a
+          // meal the user logged in the app mid-questionnaire is a regression.
+          remaining: p
+            ? {
+                calories: p.targets.calories - dashboard.consumed.calories,
+                protein: p.targets.protein - dashboard.consumed.protein,
+                carbs: p.targets.carbs - dashboard.consumed.carbs,
+                fat: p.targets.fat - dashboard.consumed.fat,
+              }
+            : null,
           hydrationMl: dashboard.hydrationMl,
+          note: p
+            ? null
+            : "Pas encore de profil nutrition : aucune cible, donc pas de « restant » (remaining est null). Le reste de la journée est bien réel. Déroule le questionnaire et appelle save_nutrition_profile.",
           hints:
             "Une liste vide veut dire « rien », pas « je ne sais pas » : ne complète pas de mémoire. Les totaux et le restant sont déjà calculés, ne refais pas les soustractions. Tous ces chiffres sont des estimations.",
         };
@@ -196,7 +218,8 @@ function chefTools(today: string) {
         "Ce que le user a dans son frigo et ses placards. Ce n'est pas dans ton prompt — appelle cet outil avant de proposer de cuisiner avec ce qu'il a, avant suggest_recipes_from_ingredients, et avant de lui dire qu'il lui manque quelque chose.",
       inputSchema: z.object({}),
       execute: async (ctx: ToolCtx) => {
-        const { inventory } = await ctx.runQuery(internal.chef.context, { today });
+        // Only the fridge: the day is `read_today`'s business.
+        const inventory: Doc<"inventory">[] = await ctx.runQuery(api.nutrition.inventory, {});
         if (inventory.length === 0) {
           return {
             result: "empty" as const,
@@ -708,11 +731,11 @@ async function stream(
     | { prompt: string; messages?: { role: "user"; content: string }[] }
     | { messages: { role: "user"; content: string }[] },
 ) {
-  // Only the user and the profile are read: today's meals, the log, hydration and
-  // the fridge are now fetched by `read_today` / `read_inventory`.
-  // ponytail: still the one existing query rather than a narrower new one — these
-  // are reads the turn already did, and `context` stays callable for older bundles.
-  const { user, dashboard } = await ctx.runQuery(internal.chef.context, { today });
+  // Only the user and the profile are read — for real: `streamContext` reads
+  // nothing else. Today's meals, the log, hydration and the fridge are fetched
+  // by `read_today` / `read_inventory`, when they're called. `internal.chef.context`
+  // stays exported and unchanged for older bundles.
+  const { user, profile } = await ctx.runQuery(internal.chef.streamContext, {});
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
   if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);
@@ -722,7 +745,7 @@ async function stream(
     { userId: user._id, threadId },
     {
       ...promptArgs,
-      system: systemPrompt(user, dashboard.profile, today),
+      system: systemPrompt(user, profile, today),
       tools: chefTools(today),
       // A tool call must be followed by the chef's own words, so one step is
       // never enough (the AI SDK default).

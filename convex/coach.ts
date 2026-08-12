@@ -192,6 +192,17 @@ export const context = internalQuery({
 });
 
 /**
+ * What `stream` actually injects, and nothing more: the user row the prompt is
+ * built from. The programs, the cardio and the pesée are read by
+ * `read_programs` / `read_cardio_and_bodyweight` when the model asks, so a plain
+ * turn no longer pays for 500 program rows.
+ */
+export const streamContext = internalQuery({
+  args: {},
+  handler: async (ctx) => ({ user: await requireCurrentUser(ctx) }),
+});
+
+/**
  * The coach's `read_cardio_and_bodyweight` tool. The provenance and the scale's
  * margin travel WITH the numbers: they used to sit next to them in the prompt,
  * and a caveat left behind in a prompt that no longer holds the data is a caveat
@@ -303,6 +314,20 @@ const HISTORY_LIST_LIMIT = 20;
  * ponytail: nobody runs 5 programs at once; raise it if someone does.
  */
 const ACTIVE_RENDER_LIMIT = 5;
+
+/**
+ * What `read_programs` tells the model about what it just received. The cap is
+ * in the note or the extras are silently absent: `truncated` alone is a field
+ * nothing instructs the model to read.
+ */
+export function activeProgramsNote(count: number, rendered = ACTIVE_RENDER_LIMIT): string {
+  if (count === 0)
+    return "Aucun programme en cours. Ne fais pas semblant du contraire et n'en invente pas : propose de lui en générer un.";
+  const base =
+    "Ils tournent EN PARALLÈLE, chacun avance sa propre rotation de jours. Tu ne reçois ici que la DERNIÈRE version de chaque programme actif : pour une version antérieure, un programme archivé ou terminé, appelle `lookup_program_history`.";
+  if (count <= rendered) return base;
+  return `${base} ATTENTION : il a ${count} programmes actifs et seuls ${rendered} sont rendus ici — les autres ne sont PAS dans cette réponse. Si le user parle d'un programme qui n'y figure pas, va le chercher par son nom avec \`lookup_program_history\`.`;
+}
 
 /**
  * The programs the user is currently running — latest version of each lineage,
@@ -421,9 +446,7 @@ export const programHistory = internalQuery({
           lastTrained: p._id === user.currentProgramId,
           program: renderProgram(p, p._id === user.currentProgramId),
         })),
-        note: active.length
-          ? "Ils tournent EN PARALLÈLE, chacun avance sa propre rotation de jours. Tu ne reçois ici que la DERNIÈRE version de chaque programme actif : pour une version antérieure, un programme archivé ou terminé, appelle `lookup_program_history`."
-          : "Aucun programme en cours. Ne fais pas semblant du contraire et n'en invente pas : propose de lui en générer un.",
+        note: activeProgramsNote(active.length),
       };
     }
 
@@ -955,11 +978,11 @@ async function stream(
     | { prompt: string; messages?: { role: "user"; content: string }[] }
     | { messages: { role: "user"; content: string }[] },
 ) {
-  // Only `user` is read: the programs and the cardio the prompt used to inject
-  // are now fetched by `read_programs` / `read_cardio_and_bodyweight`.
-  // ponytail: still one query rather than a narrower new one — it's the reads
-  // this turn already did, and `context` stays callable for older bundles.
-  const { user } = await ctx.runQuery(internal.coach.context, {});
+  // Only `user` is read — for real: `streamContext` reads nothing else. The
+  // programs and the cardio the prompt used to inject are fetched by
+  // `read_programs` / `read_cardio_and_bodyweight`, when they're called.
+  // `internal.coach.context` stays exported and unchanged for older bundles.
+  const { user } = await ctx.runQuery(internal.coach.streamContext, {});
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
   if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);

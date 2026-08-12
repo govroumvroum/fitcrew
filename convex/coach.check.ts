@@ -3,7 +3,7 @@
  * `activeLineages`. Run: `bun convex/coach.check.ts`
  */
 import assert from "node:assert/strict";
-import { activeLineages, lookupHistory } from "./coach";
+import { activeLineages, activeProgramsNote, lookupHistory } from "./coach";
 
 type Status = "active" | "archived" | "completed";
 let t = 0;
@@ -169,4 +169,28 @@ assert.deepEqual(activeLineages([]), []);
 // Every row archived: still empty, and in particular NOT the archived rows.
 assert.deepEqual(activeLineages(boxe), []);
 
-console.log("convex/coach.ts lookupHistory + activeLineages ok");
+// ---------------------------------------------------------------------------
+// activeProgramsNote — the cap has to be IN the note, not just in `truncated`.
+// ---------------------------------------------------------------------------
+
+// Nothing active: the note forbids inventing a program, and says nothing about a cap.
+assert.match(activeProgramsNote(0), /Aucun programme en cours/);
+assert.doesNotMatch(activeProgramsNote(0), /ATTENTION/);
+
+// At or under the cap: the plain note, no warning.
+for (const n of [1, 5]) {
+  assert.match(activeProgramsNote(n), /EN PARALLÈLE/);
+  assert.doesNotMatch(activeProgramsNote(n), /ATTENTION/);
+}
+
+// Over the cap: how many exist, how many are rendered, and the way out.
+const capped = activeProgramsNote(7);
+assert.match(capped, /ATTENTION/);
+assert.match(capped, /7 programmes actifs/);
+assert.match(capped, /seuls 5 sont rendus/);
+assert.match(capped, /lookup_program_history/);
+
+// The rendered count is a parameter, not a hardcoded 5 in the prose.
+assert.match(activeProgramsNote(4, 2), /il a 4 programmes actifs et seuls 2 sont rendus/);
+
+console.log("convex/coach.ts lookupHistory + activeLineages + activeProgramsNote ok");
