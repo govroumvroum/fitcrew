@@ -59,9 +59,16 @@ bunx convex deployment create dev/<slug> --type dev --select --expiration "in 5 
   someone else — otherwise its first instinct on any trouble is to re-point at the
   deployment it can see in the other worktree.
 
-Two more resources every worktree shares: the `agent-browser --session-name
-fitcrew` cookie jar, and the dev port `next dev` probes for (3000–3005). Give
-concurrent workers distinct session names.
+Two more resources every worktree shares, and one of them cannot be isolated:
+
+- **The browser.** `agent-browser --session-name` does **not** give a worker its
+  own browser — there is one `default` session with one tab whatever you pass, so
+  concurrent workers drive the same window and one agent's typing lands in the
+  other's chat thread. Serialize it: one worker on the browser at a time, an
+  explicit "browser released" before the next one starts, and treat any capture
+  containing a message the worker did not type as contaminated.
+- **The dev port** `next dev` probes for (3000–3005), so the second server lands
+  somewhere its own QA does not expect. Pin it per worker with `PORT`.
 
 When isolation is impossible, serialize out loud: name the holder, tell it to
 signal release in plain words, tell the waiter to say it is waiting rather than
