@@ -107,12 +107,7 @@ UI PR must carry and the `fouine-review` loop you're expected to drive to green.
 
 # Exercising the app for real
 
-`.agents/skills/qa/SKILL.md` — how to get a signed-in browser, drive the feature
-until it actually works, and read a claim out of the DOM instead of squinting at a
-screenshot. Read it before writing "verified" about anything on screen, and when a
-PR needs its `## Écrans`.
-
-Exercise the feature, don't inspect it. A new agent tool isn't verified because it
-compiles — open the chat, get the agent to call it, watch the card render, then
-reload and check the write stuck. `renderTool` switches on a string, so a
-misspelled tool name builds green and silently renders nothing.
+**Drive** a change through the running app before calling it verified — read
+`.agents/skills/qa/SKILL.md`. It covers driving the feature (an agent tool is
+driven by talking to the agent until it calls the tool), capturing the shots a PR
+needs, and measuring the claims a screenshot cannot carry.
