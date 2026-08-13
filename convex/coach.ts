@@ -476,7 +476,7 @@ export const programHistory = internalQuery({
  * cache every midnight just as surely as a date-stamped system prompt. Inside
  * `execute` it is invisible to the model, which is where every use below is.
  */
-function coachTools(today: string) {
+export function coachTools(today: string) {
   return {
     save_onboarding: createTool({
       description:
@@ -708,7 +708,7 @@ Deload : ${program.deloadEveryWeeks ? `toutes les ${program.deloadEveryWeeks} se
  * `today` is the ONE dynamic value left, and it sits at the very END on purpose
  * (see the comment above the return). Do not move it back up.
  */
-function systemPrompt(user: Doc<"users">, today: string) {
+export function systemPrompt(user: Doc<"users">, today: string) {
   const onboarding = user.onboarding;
 
   return `Tu es le coach sportif de ${user.name} dans l'app FitCrew. Tu parles français, tu tutoies, tu es bref : c'est une conversation sur un téléphone, pas un article de blog. 2-6 phrases par message, sauf quand tu présentes un programme.
@@ -793,6 +793,7 @@ function coach() {
         inputTokens: usage.inputTokens ?? 0,
         outputTokens: usage.outputTokens ?? 0,
         reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+        cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens,
         costUsd: costUsdFrom(providerMetadata),
       });
     },
