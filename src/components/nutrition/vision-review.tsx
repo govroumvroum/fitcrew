@@ -280,11 +280,7 @@ export function VisionReview({
             </Label>
             {/* `items` because Base UI's <SelectValue> prints the value, not the
                 selected option's text — and the options aren't mounted while closed. */}
-            <Select
-              items={SLOT_LABELS}
-              value={slot}
-              onValueChange={(v) => setSlot(v as MealSlot)}
-            >
+            <Select items={SLOT_LABELS} value={slot} onValueChange={(v) => setSlot(v as MealSlot)}>
               <SelectTrigger id={`${id}-slot`} className="h-11 w-full text-base sm:text-sm">
                 <SelectValue />
               </SelectTrigger>

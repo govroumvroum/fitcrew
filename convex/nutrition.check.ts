@@ -204,9 +204,10 @@ assert.equal(forbiddenHits([dish("Poulet riz", ["poulet"])], [buried]).length, 1
 // A normal long-ish name is still scanned, not refused: the cap is for absurd
 // input, not for "filet de poulet fermier élevé en plein air label rouge".
 assert.deepEqual(
-  hitNames([dish("Plat", ["filet de poulet fermier élevé en plein air label rouge des Landes"])], [
-    "oeuf",
-  ]),
+  hitNames(
+    [dish("Plat", ["filet de poulet fermier élevé en plein air label rouge des Landes"])],
+    ["oeuf"],
+  ),
   [],
 );
 

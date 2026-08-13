@@ -253,7 +253,8 @@ async function agentBrowser(sessionName: string, args: string[]): Promise<string
       ["--session-name", sessionName, ...args],
       { timeout: 60_000 },
       (error, stdout, stderr) => {
-        if (error) reject(new Error(`agent-browser ${args[0]} failed: ${stderr.trim() || error.message}`));
+        if (error)
+          reject(new Error(`agent-browser ${args[0]} failed: ${stderr.trim() || error.message}`));
         else resolve(stdout.trim());
       },
     );
@@ -300,8 +301,10 @@ export async function importCookies(
       if (msg.error) reject(new Error(`Cookie import failed: ${msg.error.message}`));
       else resolve();
     };
-    ws.onerror = () => reject(new Error("The browser's CDP socket errored during the cookie import."));
-    ws.onclose = () => reject(new Error("The browser's CDP socket closed before the cookie import finished."));
+    ws.onerror = () =>
+      reject(new Error("The browser's CDP socket errored during the cookie import."));
+    ws.onclose = () =>
+      reject(new Error("The browser's CDP socket closed before the cookie import finished."));
   });
   ws.send(
     JSON.stringify({
@@ -406,7 +409,9 @@ async function main(): Promise<void> {
         "check that the redirect URL's port serves this app and the identifier matches a dev user.",
     );
   }
-  process.stderr.write(`Ticket consumed; ${localhostCookies.length} localhost cookies to import.\n`);
+  process.stderr.write(
+    `Ticket consumed; ${localhostCookies.length} localhost cookies to import.\n`,
+  );
 
   await agentBrowser(sessionName, ["open", "about:blank"]);
   // `agent-browser get cdp-url` already answers a ws:// URL; no rewriting needed.

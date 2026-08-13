@@ -248,7 +248,10 @@ export const start = mutation({
     const rows = program
       ? await lineageRows(ctx, user._id, lineageOf(program) as Id<"programs">)
       : [];
-    const lineage = new Set<string>([...(program ? [lineageOf(program)] : []), ...rows.map((row) => row._id)]);
+    const lineage = new Set<string>([
+      ...(program ? [lineageOf(program)] : []),
+      ...rows.map((row) => row._id),
+    ]);
     const existing = program
       ? lastInLineage(todays, lineage)
       : todays.find((w) => w.programId === undefined);

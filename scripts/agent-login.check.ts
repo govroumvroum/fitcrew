@@ -61,7 +61,10 @@ assert.equal(await resolvePort(undefined, onlyOn(3000)), 3000);
 // An explicit port is trusted without probing — the server may still be booting.
 assert.equal(await resolvePort(4321, async () => false), 4321);
 // Nothing listening is an error, never a silent fallback to 3000.
-await assert.rejects(resolvePort(undefined, async () => false), /No Next dev server answered/);
+await assert.rejects(
+  resolvePort(undefined, async () => false),
+  /No Next dev server answered/,
+);
 assert.equal(CANDIDATE_PORTS[0], 3000);
 
 assert.equal(parsePort("3001"), 3001);
