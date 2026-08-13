@@ -19,6 +19,10 @@ Per-repo settings for the `github-pr` skill vendored in this repo (`.claude/skil
 
 ## Screenshots need a signed-in app
 
+**Read `../qa/SKILL.md` for the capture itself** — waiting for the app to be
+loaded instead of sleeping, hiding the Next.js dev overlay, and reading the claim
+out of the DOM rather than trusting the picture. What follows is only the sign-in.
+
 Every route is behind Clerk, and the dev instance only offers Google OAuth — the
 screenshot run will sit on the sign-in screen forever waiting for a human. Sign in
 first, with a Clerk Agent Task:

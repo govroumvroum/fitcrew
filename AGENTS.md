@@ -104,3 +104,10 @@ Self-check: `bun scripts/agent-login.check.ts`.
 `main` is protected: PR required, squash-only, no force-push. Read
 `.agents/skills/pr/SKILL.md` before opening a PR — it covers the screenshots a
 UI PR must carry and the `fouine-review` loop you're expected to drive to green.
+
+# Exercising the app for real
+
+**Drive** a change through the running app before calling it verified — read
+`.agents/skills/qa/SKILL.md`. It covers driving the feature (an agent tool is
+driven by talking to the agent until it calls the tool), capturing the shots a PR
+needs, and measuring the claims a screenshot cannot carry.
