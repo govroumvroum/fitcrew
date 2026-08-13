@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { Slot } from "radix-ui"
+import { useRender } from "@base-ui/react/use-render"
 
 import { cn } from "@/lib/utils"
 
@@ -67,27 +67,43 @@ const buttonVariants = cva(
   }
 )
 
+/**
+ * We keep `asChild` rather than adopting Base UI's `render` prop, on our own cva
+ * components (`Button`, `Badge`, `ButtonGroupText`, the `Sidebar*` ones). Base UI
+ * only asks for `render` on *its* primitives; these are ours, and `asChild` is
+ * already what 19 call sites spell. Renaming the prop would touch 15 app files to
+ * buy nothing but vocabulary — and every touched file is a chance to lose a class
+ * string, which this migration is not allowed to do. `useRender` under the hood
+ * gives us the same single-element merge Radix's `Slot` did, so the semantics are
+ * unchanged.
+ *
+ * Note the `children: asChild ? undefined : children`: when `asChild` is set the
+ * child element *is* the render target, so its own children must win. Passing our
+ * `children` through would make the element its own child.
+ */
 function Button({
   className,
   variant = "default",
   size = "default",
   asChild = false,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
   }) {
-  const Comp = asChild ? Slot.Root : "button"
-
-  return (
-    <Comp
-      data-slot="button"
-      data-variant={variant}
-      data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
-      {...props}
-    />
-  )
+  return useRender({
+    render: asChild ? (children as React.ReactElement) : undefined,
+    defaultTagName: "button",
+    props: {
+      "data-slot": "button",
+      "data-variant": variant,
+      "data-size": size,
+      className: cn(buttonVariants({ variant, size, className })),
+      children: asChild ? undefined : children,
+      ...props,
+    },
+  })
 }
 
 export { Button, buttonVariants }
