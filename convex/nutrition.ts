@@ -108,6 +108,158 @@ export function normalizeName(name: string): string {
     .replace(/s$/, "");
 }
 
+// --- Allergy / exclusion guard --------------------------------------------
+//
+// The system prompt calls allergies and excluded foods hard constraints, but a
+// prompt is not an enforcement mechanism: until this guard, the only thing
+// stopping a plan with peanuts in it from reaching the database was the model
+// reading its own instructions. This is the one health-safety path in the app,
+// so it gets a server-side backstop on the WRITE mutations (see `savePlan`,
+// `replaceMeal`, `regenerateDay`).
+//
+// Deliberately NOT attempted: hidden-ingredient inference (butter → lactose,
+// soy sauce → wheat, surimi → egg). The prompt asks the model for that, and a
+// server-side food-science table we'd have to keep correct would give false
+// confidence in the half of the space it doesn't know. This guard checks what
+// the model actually wrote down, nothing more.
+
+/**
+ * Ingredient lists and exclusion lists are user/model data — everything is
+ * bounded. Every one of these is a SCAN cap, not a truncation: past any of them
+ * the guard refuses instead of checking a prefix and calling it clear. A name is
+ * usually 2-4 words, so a 24-word one is a model gone strange, not a recipe.
+ */
+const MAX_NAME_CHARS = 120;
+const MAX_TOKENS = 24;
+const MAX_INGREDIENTS = 60;
+const MAX_FORBIDDEN = 40;
+
+/**
+ * A food name as comparable word tokens: accents stripped, "œ"/"æ" spelled out,
+ * lowercased, split on anything that isn't a letter or a digit, and a naive
+ * singular — a trailing "s" is dropped from words of 4 letters or more, so
+ * "Œufs" and "oeuf" meet in the middle while "noix", "riz" and "ail" are left
+ * alone.
+ *
+ * Tokens, not a substring, because substring matching is wrong in both
+ * directions here: `"chocolat".includes("lait")` is false but
+ * `"travail".includes("ail")` is true, and an allergy guard that fires on
+ * "travail" gets muted by its user.
+ */
+function foodTokens(name: string): string[] {
+  return name
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/œ/g, "oe")
+    .replace(/æ/g, "ae")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map((word) => (word.length >= 4 && word.endsWith("s") ? word.slice(0, -1) : word));
+}
+
+/**
+ * A name we cannot honestly claim to have checked. `foodTokens` used to slice
+ * here, which meant an allergen past the cap was silently reported clear — the
+ * same fail-open the count checks below were written to prevent, one level down.
+ * The length test comes first and `||` short-circuits, so tokenising only ever
+ * runs on a name already under 120 chars: bounded work, no truncation.
+ */
+const unscannable = (name: string): boolean =>
+  name.length > MAX_NAME_CHARS || foodTokens(name).length > MAX_TOKENS;
+
+/** `needle` as a contiguous run of whole words in `haystack` — so "fruits de mer" matches
+ *  "Fruits de mer surgelés" but "mer" alone never matches "amer". */
+function containsWords(haystack: string[], needle: string[]): boolean {
+  if (needle.length === 0 || needle.length > haystack.length) return false;
+  return haystack.some((_, i) => needle.every((word, j) => haystack[i + j] === word));
+}
+
+export type ForbiddenHit = { meal: string; ingredient: string; forbidden: string };
+
+/**
+ * Every (ingredient, forbidden item) pair a set of meals hits. Empty means the
+ * meals are clear — which is also what an empty `allergies` + `excluded` gives,
+ * so a profile with no restrictions behaves exactly as before.
+ *
+ * Pure and exported so `nutrition.check.ts` can hammer it without a Convex
+ * runtime. Matching is on the ingredient names the model wrote; a forbidden
+ * item named inside a recipe STEP but absent from the ingredients is not
+ * caught, and neither is a dish name that implies it ("tiramisu" with no egg
+ * listed).
+ *
+ * Known and accepted over-match: an exclusion of "lait" flags "lait de coco",
+ * which contains no dairy. Over-refusing a meal costs the model one retry;
+ * under-refusing costs the user an allergic reaction.
+ *
+ * The bounds below fail CLOSED for the same reason. Reads here stay bounded like
+ * every read in this codebase, but a guard that silently stops scanning at the
+ * cap is worse than no guard: it reports "clear" on the one payload big enough to
+ * hide something. Past the cap it refuses instead of shrugging. Nothing clamps
+ * ingredient COUNT upstream — `clampMeal` only clamps macros — so this is the
+ * only thing standing between a 200-ingredient meal and the database.
+ */
+export function forbiddenHits(
+  meals: { name: string; ingredients: { name: string }[] }[],
+  forbidden: string[],
+): ForbiddenHit[] {
+  // Counted BEFORE the needles are built, and before the empty-needle exit: with
+  // the order reversed, 40 blank entries followed by one real allergy tokenised to
+  // nothing, returned "clear", and never reached this refusal.
+  if (forbidden.length > MAX_FORBIDDEN) {
+    return meals.map((meal) => ({
+      meal: meal.name,
+      ingredient: `${forbidden.length} interdits déclarés`,
+      forbidden: `plus de ${MAX_FORBIDDEN} interdits : liste trop longue pour être vérifiée`,
+    }));
+  }
+  const unscannableNeedle = forbidden.find(unscannable);
+  if (unscannableNeedle !== undefined) {
+    return meals.map((meal) => ({
+      meal: meal.name,
+      ingredient: `interdit de ${unscannableNeedle.length} caractères`,
+      forbidden: "un interdit trop long pour être vérifié",
+    }));
+  }
+  const needles = forbidden
+    .map((item) => ({ label: item.trim(), tokens: foodTokens(item) }))
+    .filter((needle) => needle.tokens.length > 0);
+  if (needles.length === 0) return [];
+
+  const hits: ForbiddenHit[] = [];
+  for (const meal of meals) {
+    if (meal.ingredients.length > MAX_INGREDIENTS) {
+      hits.push({
+        meal: meal.name,
+        ingredient: `${meal.ingredients.length} ingrédients`,
+        forbidden: `plus de ${MAX_INGREDIENTS} ingrédients : recette trop longue pour être vérifiée`,
+      });
+      continue;
+    }
+    for (const ingredient of meal.ingredients) {
+      if (unscannable(ingredient.name)) {
+        hits.push({
+          meal: meal.name,
+          ingredient: ingredient.name.slice(0, 40).trim(),
+          forbidden: "nom d'ingrédient trop long pour être vérifié",
+        });
+        continue;
+      }
+      const words = foodTokens(ingredient.name);
+      for (const needle of needles) {
+        if (containsWords(words, needle.tokens)) {
+          hits.push({
+            meal: meal.name,
+            ingredient: ingredient.name.trim(),
+            forbidden: needle.label,
+          });
+        }
+      }
+    }
+  }
+  return hits;
+}
+
 /**
  * A week's ingredients as a shopping list, merged by normalised name.
  *
@@ -174,6 +326,35 @@ const planFor = (ctx: QueryCtx, userId: Id<"users">, week: string) =>
     .query("mealPlans")
     .withIndex("by_user_and_week", (q) => q.eq("userId", userId).eq("weekStart", week))
     .unique();
+
+/**
+ * The backstop, on every path that persists a meal. Returns the hits; the caller
+ * MUST return before writing when the list isn't empty.
+ *
+ * A refusal is RETURNED, not thrown: these mutations are called from a chef tool
+ * mid-conversation, and a thrown error surfaces to the user as a broken turn
+ * while telling the model nothing it can act on. A structured refusal (same
+ * spirit as the discriminated results in `convex/coach.ts`) lands in the tool
+ * result, so the model reads which ingredient it must drop and calls the tool
+ * again. Silent persistence is impossible either way: nothing is written on the
+ * refusal branch.
+ */
+async function forbiddenIn(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  meals: PlannedMeal[],
+): Promise<ForbiddenHit[]> {
+  const profile = await profileFor(ctx, userId);
+  if (!profile) return [];
+  return forbiddenHits(meals, [...profile.allergies, ...profile.excluded]);
+}
+
+const refused = (violations: ForbiddenHit[]) =>
+  ({
+    result: "refused" as const,
+    violations,
+    note: "Rien n'a été enregistré : ces ingrédients sont dans les ALLERGIES ou les ALIMENTS EXCLUS du user. Remplace-les et rappelle l'outil. Dis-lui ce que tu as changé.",
+  }) as const;
 
 async function requirePlan(ctx: MutationCtx, week: string) {
   const user = await requireCurrentUser(ctx);
@@ -304,13 +485,23 @@ export const savePlan = internalMutation({
       date: day.date,
       meals: day.meals.map(clampMeal).sort(bySlot),
     }));
+
+    // Checked across the WHOLE week before anything is written: a half-saved
+    // plan is worse than a refused one.
+    const violations = await forbiddenIn(
+      ctx,
+      user._id,
+      days.flatMap((day) => day.meals),
+    );
+    if (violations.length > 0) return refused(violations);
+
     const existing = await planFor(ctx, user._id, args.weekStart);
     if (existing) {
       await ctx.db.patch("mealPlans", existing._id, { days });
     } else {
       await ctx.db.insert("mealPlans", { userId: user._id, weekStart: args.weekStart, days });
     }
-    return { meals: days.reduce((n, day) => n + day.meals.length, 0) };
+    return { result: "ok" as const, meals: days.reduce((n, day) => n + day.meals.length, 0) };
   },
 });
 
@@ -321,13 +512,16 @@ export const replaceMeal = internalMutation({
     const day = requireDay(plan, args.date);
     const meal = clampMeal({ ...args.meal, slot: args.slot });
 
+    const violations = await forbiddenIn(ctx, plan.userId, [meal]);
+    if (violations.length > 0) return refused(violations);
+
     const index = day.meals.findIndex((m) => m.slot === args.slot);
     if (index >= 0) day.meals[index] = meal;
     else day.meals.push(meal);
     day.meals.sort(bySlot);
 
     await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
-    return { name: meal.name };
+    return { result: "ok" as const, name: meal.name };
   },
 });
 
@@ -375,9 +569,15 @@ export const regenerateDay = internalMutation({
     const locked = new Set(kept.map((meal) => meal.slot));
     const added = args.meals.filter((meal) => !locked.has(meal.slot)).map(clampMeal);
 
+    // Only the incoming meals are checked. The kept ones are already in the plan
+    // and locked BY THE USER — refusing the whole day over one of those would
+    // leave the model unable to regenerate anything, with no way to fix it.
+    const violations = await forbiddenIn(ctx, plan.userId, added);
+    if (violations.length > 0) return refused(violations);
+
     day.meals = [...kept, ...added].sort(bySlot);
     await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
-    return { kept: kept.length, added: added.length };
+    return { result: "ok" as const, kept: kept.length, added: added.length };
   },
 });
 
