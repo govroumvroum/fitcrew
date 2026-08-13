@@ -263,7 +263,7 @@ function Form({
           <Input
             id={`${id}-diet`}
             value={draft.diet}
-            placeholder="végétarien, halal, sans lactose… ou laisse vide"
+            placeholder="végétarien, halal, sans lactose…"
             className="h-11 text-base sm:text-sm"
             onChange={(e) => set("diet", e.target.value)}
             onBlur={() => persist(draft)}
@@ -274,7 +274,7 @@ function Form({
           <Input
             id={`${id}-budget`}
             value={draft.budget}
-            placeholder="serré, normal… ou laisse vide"
+            placeholder="serré, normal…"
             className="h-11 text-base sm:text-sm"
             onChange={(e) => set("budget", e.target.value)}
             onBlur={() => persist(draft)}
@@ -332,7 +332,16 @@ function Form({
               // The agent never sees the form's fields: without this echo it
               // doesn't know what was answered. Not awaited for its reply — that
               // arrives over the `listMessages` subscription, like a normal send.
-              void send({ threadId, prompt: recap(answers), today: today as string }).catch(() =>
+              void send({
+                threadId,
+                prompt: recap(answers),
+                today: today as string,
+                // The app writes this one on his behalf, so it must not name the
+                // conversation: on the onboarding path it is the FIRST user-role
+                // message, and the sidebar would read « J'ai rempli le
+                // questionnaire : prise de mas… » instead of his own words.
+                skipTitle: true,
+              }).catch(() =>
                 // Surfaced rather than swallowed: the profile IS written at this
                 // point, so a silent failure leaves « Profil enregistré. » above
                 // an agent that never answers, with nothing saying why.

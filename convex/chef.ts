@@ -707,24 +707,41 @@ export const send = action({
     /** Photos joined to this message. Kept out of the prompt so the user's bubble
      * stays readable — the ids reach the model as unsaved context. */
     storageIds: v.optional(v.array(v.id("_storage"))),
+    /**
+     * For a message the app sends ON the user's behalf — today only the
+     * questionnaire's recap echo. It is a real, visible user turn (unlike a
+     * sentinel), but it must not name the conversation: « le premier message de
+     * l'utilisateur nomme la conversation » means HIS words, and on the
+     * onboarding path the echo is the first user-role message there is.
+     *
+     * Optional, so an already-loaded bundle that never sends it keeps today's
+     * behaviour exactly.
+     */
+    skipTitle: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    await stream(ctx, args.threadId, args.today, {
-      prompt: args.prompt,
-      ...(args.storageIds?.length && {
-        messages: [
-          {
-            role: "user" as const,
-            // Unlike the coach there are four analysis tools, so the marker says
-            // to CHOOSE rather than naming one: only the user's own words say
-            // whether this is a plate, a fridge, a label or a shopping bag. That
-            // choice stays with the model — guessing the intent server-side from
-            // a filename would be worse than asking.
-            content: `${CHEF_ATTACHMENTS}, à analyser avec l'outil qui correspond à ce que le user décrit — analyze_plate, analyze_fridge, read_nutrition_label ou analyze_groceries : ${args.storageIds.join(", ")})`,
-          },
-        ],
-      }),
-    });
+    await stream(
+      ctx,
+      args.threadId,
+      args.today,
+      {
+        prompt: args.prompt,
+        ...(args.storageIds?.length && {
+          messages: [
+            {
+              role: "user" as const,
+              // Unlike the coach there are four analysis tools, so the marker says
+              // to CHOOSE rather than naming one: only the user's own words say
+              // whether this is a plate, a fridge, a label or a shopping bag. That
+              // choice stays with the model — guessing the intent server-side from
+              // a filename would be worse than asking.
+              content: `${CHEF_ATTACHMENTS}, à analyser avec l'outil qui correspond à ce que le user décrit — analyze_plate, analyze_fridge, read_nutrition_label ou analyze_groceries : ${args.storageIds.join(", ")})`,
+            },
+          ],
+        }),
+      },
+      args.skipTitle === true,
+    );
     return null;
   },
 });
@@ -748,6 +765,7 @@ async function stream(
   promptArgs:
     | { prompt: string; messages?: { role: "user"; content: string }[] }
     | { messages: { role: "user"; content: string }[] },
+  skipTitle = false,
 ) {
   // Only the user and the profile are read — for real: `streamContext` reads
   // nothing else. Today's meals, the log, hydration and the fridge are fetched
@@ -756,7 +774,7 @@ async function stream(
   const { user, profile } = await ctx.runQuery(internal.chef.streamContext, {});
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
-  if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);
+  if ("prompt" in promptArgs && !skipTitle) await ensureTitle(ctx, threadId, promptArgs.prompt);
 
   const result = await chef().streamText(
     ctx,
