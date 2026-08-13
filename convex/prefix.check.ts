@@ -10,6 +10,7 @@
  * at the very end of each system prompt. Never in a tool description.
  */
 import assert from "node:assert/strict";
+import { z } from "zod";
 import { chefTools, systemPrompt as chefSystemPrompt } from "./chef";
 import { coachTools, systemPrompt as coachSystemPrompt } from "./coach";
 import type { Doc } from "./_generated/dataModel";
@@ -49,10 +50,17 @@ const profile = {
   targets: { calories: 2300, protein: 160, carbs: 240, fat: 70 },
 } as unknown as Doc<"nutritionProfiles">;
 
-/** Name + description of every tool, in order: the half of the prefix that isn't prose. */
-const toolDefs = (tools: Record<string, { description?: string }>) =>
+/**
+ * Every tool as the provider actually receives it: name, description AND input
+ * schema. The schema counts — a `${today}` in a `.describe()` or a default would
+ * move the prefix daily while name and description stayed identical.
+ */
+const toolDefs = (tools: Record<string, { description?: string; inputSchema?: unknown }>) =>
   Object.entries(tools)
-    .map(([name, t]) => `${name}\n${t.description ?? ""}`)
+    .map(
+      ([name, t]) =>
+        `${name}\n${t.description ?? ""}\n${JSON.stringify(z.toJSONSchema(t.inputSchema as z.ZodType, { io: "input" }))}`,
+    )
     .join("\n---\n");
 
 // Two dates in different ISO weeks, so the Chef's derived monday/sunday move too.
@@ -123,6 +131,11 @@ for (const a of agents) {
       t.description ?? "",
       ISO_DATE,
       `${a.label}: tool \`${name}\` has a date in its description`,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(z.toJSONSchema(t.inputSchema as z.ZodType, { io: "input" })),
+      ISO_DATE,
+      `${a.label}: tool \`${name}\` has a date baked into its input schema`,
     );
   }
   assert.equal(
