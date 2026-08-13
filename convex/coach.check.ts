@@ -1,6 +1,9 @@
-/** Self-check for `lookupHistory` in convex/coach.ts. Run: `bun convex/coach.check.ts` */
+/**
+ * Self-check for the pure selection in convex/coach.ts — `lookupHistory` and
+ * `activeLineages`. Run: `bun convex/coach.check.ts`
+ */
 import assert from "node:assert/strict";
-import { lookupHistory } from "./coach";
+import { activeLineages, activeProgramsNote, lookupHistory } from "./coach";
 
 type Status = "active" | "archived" | "completed";
 let t = 0;
@@ -147,4 +150,47 @@ assert.equal(r.result, "not_found");
 r = lookupHistory(rows, {});
 assert.equal(r.result, "ambiguous");
 
-console.log("convex/coach.ts lookupHistory ok");
+// ---------------------------------------------------------------------------
+// activeLineages — what `read_programs` renders, now that the prompt doesn't.
+// ---------------------------------------------------------------------------
+
+// One row per lineage, latest version only, archived and completed dropped. The
+// legacy row (no status) counts as active — that's the `?? "active"` contract.
+const active = activeLineages(rows);
+assert.deepEqual(
+  active.map((p) => `${p.name} v${p.version}`),
+  ["Programme historique v1", "Full Body 3 jours v3"],
+);
+
+// An empty lineage list is an empty result, never a fallback to "everything":
+// `read_programs` says "aucun programme" and the coach must not invent one.
+assert.deepEqual(activeLineages([]), []);
+
+// Every row archived: still empty, and in particular NOT the archived rows.
+assert.deepEqual(activeLineages(boxe), []);
+
+// ---------------------------------------------------------------------------
+// activeProgramsNote — the cap has to be IN the note, not just in `truncated`.
+// ---------------------------------------------------------------------------
+
+// Nothing active: the note forbids inventing a program, and says nothing about a cap.
+assert.match(activeProgramsNote(0), /Aucun programme en cours/);
+assert.doesNotMatch(activeProgramsNote(0), /ATTENTION/);
+
+// At or under the cap: the plain note, no warning.
+for (const n of [1, 5]) {
+  assert.match(activeProgramsNote(n), /EN PARALLÈLE/);
+  assert.doesNotMatch(activeProgramsNote(n), /ATTENTION/);
+}
+
+// Over the cap: how many exist, how many are rendered, and the way out.
+const capped = activeProgramsNote(7);
+assert.match(capped, /ATTENTION/);
+assert.match(capped, /7 programmes actifs/);
+assert.match(capped, /seuls 5 sont rendus/);
+assert.match(capped, /lookup_program_history/);
+
+// The rendered count is a parameter, not a hardcoded 5 in the prose.
+assert.match(activeProgramsNote(4, 2), /il a 4 programmes actifs et seuls 2 sont rendus/);
+
+console.log("convex/coach.ts lookupHistory + activeLineages + activeProgramsNote ok");
