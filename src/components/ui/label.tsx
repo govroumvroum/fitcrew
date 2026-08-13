@@ -1,16 +1,17 @@
 "use client"
 
 import * as React from "react"
-import { Label as LabelPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
-function Label({
-  className,
-  ...props
-}: React.ComponentProps<typeof LabelPrimitive.Root>) {
+/**
+ * A plain `<label>`: Base UI ships no Label primitive, and Radix's only added
+ * behaviour was suppressing the double-click text selection that `select-none`
+ * below already suppresses.
+ */
+function Label({ className, ...props }: React.ComponentProps<"label">) {
   return (
-    <LabelPrimitive.Root
+    <label
       data-slot="label"
       className={cn(
         "flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50",

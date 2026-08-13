@@ -144,13 +144,11 @@ function CreateDialog({ weekStart }: { weekStart: string }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {/* h-11 like the other trailing outline buttons: the default h-9 is under
-            the 44px touch target on a phone. */}
-        <Button variant="outline" className="h-11 w-full">
-          <PlusIcon aria-hidden />
-          Nouveau défi
-        </Button>
+      {/* h-11 like the other trailing outline buttons: the default h-9 is under
+          the 44px touch target on a phone. */}
+      <DialogTrigger render={<Button variant="outline" className="h-11 w-full" />}>
+        <PlusIcon aria-hidden />
+        Nouveau défi
       </DialogTrigger>
       <DialogContent>
         {/* Mounted only while open, so the form state resets by itself and
