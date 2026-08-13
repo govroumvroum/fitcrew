@@ -25,7 +25,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
-import { languageModel } from "./model";
+import { CONTEXT_OPTIONS, languageModel } from "./model";
 import { latestPerLineage, lineageOf, userPrograms } from "./programs";
 import { programExercise } from "./schema";
 import { searchWeb } from "./search";
@@ -709,9 +709,10 @@ export const thread = query({
     const latest = threads.page[0];
     if (!latest) return { threadId: null };
 
-    // One conversation per day. Continuity lives in the database — profile,
-    // program, PRs are rebuilt into the system prompt on every call — so
-    // yesterday's transcript is cost without value. Returning null makes the
+    // One conversation per day. Continuity lives in the database — profile and
+    // programs are rebuilt into the system prompt on every call, PRs are fetched
+    // on demand by `explain_exercise` — so yesterday's transcript is cost
+    // without value. Returning null makes the
     // client open a fresh thread, and the coach greets you for the new day.
     // ponytail: a chat spanning midnight splits in two. Nobody will notice.
     return { threadId: latest._creationTime >= args.dayStart ? latest._id : null };
@@ -882,11 +883,7 @@ async function stream(
     },
     {
       saveStreamDeltas: true,
-      // The component default is 100 recent messages, re-sent on every turn.
-      // 20 is plenty here: the coach's actual state — profile, current program,
-      // PRs — lives in Convex and is rebuilt into the system prompt each call,
-      // so old transcript is chatter, not memory.
-      contextOptions: { recentMessages: 20 },
+      contextOptions: CONTEXT_OPTIONS,
     },
   );
   await result.consumeStream();
