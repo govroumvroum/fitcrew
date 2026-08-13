@@ -61,6 +61,11 @@ Switching between stacks that differ in dependencies leaves `node_modules` from
 the other one — `bun run build` then fails on a missing package. `bun install`
 after every checkout.
 
+The same trap catches documentation. A script or CSS property added in one layer
+does not exist on `main`, so anything written from memory of another branch can
+describe a world the reader's checkout doesn't have. Run the command on the branch
+you are documenting before writing it down.
+
 ## Finishing
 
 ```sh

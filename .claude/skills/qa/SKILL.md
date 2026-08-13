@@ -108,12 +108,17 @@ return JSON.stringify({maxH:cs.maxHeight, fits:r.bottom<=innerHeight&&r.top>=0})
 EOF
 ```
 
-What this catches that no build does: `max-height: 345.5px` proving
-`--available-height` constrains a `Select` on a phone; `nestedButton: false`
-proving an `asChild` trigger produced one element; `aria-valuenow` proving a
-`Progress` forwards its value. Also worth reading: the active tab
+What this catches that no build does: a real `max-height` on a popup, proving the
+available-height custom property its class reads actually resolved and keeps the
+`Select` inside a 390px screen; `nestedButton: false`, proving an `asChild` trigger
+produced one element rather than a button inside a button; `aria-valuenow`,
+proving a `Progress` forwards its value at all. Also worth reading: the active tab
 (`font-weight: 600` plus `accent-text`), `data-side` on a popup, `data-slot` on
 anything the CSS selects.
+
+Read the property name out of the component rather than from memory — the popup
+classes changed with the Base UI migration, and a stale name silently returns
+nothing.
 
 Where emulation cannot reach, write that down instead of implying coverage. The
 standing case: the **installed iOS PWA safe area** — Chrome does not reproduce
@@ -125,6 +130,11 @@ named as unverified.
 
 ## Before the browser
 
-`bun run check` runs every `*.check.ts` / `*.check.tsx` in `convex/` and `src/`.
-A failing check makes every screenshot suspect, and it is faster than a
-click-through.
+Run the self-checks the change touches — they are standalone scripts, one per
+file, and faster than a click-through. A failing check makes every screenshot
+suspect.
+
+```sh
+bun convex/nutrition.check.ts                  # one file
+for f in $(find convex src -name '*.check.ts' -o -name '*.check.tsx'); do bun "$f" || break; done
+```
