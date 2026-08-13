@@ -32,6 +32,15 @@ export const open = internalMutation({
     if (existing) {
       // The form the user is looking at NOW is the one that must get the echo,
       // so a card resumed in another conversation follows him there.
+      //
+      // The cost is that the stale card still rendered in the ORIGINAL thread
+      // now echoes into the new one. That is the lesser evil: NOT re-pointing
+      // means the card he is actually looking at answers into a conversation he
+      // left, so he validates and nothing happens on screen — a silent failure
+      // beats a noisy one only when someone is watching. And there is at most
+      // one open row per user (the guard just above), so the two cards are the
+      // same questionnaire seen from two places, not two forms: `assertOpen`
+      // refuses whichever validation comes second.
       if (existing.threadId !== args.threadId) {
         await ctx.db.patch("questionnaires", existing._id, { threadId: args.threadId });
       }
