@@ -107,9 +107,12 @@ UI PR must carry and the `fouine-review` loop you're expected to drive to green.
 
 # Exercising the app for real
 
-`.agents/skills/qa/SKILL.md` — how to get a signed-in browser, wait for the app
-to actually be loaded rather than sleeping, and read a claim out of the DOM
-instead of squinting at a screenshot. Read it before writing "verified" about
-anything on screen, and when a PR needs its `## Écrans`.
+`.agents/skills/qa/SKILL.md` — how to get a signed-in browser, drive the feature
+until it actually works, and read a claim out of the DOM instead of squinting at a
+screenshot. Read it before writing "verified" about anything on screen, and when a
+PR needs its `## Écrans`.
 
-A green build is not a working screen, and a screenshot is not a measurement.
+Exercise the feature, don't inspect it. A new agent tool isn't verified because it
+compiles — open the chat, get the agent to call it, watch the card render, then
+reload and check the write stuck. `renderTool` switches on a string, so a
+misspelled tool name builds green and silently renders nothing.

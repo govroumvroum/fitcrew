@@ -1,15 +1,17 @@
 ---
 name: qa
-description: Exercise fitcrew in a real browser and come back with evidence — screenshots for a PR, or a DOM assertion that proves a UI claim. Use when asked to QA, dogfood, click through the app, take screenshots, check a change "for real", verify something renders, or when a PR needs its `## Écrans` section. Also read this before claiming a UI behaviour is verified.
+description: Drive a fitcrew change in a real browser until it actually works, then come back with evidence. Use when asked to QA, dogfood, click through the app, test a feature "for real", check that an agent picks up a new tool, verify a card renders or a write lands, take screenshots, or when a PR needs its `## Écrans`. Read this before writing "verified" about anything on screen.
 ---
 
 # QA — fitcrew
 
-The rule this skill exists for: **"it builds" is not "it works", and a screenshot
-is not a measurement.** A green build says the code compiles. A screenshot says
-it looked right in one state. Neither says the popup stays inside a 390px screen
-or that `asChild` collapsed to one element. Get both — a shot for the reviewer's
-eye, a DOM assertion for the claim.
+**Exercise the feature, don't inspect it.** A green build says the code compiles.
+A screenshot says a screen rendered once. Neither says the agent actually calls
+the new tool, that its card renders instead of a fallback line, that the write
+survived a reload, or that the popup stays inside a 390px screen.
+
+So the order is: make the feature happen through the UI (§3), then capture what
+it did (§5) and measure the claims a picture can't carry (§6).
 
 For the PR mechanics around the shots (hosting on `pr-media`, the `## Écrans`
 heading, `width="320"`), see `../pr/SKILL.md`. This file is about getting to a
@@ -46,7 +48,64 @@ It isn't. The saved session lapsed. Re-run `bun run agent-login -- --browser`
 and move on — AGENTS.md says this explicitly, and debugging it instead costs
 twenty minutes.
 
-## 3. Never `sleep` and shoot
+## 3. Drive the feature. Looking at it is not testing it
+
+This is the job. A screenshot proves a screen rendered; QA proves the thing
+**does what it was built to do**, reached the way a user reaches it. Never call
+the function directly and call that verified — go through the UI, or you have
+tested the function, not the feature.
+
+Ask what the change is supposed to make *happen*, then make it happen:
+
+| change | driving it |
+|---|---|
+| a new agent tool | open the chat and **talk to the agent** until it calls the tool |
+| a nav change | navigate with it — hardware back, deep link, same-route tap |
+| a guard / refusal | try to violate it and read what comes back |
+| a write path | do the write, then reload and confirm it stuck |
+| a state machine | run every branch, including the empty and error ones |
+
+### A new agent tool, end to end
+
+The one that gets faked most often, because the code looks obviously right. Four
+things have to be true and only the first is visible in the diff:
+
+1. **The model picks it up.** Write a message that should trigger it and watch for
+   the tool line. If the model answers in prose instead, that's your finding — a
+   prompt problem, and a real one. Registering a tool does not make it called.
+2. **The card renders.** `renderTool` is a `switch` on a **string**, and
+   `agent-chat.tsx` keeps `input`/`output` as `unknown` on purpose — so a
+   misspelled tool name **compiles, lints, builds, and silently renders nothing**
+   but the generic fallback line. Only looking catches it. Check the four states
+   too: `input-streaming`, `input-available`, `output-available`, `output-error`.
+3. **The write landed.** The chat saying it saved something is not evidence.
+   Check the screen that reads the data (`/nutrition`, `/programme`) — and
+   **reload** before believing it.
+4. **The absent case behaves.** Feed it something that yields nothing. The prompts
+   are explicit that an empty result must not produce "validate the card shown" —
+   there is no card. That instruction exists because it got shipped wrong once.
+
+**Start at `/demo`, finish in the chat.** The gallery
+(`src/components/chat/tool-gallery.tsx`) is driven by the **real** `COACH` /
+`CHEF` configs — the tool list comes from `config.toolLabels`, every card from
+`config.renderTool` — and it renders all four states without paying for a model
+call. So a new tool appears there on its own, marked *« pas de fixture »* until
+someone writes one, and a card that renders as a fallback line shows up
+immediately. Writing that fixture is part of adding a tool, not a nicety.
+
+What `/demo` cannot tell you is points 1 and 3: whether the **model** chooses the
+tool, and whether the **mutation** ran. Those only happen in a real conversation.
+Don't report the gallery as if it were the app.
+
+Interactive cards (`vision-review.tsx`, `extracted-review.tsx`) hold their state
+in a Convex subscription, not React state, precisely so a reload doesn't resurrect
+a spent form. So **reload with the card on screen** — a form that comes back blank
+or resubmits is the bug that pattern exists to prevent.
+
+Keep the chat short: every turn is a real OpenRouter call, billed and written to
+`aiUsage`. Two or three messages that trigger the path beat a conversation.
+
+## 4. Never `sleep` and shoot
 
 A fixed `sleep 3` catches Convex mid-flight and you publish a screenshot of an
 empty state that does not exist for real users. Wait for a **condition**:
@@ -58,7 +117,7 @@ until [ "$(agent-browser --session-name fitcrew eval 'document.querySelectorAll(
 Two signals worth waiting on: the nav exists (Clerk hydrated — it renders only
 for a signed-in user) and the screen's own data is on the page.
 
-## 4. Shots
+## 5. Shots
 
 ```sh
 agent-browser --session-name fitcrew open                    # launch first
@@ -80,7 +139,7 @@ EOF
 Reserve `set viewport 1280 900 2` for the desktop rail — it is a different
 component (`NavRail`) and a mobile shot says nothing about it.
 
-## 5. Measure, don't squint
+## 6. Measure, don't squint
 
 The claims that matter are geometric or structural, and a picture can't carry
 them. Read them out of the DOM and put the numbers in the PR body:
@@ -102,7 +161,7 @@ Also worth asserting because the app's own conventions depend on them: the
 active tab (`font-weight: 600` plus the `accent-text` class), `data-side` on a
 sheet or popup, and `data-slot` on anything the CSS selects.
 
-## 6. `eval` gotchas that will waste your afternoon
+## 7. `eval` gotchas that will waste your afternoon
 
 - **Wrap every script in an IIFE.** The page context persists between calls, so
   a bare `const x = …` throws `Identifier 'x' has already been declared` on the
@@ -112,7 +171,7 @@ sheet or popup, and `data-slot` on anything the CSS selects.
   Same trap when writing a PR body with code spans.
 - Prefer `eval --stdin` over inline `eval "…"` for anything with quotes.
 
-## 7. "Element is covered" is usually the tab bar
+## 8. "Element is covered" is usually the tab bar
 
 `agent-browser click` refusing with *covered by `<button#base-ui-…>`* almost
 always means the target is **below the fold**, under the fixed tab bar, at
@@ -127,7 +186,7 @@ EOF
 `main` reserves `pb-[var(--tab-bar)]` (64px against a 61px bar), so the layout is
 fine — scroll the element into view and click again.
 
-## 8. Say which layer you shot, and what you could not
+## 9. Say which layer you shot, and what you could not
 
 On a stacked branch, a screenshot shows **that layer's** state: a shot taken
 below the nav-drawer layer shows the old 7-tab bar. That is honest, so label it.
@@ -139,7 +198,7 @@ reproduce `env(safe-area-inset-bottom)` in standalone mode, and #40 was exactly
 that bug. It needs a real phone; write that down instead of shipping a
 desktop-emulated shot of the same screen.
 
-## 9. Leave nothing running
+## 10. Leave nothing running
 
 ```sh
 agent-browser --session-name fitcrew close
