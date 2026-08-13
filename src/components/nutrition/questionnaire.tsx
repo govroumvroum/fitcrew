@@ -355,8 +355,25 @@ function Form({
         <Button
           variant="ghost"
           size="sm"
-          disabled={pending}
-          onClick={() => void run(() => abandon({ questionnaireId }), "Questionnaire abandonné.")}
+          disabled={pending || today === null}
+          onClick={() =>
+            void run(async () => {
+              await abandon({ questionnaireId });
+              // Symmetric with the submit path, and for the same reason: the
+              // Chef never sees the form. Without this it keeps waiting for a
+              // « je l'ai rempli » that will never come — its turn ended on the
+              // tool call — and the prose fallback the prompt promises is
+              // unreachable, because nothing tells it the form is gone.
+              void send({
+                threadId,
+                prompt: "Je ne veux pas remplir le formulaire. Pose-moi les questions à la place.",
+                today: today as string,
+                skipTitle: true,
+              }).catch(() =>
+                toast.error("Questionnaire abandonné, mais le Chef n'a pas été prévenu."),
+              );
+            }, "Questionnaire abandonné.")
+          }
         >
           Abandonner
         </Button>

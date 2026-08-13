@@ -157,7 +157,7 @@ function chefTools(today: string) {
         if (!ctx.threadId) throw new Error("ask_questionnaire appelé hors conversation");
         return {
           ...(await ctx.runMutation(internal.questionnaires.open, { threadId: ctx.threadId })),
-          note: "Le formulaire est à l'écran. Attends qu'il te dise l'avoir rempli — ne repose PAS les questions en prose par-dessus, et n'appelle PAS save_nutrition_profile : la validation du formulaire écrit le profil et ses cibles toute seule.",
+          note: "Le formulaire est à l'écran. Attends qu'il te dise l'avoir rempli — ne repose PAS les questions en prose par-dessus, et n'appelle PAS save_nutrition_profile : la validation du formulaire écrit le profil et ses cibles toute seule. SAUF s'il te dit qu'il ne veut pas le remplir : le formulaire est alors fermé, et c'est le seul cas où tu reprends les questions une par une, en prose.",
         };
       },
     }),
