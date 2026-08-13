@@ -6,6 +6,7 @@ import {
   BoxIcon,
   CalendarDaysIcon,
   CheckIcon,
+  ClipboardListIcon,
   DatabaseIcon,
   DumbbellIcon,
   NotebookPenIcon,
@@ -47,6 +48,7 @@ import {
   type ReplaceMealInput,
   type ShoppingListOutput,
 } from "@/components/chat/chef-tool-cards";
+import { OnboardingQuestionnaire } from "@/components/nutrition/questionnaire";
 import { VisionReview } from "@/components/nutrition/vision-review";
 
 /** What `api.vision.analyze` hands back — the four photo tools all return it. */
@@ -93,8 +95,18 @@ export const CHEF: AgentConfig = {
     "tool-shopping_list",
     "tool-suggest_recipes_from_ingredients",
     "tool-lookup_food",
+    // The form reads `questionnaireId` off the OUTPUT: the tool takes no
+    // arguments at all, so its input is `{}` and the guard would hide the card.
+    "tool-ask_questionnaire",
   ],
   toolLabels: {
+    "tool-ask_questionnaire": {
+      icon: ClipboardListIcon,
+      pending: "Je prépare tes questions…",
+      running: "J'ouvre ton questionnaire…",
+      done: "Questionnaire nutrition",
+      failed: "Le questionnaire n'a pas pu s'ouvrir.",
+    },
     "tool-save_nutrition_profile": {
       icon: CheckIcon,
       pending: "Je récapitule…",
@@ -219,6 +231,9 @@ export const CHEF: AgentConfig = {
     "tool-analyze_fridge",
     "tool-read_nutrition_label",
     "tool-analyze_groceries",
+    // A form nobody can see is a form nobody fills in: the whole point of the
+    // tool is that the user acts on it.
+    "tool-ask_questionnaire",
   ],
   renderTool: (tool, isNew) => {
     const { input, output } = tool;
@@ -243,6 +258,15 @@ export const CHEF: AgentConfig = {
           />
         );
       }
+
+      // The onboarding form. Its state lives in Convex, so the card only needs
+      // the id — everything else comes from `api.questionnaires.status`.
+      case "tool-ask_questionnaire":
+        return (
+          <OnboardingQuestionnaire
+            questionnaireId={(output as { questionnaireId: Id<"questionnaires"> }).questionnaireId}
+          />
+        );
 
       case "tool-save_nutrition_profile":
         return (

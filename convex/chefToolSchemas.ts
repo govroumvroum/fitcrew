@@ -35,6 +35,13 @@ export const zSaveNutritionProfile = z.object({
   people: z.number().int().min(1).max(12).nullable().describe("Nombre de couverts"),
 });
 
+/**
+ * No arguments, deliberately: the questions ARE the nutrition profile above, and
+ * they are fixed. Letting the model pass its own list of questions would be a
+ * generic form engine, which is explicitly out of scope.
+ */
+export const zAskQuestionnaire = z.object({});
+
 export const zPlannedMeal = z.object({
   slot: zMealSlot,
   name: z.string().describe('Ex : "Poulet rôti, patate douce, brocolis"'),

@@ -293,6 +293,21 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
 };
 
 export const CHEF_FIXTURES: Record<string, Fixture[]> = {
+  "tool-ask_questionnaire": [
+    {
+      label: "Formulaire ouvert",
+      tool: done(
+        "tool-ask_questionnaire",
+        {},
+        {
+          questionnaireId: "demo_fake_questionnaire_id" as Id<"questionnaires">,
+          resumed: false,
+          note: "Le formulaire est à l'écran.",
+        },
+      ),
+      note: "État live, dépend d'une vraie ligne Convex : l'id est faux, la carte s'abonne à `api.questionnaires.status`.",
+    },
+  ],
   "tool-save_nutrition_profile": [
     {
       label: "Profil complet, cibles 2220 kcal",

@@ -346,6 +346,29 @@ export default defineSchema({
     confirmed: v.boolean(),
   }).index("by_user", ["userId"]),
 
+  // The onboarding form card, same durable-state contract as `visionAnalyses`:
+  // the card lives forever in a message stream, so a reload has to find it
+  // exactly as the user left it.
+  //
+  // `answers` is partial by nature — that's the point of a form you fill in over
+  // several minutes — and gets the same treatment as `visionAnalyses.items`:
+  // validated at the boundary (`sanitizeAnswers`), not by the table. The client
+  // writes this field, so nothing here is trusted.
+  //
+  // `kind` is a single literal today; a second questionnaire adds a literal, not
+  // a form engine.
+  questionnaires: defineTable({
+    userId: v.id("users"),
+    kind: v.literal("chef_onboarding"),
+    // Carried on the row, not read from the client: the card sends an echo
+    // message back into ITS OWN conversation after a submit, which is not
+    // necessarily the thread currently selected in the URL — and on /demo there
+    // is no URL state at all.
+    threadId: v.string(),
+    answers: v.any(),
+    status: v.union(v.literal("open"), v.literal("completed"), v.literal("abandoned")),
+  }).index("by_user_status", ["userId", "status"]),
+
   // One row per LLM call, so we know who spends what. Written by the coach's
   // `usageHandler` and by hand at the two `generateObject` sites.
   //

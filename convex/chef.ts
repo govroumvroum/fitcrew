@@ -28,6 +28,7 @@ import {
   zAddFoodLogEntry,
   zAnalyzeImage,
   zAskCoach,
+  zAskQuestionnaire,
   zGenerateMealPlan,
   zLogPlannedMeal,
   zLookupFood,
@@ -144,6 +145,23 @@ function chefTools(today: string) {
   const week = { weekStart: monday };
 
   return {
+    ask_questionnaire: createTool({
+      description:
+        "Affiche le formulaire de profil nutrition au user : toutes les questions d'un coup, dans une carte qu'il remplit lui-même. N'enregistre RIEN par lui-même — c'est la validation du formulaire qui écrit le profil et calcule ses cibles.",
+      inputSchema: zAskQuestionnaire,
+      execute: async (ctx: ToolCtx) => {
+        // The component injects `threadId` into every tool ctx it builds, but
+        // types it optional because a tool can also run outside a thread. A
+        // throw, not a fallback: the card sends its echo message back into this
+        // conversation, and guessing which one would send it to the wrong place.
+        if (!ctx.threadId) throw new Error("ask_questionnaire appelé hors conversation");
+        return {
+          ...(await ctx.runMutation(internal.questionnaires.open, { threadId: ctx.threadId })),
+          note: "Le formulaire est à l'écran. Attends qu'il te dise l'avoir rempli — ne repose PAS les questions en prose par-dessus, et n'appelle PAS save_nutrition_profile : la validation du formulaire écrit le profil et ses cibles toute seule.",
+        };
+      },
+    }),
+
     save_nutrition_profile: createTool({
       description:
         "Enregistre le profil nutrition et calcule ses cibles caloriques. À appeler UNIQUEMENT après que le user a validé ton récapitulatif.",
@@ -206,7 +224,7 @@ function chefTools(today: string) {
           hydrationMl: dashboard.hydrationMl,
           note: p
             ? null
-            : "Pas encore de profil nutrition : aucune cible, donc pas de « restant » (remaining est null). Le reste de la journée est bien réel. Déroule le questionnaire et appelle save_nutrition_profile.",
+            : "Pas encore de profil nutrition : aucune cible, donc pas de « restant » (remaining est null). Le reste de la journée est bien réel. Appelle ask_questionnaire pour lui afficher le formulaire de profil.",
           hints:
             "Une liste vide veut dire « rien », pas « je ne sais pas » : ne complète pas de mémoire. Les totaux et le restant sont déjà calculés, ne refais pas les soustractions. Tous ces chiffres sont des estimations.",
         };
@@ -468,14 +486,14 @@ ${
 
 CIBLES QUOTIDIENNES (estimées, Mifflin-St Jeor) : ${p.targets.calories} kcal — ${p.targets.protein} g de protéines, ${p.targets.carbs} g de glucides, ${p.targets.fat} g de lipides.
 
-Le profil est déjà fait. S'il veut le refaire ou change de poids/objectif, reprends les questions une par une et rappelle \`save_nutrition_profile\` à la fin.`
+Le profil est déjà fait. S'il veut le refaire ou change de poids/objectif, appelle \`ask_questionnaire\` : le formulaire s'ouvre pré-rempli avec ce qu'il a déjà. Sa validation réécrit le profil et les cibles — n'appelle pas \`save_nutrition_profile\` derrière.`
     : `PREMIÈRE CONVERSATION — LE PROFIL N'EXISTE PAS ENCORE
 Tu ne peux rien calculer sans lui. Déroule exactement ça :
-- Accueille en une ou deux phrases.
-- Pose les questions suivantes UNE PAR UNE. Jamais deux questions dans le même message, jamais de liste à cocher. Tu rebondis sur la réponse avant d'enchaîner.
-${QUESTIONS}
-- Puis fais un récapitulatif de ce que tu as compris et demande si c'est bon.
-- Une fois validé, appelle \`save_nutrition_profile\`, annonce ses cibles en précisant que ce sont des estimations, puis propose de générer sa semaine de repas.`
+- Accueille en une ou deux phrases, puis appelle \`ask_questionnaire\`. Le formulaire s'affiche dans la conversation, avec toutes les questions d'un coup.
+- Tant qu'il est à l'écran, tu ne poses AUCUNE de ces questions en prose. Tu attends qu'il te dise l'avoir rempli.
+- Quand il te le dit : le profil et les cibles sont DÉJÀ enregistrés, n'appelle pas \`save_nutrition_profile\`. Annonce ses cibles en précisant que ce sont des estimations, puis propose de générer sa semaine de repas.
+- S'il refuse le formulaire ou l'abandonne, et SEULEMENT dans ce cas : pose les questions UNE PAR UNE, jamais deux dans le même message, en rebondissant sur chaque réponse. Puis récapitule, demande si c'est bon, et appelle \`save_nutrition_profile\` une fois validé.
+${QUESTIONS}`
 }
 
 CE PROMPT NE CONTIENT PAS SA JOURNÉE — TU VAS LA CHERCHER
