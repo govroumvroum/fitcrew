@@ -2,6 +2,7 @@
 
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useId, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -331,8 +332,11 @@ function Form({
               // The agent never sees the form's fields: without this echo it
               // doesn't know what was answered. Not awaited for its reply — that
               // arrives over the `listMessages` subscription, like a normal send.
-              void send({ threadId, prompt: recap(answers), today: today as string }).catch(
-                () => {},
+              void send({ threadId, prompt: recap(answers), today: today as string }).catch(() =>
+                // Surfaced rather than swallowed: the profile IS written at this
+                // point, so a silent failure leaves « Profil enregistré. » above
+                // an agent that never answers, with nothing saying why.
+                toast.error("Profil enregistré, mais le Chef n'a pas reçu tes réponses."),
               );
             }, "Profil enregistré.")
           }
