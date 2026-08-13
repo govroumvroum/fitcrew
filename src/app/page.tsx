@@ -1,6 +1,7 @@
 "use client";
 
 import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
+import Link from "next/link";
 import { Today, TodaySkeleton } from "@/components/home/today";
 import { Button } from "@/components/ui/button";
 import { useLocalDate } from "@/lib/dates";
@@ -54,6 +55,20 @@ export default function Home() {
               So the level-1 has to exist without changing a pixel. */}
           <h1 className="sr-only">Aujourd&apos;hui</h1>
           {date ? <Today date={date} /> : <TodaySkeleton />}
+        </Show>
+
+        {/* The only way in to /changelog: TABS is full (7 entries) and a list of
+            what shipped is not a destination you go to every day. Signed-in only —
+            /changelog is behind Clerk, so signed out the link is a trip to /sign-in. */}
+        <Show when="signed-in">
+          <footer className="px-4 pt-8 pb-[calc(var(--tab-bar)+1rem)] text-center">
+            <Link
+              href="/changelog"
+              className="text-muted-foreground text-xs underline-offset-4 hover:underline"
+            >
+              Nouveautés
+            </Link>
+          </footer>
         </Show>
       </main>
     </div>

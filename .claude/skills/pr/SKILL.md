@@ -17,6 +17,23 @@ Per-repo settings for the `github-pr` skill vendored in this repo (`.claude/skil
 | screenshots heading | `## Écrans` |
 | build gate | `bun run build` green; `bunx tsc --noEmit` and `bunx oxlint` passing is not enough — the build is the bar. Run the `*.check.ts` self-checks touched by the change. |
 
+## Changelog entry
+
+`/changelog` is fed by markdown files in the branch, so the entry ships with the
+PR that ships the feature — not after.
+
+- **Due** when the crew would notice: a new screen, a new action, a behaviour or
+  wording change they can see.
+- **Not due** for refactors, dependency bumps, skills, CI, docs, or pure backend
+  work with no visible effect. Say so in one line in the PR body ("pas d'entrée
+  changelog : refacto") rather than committing an empty file.
+
+One file per entry: `src/content/changelog/AAAA-MM-JJ-slug.md`, dated the day the
+PR is opened. First line is `# Titre`, then 2–5 lines of body. Written to a user,
+in French, tutoiement — "tu peux maintenant partager ton programme par lien", not
+"ajout de `programs:getByShareCode`". No function names, no PR numbers. A file
+that doesn't match the naming pattern is silently ignored, so check the name.
+
 ## Screenshots need a signed-in app
 
 **Read `../qa/SKILL.md` for the capture itself** — waiting for the app to be
