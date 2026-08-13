@@ -37,10 +37,14 @@ export const open = internalMutation({
       // now echoes into the new one. That is the lesser evil: NOT re-pointing
       // means the card he is actually looking at answers into a conversation he
       // left, so he validates and nothing happens on screen — a silent failure
-      // beats a noisy one only when someone is watching. And there is at most
-      // one open row per user (the guard just above), so the two cards are the
-      // same questionnaire seen from two places, not two forms: `assertOpen`
-      // refuses whichever validation comes second.
+      // beats a noisy one only when someone is watching.
+      //
+      // The guard just above keeps ONE open row per user for sequential calls.
+      // Convex has no unique index (`IndexOptions` carries `staged` and nothing
+      // else), so two truly simultaneous `open` calls rest on the engine's
+      // serializability rather than on a constraint we declared. Nothing here
+      // depends on it: `assertOpen` is the real backstop on every write, and a
+      // second validation re-saves the same profile rather than corrupting it.
       if (existing.threadId !== args.threadId) {
         await ctx.db.patch("questionnaires", existing._id, { threadId: args.threadId });
       }
