@@ -43,7 +43,7 @@ export const METRICS = {
  * nothing can recover "Volume" from `volume`. Hence `items` on `<Select>`.
  */
 const METRIC_LABELS = Object.fromEntries(
-  Object.entries(METRICS).map(([key, { label }]) => [key, label]),
+  Object.entries(METRICS).map(([key, { label }]) => [key, label])
 ) as Record<ChallengeMetric, string>;
 
 export function Challenges({ today }: { today: string }) {
@@ -244,7 +244,10 @@ function CreateForm({ weekStart, onDone }: { weekStart: string; onDone: () => vo
         <div className="space-y-2">
           <Label>Exercice</Label>
           {/* Values are the exercise names, so no `items` needed. */}
-          <Select value={exerciseName} onValueChange={(value) => setExerciseName(value ?? "")}>
+          <Select
+            value={exerciseName}
+            onValueChange={(value) => setExerciseName(value ?? "")}
+          >
             <SelectTrigger className="h-12 w-full text-base sm:text-sm">
               <SelectValue placeholder="Choisis un exercice" />
             </SelectTrigger>

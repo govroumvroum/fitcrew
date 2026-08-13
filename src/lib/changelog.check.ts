@@ -30,7 +30,9 @@ assert.deepEqual(dates, ["2026-08-11", "2026-01-02", "2025-12-31"]);
 assert.deepEqual(
   parseEntries([
     { name: "README.md", content: "# Nope" },
-    { name: "2026-13-01-not-a-date.md", content: "# Nope" }, // month 13
+    { name: "2026-13-01-not-a-date.md", content: "# Nope" }, // month 13 → Invalid Date
+    { name: "2026-02-31-not-a-date.md", content: "# Nope" }, // day 31 of Feb → would roll to Mar 3
+    { name: "2026-04-31-not-a-date.md", content: "# Nope" }, // day 31 of a 30-day month
     { name: "2026-08-11.md", content: "# Nope" }, // no slug
     { name: "2026-08-11-notes.txt", content: "# Nope" },
     { name: "2026-08-11-no-title.md", content: "juste du corps" },

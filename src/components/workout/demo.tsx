@@ -58,42 +58,40 @@ export function ExerciseDemo({ name, gifUrl }: { name: string; gifUrl: string })
   return (
     <Sheet>
       <SheetTrigger
-        render={
-          reduce ? (
-            <Button
-              variant="outline"
-              className="size-11 shrink-0 active:scale-[0.96] [&_svg]:size-4"
-              aria-label={`Voir la démo : ${name}`}
-            >
-              <PlayIcon />
-            </Button>
-          ) : (
-            // ghost, not outline: the outline treatment lives on the image itself
-            // (the button's own `outline-none` would fight it), and a border
-            // around a bordered thumbnail is just noise.
-            <Button
-              variant="ghost"
-              className="size-14 shrink-0 p-0 active:scale-[0.96]"
-              aria-label={`Voir la démo : ${name}`}
-            >
-              {/* Plain <img>, not next/image: hotlinked third-party GIF, and their
+        render={reduce ? (
+          <Button
+            variant="outline"
+            className="size-11 shrink-0 active:scale-[0.96] [&_svg]:size-4"
+            aria-label={`Voir la démo : ${name}`}
+          >
+            <PlayIcon />
+          </Button>
+        ) : (
+          // ghost, not outline: the outline treatment lives on the image itself
+          // (the button's own `outline-none` would fight it), and a border
+          // around a bordered thumbnail is just noise.
+          <Button
+            variant="ghost"
+            className="size-14 shrink-0 p-0 active:scale-[0.96]"
+            aria-label={`Voir la démo : ${name}`}
+          >
+            {/* Plain <img>, not next/image: hotlinked third-party GIF, and their
                 terms say don't proxy or re-host — which is exactly what the
                 optimizer would do. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={gifUrl}
-                alt=""
-                // 56px against a 180px source: a downscale, so this is the one
-                // place in the app the GIF actually looks sharp. Fixed square box
-                // so the card can't reflow when it decodes; lazy so a day's worth
-                // of cards below the fold doesn't hit the CDN on first paint.
-                className="aspect-square size-full rounded-lg bg-muted object-contain outline outline-white/10"
-                loading="lazy"
-                decoding="async"
-              />
-            </Button>
-          )
-        }
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={gifUrl}
+              alt=""
+              // 56px against a 180px source: a downscale, so this is the one
+              // place in the app the GIF actually looks sharp. Fixed square box
+              // so the card can't reflow when it decodes; lazy so a day's worth
+              // of cards below the fold doesn't hit the CDN on first paint.
+              className="aspect-square size-full rounded-lg bg-muted object-contain outline outline-white/10"
+              loading="lazy"
+              decoding="async"
+            />
+          </Button>
+        )}
       />
       <SheetContent side="bottom" className="gap-3 rounded-t-xl p-4">
         <SheetHeader className="p-0 pr-10">

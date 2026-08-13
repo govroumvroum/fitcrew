@@ -25,8 +25,12 @@ export function parseEntries(files: { name: string; content: string }[]): Change
   return files
     .flatMap(({ name, content }) => {
       const date = FILE_NAME.exec(name)?.[1];
-      // `Date.parse` rejects what the regex can't: month 13, 31 February.
-      if (!date || Number.isNaN(Date.parse(date))) return [];
+      if (!date) return [];
+      // Round-trip, not just `Date.parse`: month 13 gives an Invalid Date, but
+      // day 31 of February silently rolls to March 3rd — only re-serialising
+      // catches that. `toISOString()` throws on Invalid Date, hence both checks.
+      const parsed = new Date(`${date}T00:00:00Z`);
+      if (Number.isNaN(+parsed) || parsed.toISOString().slice(0, 10) !== date) return [];
       const lines = content.split("\n");
       const heading = lines.findIndex((line) => line.startsWith("# "));
       if (heading === -1) return [];
@@ -42,7 +46,8 @@ export function parseEntries(files: { name: string; content: string }[]): Change
     .sort((a, b) => b.name.localeCompare(a.name));
 }
 
-/** Read at build time. Missing or empty directory → no entries, no crash. */
+/** Read at build time. Empty directory → no entries. The directory is committed,
+ * so `readdirSync` can't ENOENT here — no try/catch for a case that can't happen. */
 export function readEntries(dir = CHANGELOG_DIR): ChangelogEntry[] {
   const names = readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isFile())

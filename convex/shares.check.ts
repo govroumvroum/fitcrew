@@ -29,9 +29,7 @@ const source = {
   status: "archived",
   version: 7,
   name: "PPL 4 jours",
-  days: [
-    { name: "Jour 1 — Push", exercises: [{ name: "DC", sets: 4, reps: "8", restSeconds: 90 }] },
-  ],
+  days: [{ name: "Jour 1 — Push", exercises: [{ name: "DC", sets: 4, reps: "8", restSeconds: 90 }] }],
   progressionRules: "+2,5 kg quand toutes les séries passent",
   deloadEveryWeeks: 5,
 };

@@ -35,8 +35,7 @@ export function Today({ date }: { date: string }) {
   // day" to show — there's one per program.
   const programs = useQuery(api.programs.list, { date });
 
-  if (today === undefined || stats === undefined || programs === undefined)
-    return <TodaySkeleton />;
+  if (today === undefined || stats === undefined || programs === undefined) return <TodaySkeleton />;
   if (today === null || stats === null) {
     return <p className="p-6 text-center text-muted-foreground">Profil en cours de création…</p>;
   }
@@ -112,7 +111,10 @@ export function Today({ date }: { date: string }) {
                    summary — picking one and starting it is /seance's job. */
                 <ul className="divide-y">
                   {active.map((program) => (
-                    <li key={program.lineageId} className="flex items-center gap-3 py-1.5 text-sm">
+                    <li
+                      key={program.lineageId}
+                      className="flex items-center gap-3 py-1.5 text-sm"
+                    >
                       <span className="min-w-0 flex-1 truncate">{program.name}</span>
                       <span className="min-w-0 max-w-[55%] shrink-0 truncate text-muted-foreground">
                         {program.nextDayName ?? `${program.dayCount} jours`}
@@ -189,7 +191,9 @@ export function Today({ date }: { date: string }) {
                   <Cta href="/programme">Réactive un programme</Cta>
                 )
               ) : (
-                <Cta href="/seance">{only ? "Commencer la séance" : "Choisir une séance"}</Cta>
+                <Cta href="/seance">
+                  {only ? "Commencer la séance" : "Choisir une séance"}
+                </Cta>
               )
             ) : workout?.endedAt ? null : (
               <Cta href="/seance">{running ? "Reprendre la séance" : "Commencer la séance"}</Cta>

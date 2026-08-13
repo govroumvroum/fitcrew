@@ -261,9 +261,7 @@ function ProgramSection({
           It must never grow into a week view. */}
       <div className={cn("flex flex-col gap-3", isLoop && "slab")}>
         <div className="min-w-0">
-          <p className="eyebrow">
-            {isLoop ? "La rotation" : "Un seul jour, répété à chaque séance"}
-          </p>
+          <p className="eyebrow">{isLoop ? "La rotation" : "Un seul jour, répété à chaque séance"}</p>
           {isLoop ? (
             <p className="text-sm text-muted-foreground">
               Le jour qui vient, puis le suivant. Tu ne peux pas être en retard sur une boucle.

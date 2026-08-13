@@ -43,7 +43,11 @@ export function snapshotForCopy(program: ProgramSnapshot, receiverId: Id<"users"
 // ---------------------------------------------------------------------------
 
 /** The lineage's latest row, IF the caller owns it. Throws otherwise. */
-async function requireOwnedLineage(ctx: QueryCtx, userId: Id<"users">, lineageId: Id<"programs">) {
+async function requireOwnedLineage(
+  ctx: QueryCtx,
+  userId: Id<"users">,
+  lineageId: Id<"programs">,
+) {
   const latest = await latestInLineage(ctx, userId, lineageId);
   if (!latest) throw new Error("Programme introuvable");
   return latest;
@@ -162,7 +166,10 @@ export const copyShared = mutation({
     // Same two-step as coach.saveProgram: a root row's lineage is itself, and
     // we only know the id after the insert. `currentProgramId` is NOT touched —
     // it means "most recently trained", and a copy was never trained.
-    const programId = await ctx.db.insert("programs", snapshotForCopy(resolved.program, user._id));
+    const programId = await ctx.db.insert(
+      "programs",
+      snapshotForCopy(resolved.program, user._id),
+    );
     await ctx.db.patch("programs", programId, { lineageId: programId });
     return programId;
   },
