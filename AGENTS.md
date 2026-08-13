@@ -26,6 +26,23 @@ Convex agent skills for common tasks can be installed by running
 
 When creating or rewriting a GitHub issue, read `.agents/skills/issue/SKILL.md` first. It defines the research process and the quality bar for decision-ready issues, and should be used with the templates in `.github/ISSUE_TEMPLATE/`.
 
+# `src/components/ai-elements/` is vendored — a resync overwrites it
+
+Those files come from the AI Elements registry, so anything we change in them is
+lost the next time they're pulled. Two edits are currently carried there and will
+need redoing after a resync:
+
+- the `PromptInputCommand*` wrappers and their `@/components/ui/command` import
+  were removed — `command.tsx` is deleted, so a resync brings back an import that
+  resolves to nothing;
+- `asChild` on triggers, `onSelect` on menu items and `openDelay`/`closeDelay` on
+  hover cards are Radix-era props. Our `src/components/ui/*` wrappers absorb them
+  and map them onto Base UI, so vendored code keeps compiling — don't "fix" it by
+  editing `ai-elements/`, extend the wrapper instead.
+
+The failure is loud either way (module not found, or a type error), but only
+obvious if you know it was deliberate.
+
 # Migrations
 
 Data migrations live in `convex/migrations.ts`, built with `@convex-dev/migrations`.
