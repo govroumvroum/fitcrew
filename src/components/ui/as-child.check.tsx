@@ -49,10 +49,10 @@ assert.equal(badge.match(/>3</g)?.length, 1, badge);
 assert.match(badge, /data-slot="badge"/);
 
 /**
- * The one live interop between the two libraries in this layer: a Radix `Slot`
- * (`DropdownMenuTrigger asChild`, as `/chef`'s thread sidebar uses it) receiving
- * an element produced by Base UI's `useRender`. Radix has to be able to clone it
- * and merge its own trigger props in. This is `thread-sidebar.tsx:145`.
+ * Two `render` layers stacked: `DropdownMenuTrigger asChild` (which is now Base
+ * UI's `render` under the hood) receiving an element that is itself produced by
+ * `useRender`. This is `thread-sidebar.tsx:145`, and it has to still collapse to
+ * one button with the menu's trigger props merged in.
  */
 const interop = renderToStaticMarkup(
   <SidebarProvider>
@@ -66,13 +66,21 @@ const interop = renderToStaticMarkup(
 );
 
 assert.match(interop, /data-slot="sidebar-menu-button"[^>]*>Ma séance</, interop);
-// Radix's own trigger props landed on our button. `data-slot` becomes
+// Exactly two buttons: the menu one and `SidebarMenuButton`. This is the only
+// assertion here that catches a regressed `children: undefined` guard — Base UI
+// would then merge the trigger's props onto the OUTER element and render the
+// child again inside, so every attribute assertion below still passes with a
+// nested <button> sitting in the markup.
+assert.equal(interop.match(/<button/g)?.length, 2, interop);
+// The menu's own trigger props landed on our button. `data-slot` becomes
 // `dropdown-menu-trigger`, because `{...props}` is spread last — that was already
 // true with `Slot`, and `data-sidebar` is the attribute the CSS actually keys on.
 assert.match(interop, /data-slot="dropdown-menu-trigger" data-sidebar="menu-action"/, interop);
 assert.match(interop, /aria-haspopup="menu"/, interop);
-assert.match(interop, /aria-expanded="false"/, interop);
 assert.match(interop, /class="[^"]*top-1\.5/, interop);
+// No `aria-expanded="false"` here, where Radix emitted one: Base UI adds it from
+// the root's trigger props, which only attach on the client. Nothing keys on it
+// in CSS, and it is back after hydration — same with and without `asChild`.
 
 /**
  * The one DOM difference this migration introduces: Base UI writes an explicit
@@ -87,4 +95,4 @@ assert.match(
   /^<button type="submit"/,
 );
 
-console.log("ok — asChild composes to a single element, and Radix can still clone it");
+console.log("ok — asChild composes to a single element, and Base UI's render can wrap it");

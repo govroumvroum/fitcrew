@@ -48,6 +48,21 @@ const parseNum = (raw: string) => {
 
 const SPRING = { type: "spring", duration: 0.3, bounce: 0 } as const;
 
+/**
+ * One list, used both to render the options and as `items` on the `<Select>`:
+ * Base UI's `<SelectValue>` prints the value ("90"), not the option's text
+ * ("90 s"), because the options live in a portal that isn't mounted while the
+ * select is closed. An array, not a record — a record with numeric-looking keys
+ * would sort "auto" after them.
+ */
+const REST_ITEMS = [
+  { value: "auto", label: "Comme le programme" },
+  ...REST_OPTIONS.map((seconds) => ({
+    value: String(seconds),
+    label: seconds < 60 ? `${seconds} s` : `${seconds / 60} min`,
+  })),
+];
+
 export function Session({ date }: { date: string }) {
   const data = useQuery(api.workouts.today, { date });
   // Every program, each with its own next day and its own prefill: the picker
@@ -519,6 +534,7 @@ export function Session({ date }: { date: string }) {
           <div className="flex items-center gap-3 rounded-lg border bg-card/55 p-3.5">
             <span className="text-sm text-muted-foreground">Repos</span>
             <Select
+              items={REST_ITEMS}
               value={rest === null ? "auto" : String(rest)}
               onValueChange={(value) => setRest(value === "auto" ? null : Number(value))}
             >
@@ -526,10 +542,9 @@ export function Session({ date }: { date: string }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="auto">Comme le programme</SelectItem>
-                {REST_OPTIONS.map((seconds) => (
-                  <SelectItem key={seconds} value={String(seconds)}>
-                    {seconds < 60 ? `${seconds} s` : `${seconds / 60} min`}
+                {REST_ITEMS.map(({ value, label }) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
                   </SelectItem>
                 ))}
               </SelectContent>
