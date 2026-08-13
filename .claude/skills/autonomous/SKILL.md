@@ -40,9 +40,8 @@ Done when `bun run build` is green.
 
 ## 3. Prove it
 
-Run the `qa` skill. **Drive** the change through the running app —
-`bun run agent-login -- --browser`, then `agent-browser --session-name fitcrew`
-— and come back with the shots `## Écrans` needs.
+Run the `qa` skill. **Drive** the change through the running app and come back
+with the shots `## Écrans` needs.
 
 A green build with no evidence is a step you have not finished.
 
