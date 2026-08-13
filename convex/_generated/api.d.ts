@@ -24,6 +24,7 @@ import type * as model from "../model.js";
 import type * as nutrition from "../nutrition.js";
 import type * as programs from "../programs.js";
 import type * as progress from "../progress.js";
+import type * as questionnaireAnswers from "../questionnaireAnswers.js";
 import type * as questionnaires from "../questionnaires.js";
 import type * as screenshots from "../screenshots.js";
 import type * as search from "../search.js";
@@ -57,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   nutrition: typeof nutrition;
   programs: typeof programs;
   progress: typeof progress;
+  questionnaireAnswers: typeof questionnaireAnswers;
   questionnaires: typeof questionnaires;
   screenshots: typeof screenshots;
   search: typeof search;
