@@ -7,6 +7,7 @@
     "build": "next build && serwist build serwist.config.mjs",
     "start": "next start",
     "lint": "oxlint",
+    "check": "for f in $(find convex src -name \"*.check.ts\" -o -name \"*.check.tsx\" | sort); do echo \"→ $f\"; bun \"$f\" || exit 1; done",
     "agent-login": "bun scripts/agent-login.ts",
     "format": "oxfmt"
   },
