@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Streamdown } from "streamdown";
+import { MarkChangelogSeen } from "@/components/changelog-badge";
 import { readEntries } from "@/lib/changelog";
 
 export const metadata: Metadata = { title: "Nouveautés — FitCrew" };
@@ -20,6 +21,9 @@ export default function ChangelogPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col p-4 pb-[var(--tab-bar)]">
+      {/* Arriving here is what marks the newest entry read — the floating badge
+          on l'accueil stops showing. Client-only, renders nothing. */}
+      <MarkChangelogSeen latest={entries[0]?.name ?? null} />
       <h1 className="font-display text-2xl font-bold">Nouveautés</h1>
       <p className="text-muted-foreground mt-1 text-sm">Ce qui a bougé dans FitCrew.</p>
 
