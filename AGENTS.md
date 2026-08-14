@@ -116,6 +116,17 @@ verifies the page reports a signed-in user before exiting 0, and revokes the tas
 
 Self-check: `bun scripts/agent-login.check.ts`.
 
+# A second worktree is not a second backend
+
+`.worktreeinclude` copies `.env.local` into every new worktree, `CONVEX_DEPLOYMENT`
+included — so **every worktree pushes to the same dev deployment by default**, and a
+Convex push replaces the whole schema and function set. Two worktrees don't
+conflict, they overwrite, with no error at either one.
+
+So before `convex dev`, `bun run dev` or `agent-browser` anywhere other than the
+main checkout, read `.agents/skills/driven/SKILL.md`. To drive several worktrees
+yourself, `.agents/skills/drive/SKILL.md`.
+
 # Pull requests
 
 `main` is protected: PR required, squash-only, no force-push. Read
