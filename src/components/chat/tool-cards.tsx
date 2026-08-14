@@ -17,6 +17,8 @@ import type {
   zSwapExercise,
 } from "../../../convex/toolSchemas";
 import { Badge } from "@/components/ui/badge";
+import type { Block } from "@/lib/circuits";
+import { betweenRoundsOf, groupCircuits, roundsOf } from "@/lib/circuits";
 import { formatLoose } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
@@ -122,12 +124,54 @@ function ExerciseRow({ exercise }: { exercise: Exercise }) {
   return (
     <li className="flex items-baseline gap-2 border-b px-1 py-2 last:border-b-0">
       <span className="min-w-0 flex-1 text-sm">{exercise.name}</span>
+      {/* `sets` on a circuit exercise is a ROUND count, not straight sets:
+          printing "4×10" here would say the exact opposite of what the circuit
+          prescribes. The rounds are stated once, by the block header above. */}
       <span className="shrink-0 text-sm font-semibold tabular-nums">
-        {exercise.sets}×{exercise.reps}
+        {exercise.circuit ? exercise.reps : `${exercise.sets}×${exercise.reps}`}
       </span>
       <span className="w-14 shrink-0 text-right text-sm text-muted-foreground tabular-nums">
         {rest(exercise.restSeconds)}
       </span>
+    </li>
+  );
+}
+
+/** The same block as /programme, at card density: rounds up top, order in the
+ *  rows, the between-rounds rest on its own line so it can't be read as one more
+ *  between-exercises rest. */
+function CircuitRow({ block }: { block: Extract<Block<Exercise>, { kind: "circuit" }> }) {
+  const rounds = roundsOf(block);
+  const betweenRounds = betweenRoundsOf(block);
+
+  return (
+    <li className="border-b px-1 py-2 last:border-b-0">
+      <div className="flex items-baseline gap-2">
+        <span className="min-w-0 flex-1 text-sm font-medium">Circuit {block.label}</span>
+        <span className="shrink-0 text-sm font-semibold tabular-nums">
+          {rounds} tour{rounds > 1 ? "s" : ""}
+        </span>
+      </div>
+      <ol className="mt-1 border-l pl-2.5">
+        {block.exercises.map((exercise, index) => (
+          // The slot tells two occurrences of the same exercise apart.
+          <li
+            key={exercise.slot ?? `${exercise.name}-${index}`}
+            className="flex items-baseline gap-2 py-0.5"
+          >
+            <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{index + 1}</span>
+            <span className="min-w-0 flex-1 text-sm">{exercise.name}</span>
+            <span className="shrink-0 text-sm font-semibold tabular-nums">{exercise.reps}</span>
+            <span className="w-14 shrink-0 text-right text-sm text-muted-foreground tabular-nums">
+              {index === block.exercises.length - 1 ? "—" : rest(exercise.restSeconds)}
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Entre deux tours&#8239;:{" "}
+        <span className="tabular-nums">{betweenRounds > 0 ? rest(betweenRounds) : "enchaîné"}</span>
+      </p>
     </li>
   );
 }
@@ -171,9 +215,13 @@ export function ProgramCard({
             </span>
           </summary>
           <ul className="mt-1 mb-2">
-            {day.exercises.map((exercise) => (
-              <ExerciseRow key={exercise.name} exercise={exercise} />
-            ))}
+            {groupCircuits(day.exercises).map((block) =>
+              block.kind === "circuit" ? (
+                <CircuitRow key={block.key} block={block} />
+              ) : (
+                <ExerciseRow key={block.key} exercise={block.exercise} />
+              ),
+            )}
           </ul>
         </details>
       ))}
@@ -345,6 +393,19 @@ export function SwapCard({
         <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 font-medium">{input.to.name}</span>
       </div>
+      {/* The swap carries one exercise and no day, so the block header the row
+          relies on doesn't exist here — this line is it. */}
+      {input.to.circuit ? (
+        <p className="text-sm text-muted-foreground">
+          Dans le circuit {input.to.circuit}
+          {" · "}
+          <span className="tabular-nums">{input.to.sets}</span> tour
+          {input.to.sets > 1 ? "s" : ""}
+          {input.to.restBetweenRoundsSeconds
+            ? ` · entre deux tours ${rest(input.to.restBetweenRoundsSeconds)}`
+            : ""}
+        </p>
+      ) : null}
       <ul>
         <ExerciseRow exercise={input.to} />
       </ul>

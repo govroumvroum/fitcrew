@@ -1,12 +1,17 @@
 /**
  * Self-check for the program shape helpers in convex/coach.ts and the lineage
- * grouping in convex/programs.ts.
+ * grouping in convex/programs.ts, plus the circuit blocks in src/lib/circuits.ts
+ * and how a circuit renders.
  * Run: `bun src/components/chat/program.check.ts`
  */
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { swapInDays, toDays } from "../../../convex/coach";
 import { latestPerLineage, lineageMembers, lineageOf } from "../../../convex/programs";
+import { daySeconds, groupCircuits } from "@/lib/circuits";
 import { formatLoose } from "@/lib/dates";
+import { ProgramCard } from "./tool-cards";
 
 const squat = { name: "Squat", sets: 4, reps: "8", restSeconds: 120, notes: null };
 const presse = { name: "Presse à cuisses", sets: 4, reps: "10", restSeconds: 90 };
@@ -103,3 +108,127 @@ assert.equal(formatLoose(""), "");
 assert.equal(formatLoose("2026-08-03"), "lundi 3 août");
 
 console.log("formatLoose ok");
+
+// ---------------------------------------------------------------------------
+// Circuits: a block is implicit in the flat exercise list.
+// ---------------------------------------------------------------------------
+
+const circuitExercise = (
+  name: string,
+  slot: string,
+  reps: string,
+  restSeconds: number,
+): Parameters<typeof groupCircuits>[0][number] & {
+  sets: number;
+  reps: string;
+  restSeconds: number;
+  restBetweenRoundsSeconds: number;
+  notes: null;
+} => ({
+  name,
+  sets: 4, // 4 TOURS — the same value on every exercise of the circuit.
+  reps,
+  restSeconds,
+  notes: null,
+  circuit: "A",
+  slot,
+  restBetweenRoundsSeconds: 90,
+});
+
+// A classic exercise: no circuit, no slot, no between-rounds rest.
+const rameur = {
+  name: "Rameur",
+  sets: 1,
+  reps: "5 min",
+  restSeconds: 60,
+  notes: null,
+  circuit: null,
+  slot: null,
+  restBetweenRoundsSeconds: null,
+};
+const circuitDay = [
+  rameur,
+  circuitExercise("Pompes", "A1", "10", 20),
+  circuitExercise("Abdos", "A2", "15", 20),
+  circuitExercise("Pompes", "A3", "AMRAP", 20),
+  {
+    ...circuitExercise("Fentes", "B1", "12", 15),
+    sets: 3,
+    circuit: "B",
+    restBetweenRoundsSeconds: 60,
+  },
+  {
+    ...circuitExercise("Gainage", "B2", "45 s", 15),
+    sets: 3,
+    circuit: "B",
+    restBetweenRoundsSeconds: 60,
+  },
+];
+
+const blocks = groupCircuits(circuitDay);
+assert.deepEqual(
+  blocks.map((b) => (b.kind === "circuit" ? `circuit ${b.label}` : b.exercise.name)),
+  ["Rameur", "circuit A", "circuit B"],
+  "l'ordre du jour doit être préservé, un circuit = un bloc",
+);
+// The same exercise twice in one circuit stays two entries, told apart by `slot`.
+const blockA = blocks[1];
+assert.equal(blockA.kind === "circuit" && blockA.exercises.length, 3);
+assert.deepEqual(
+  blockA.kind === "circuit" ? blockA.exercises.map((e) => `${e.name}/${e.slot}`) : [],
+  ["Pompes/A1", "Abdos/A2", "Pompes/A3"],
+);
+
+// A day with no circuit metadata is untouched: one block per exercise, and the
+// duration estimate is exactly the old `sets × (rest + 35)` sum.
+const classicDay = [
+  { name: "Squat", sets: 4, reps: "8", restSeconds: 120, notes: null },
+  { name: "Fentes", sets: 3, reps: "10", restSeconds: 90, notes: null },
+];
+assert.deepEqual(
+  groupCircuits(classicDay).map((b) => b.kind),
+  ["exercise", "exercise"],
+);
+assert.equal(
+  daySeconds(classicDay),
+  classicDay.reduce((n, ex) => n + ex.sets * (ex.restSeconds + 35), 0),
+);
+// A circuit pays its between-exercises rest once per round (not once per set),
+// and the between-rounds rest once per round instead of a rest after the last
+// exercise. Circuit A: 4 × (3×35 + 20+20 + 90) = 4 × 235.
+assert.equal(
+  daySeconds(circuitDay),
+  1 * (60 + 35) + 4 * (3 * 35 + 40 + 90) + 3 * (2 * 35 + 15 + 60),
+);
+
+// The regression that would come back the day someone "simplifies" the renderer:
+// `sets` on a circuit exercise is a ROUND count, so printing it per exercise as
+// "4×10" says the opposite of what the circuit prescribes — 4 straight sets of
+// pompes before touching the abdos. Asserted on the real rendered output, not on
+// a helper, because it's the rendering that lies.
+const html = renderToStaticMarkup(
+  createElement(ProgramCard, {
+    input: {
+      name: "Circuits",
+      days: [{ name: "Jour 1", exercises: circuitDay }],
+      progressionRules: "…",
+      deloadEveryWeeks: null,
+    },
+  }),
+);
+const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+assert.match(text, /Circuit A/);
+// Rounds stated once, by the block header, as tours.
+assert.equal(text.match(/4 tours/g)?.length, 1);
+assert.doesNotMatch(
+  text,
+  /4\s*×\s*10/,
+  "un exercice de circuit ne doit jamais afficher ses tours comme des séries",
+);
+assert.doesNotMatch(text, /4\s*×\s*AMRAP/);
+// The classic exercise of the same day keeps its set count.
+assert.match(text, /1×5 min/);
+// Both rests are distinguishable: 20 s between exercises, 1 min 30 between rounds.
+assert.match(text, /Entre deux tours/);
+
+console.log("circuits ok");

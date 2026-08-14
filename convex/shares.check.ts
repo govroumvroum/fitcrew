@@ -29,7 +29,34 @@ const source = {
   status: "archived",
   version: 7,
   name: "PPL 4 jours",
-  days: [{ name: "Jour 1 — Push", exercises: [{ name: "DC", sets: 4, reps: "8", restSeconds: 90 }] }],
+  days: [
+    {
+      name: "Jour 1 — Push",
+      exercises: [
+        { name: "DC", sets: 4, reps: "8", restSeconds: 90 },
+        // A circuit: its metadata must ride along, or a copied program silently
+        // becomes a classic séance for the receiver.
+        {
+          name: "Pompes",
+          sets: 4,
+          reps: "15",
+          restSeconds: 30,
+          circuit: "A",
+          slot: "A1",
+          restBetweenRoundsSeconds: 120,
+        },
+        {
+          name: "Abdos",
+          sets: 4,
+          reps: "20",
+          restSeconds: 30,
+          circuit: "A",
+          slot: "A2",
+          restBetweenRoundsSeconds: 120,
+        },
+      ],
+    },
+  ],
   progressionRules: "+2,5 kg quand toutes les séries passent",
   deloadEveryWeeks: 5,
 };
@@ -51,6 +78,7 @@ assert.equal(copy.deloadEveryWeeks, 5);
 
 // Days are a deep copy: mutating the copy must not touch the source.
 assert.deepEqual(copy.days, source.days);
+assert.deepEqual(copy.days[0].exercises[1], source.days[0].exercises[1]);
 copy.days[0].exercises[0].name = "mutated";
 assert.equal(source.days[0].exercises[0].name, "DC");
 

@@ -224,6 +224,103 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
         { version: 1 },
       ),
     },
+    {
+      // The circuit case, end to end: two blocks in one day, the same exercise
+      // twice inside one of them (distinct `slot`s), a classic exercise before
+      // and after, and both rest kinds.
+      label: "Programme en circuits",
+      tool: done(
+        "tool-generate_program",
+        {
+          name: "Circuits poids du corps — 3 jours",
+          days: [
+            {
+              name: "Jour 1 — Circuits full body",
+              exercises: [
+                {
+                  name: "Rameur",
+                  sets: 1,
+                  reps: "5 min",
+                  restSeconds: 60,
+                  notes: "Échauffement, allure facile",
+                },
+                {
+                  name: "Pompes",
+                  sets: 4,
+                  reps: "10",
+                  restSeconds: 20,
+                  notes: null,
+                  circuit: "A",
+                  slot: "A1",
+                  restBetweenRoundsSeconds: 90,
+                },
+                {
+                  name: "Abdos crunch",
+                  sets: 4,
+                  reps: "15",
+                  restSeconds: 20,
+                  notes: null,
+                  circuit: "A",
+                  slot: "A2",
+                  restBetweenRoundsSeconds: 90,
+                },
+                {
+                  name: "Pompes",
+                  sets: 4,
+                  reps: "AMRAP",
+                  restSeconds: 20,
+                  notes: "Deuxième passage, jusqu'à l'échec propre",
+                  circuit: "A",
+                  slot: "A3",
+                  restBetweenRoundsSeconds: 90,
+                },
+                {
+                  name: "Tractions",
+                  sets: 4,
+                  reps: "5",
+                  restSeconds: 30,
+                  notes: null,
+                  circuit: "A",
+                  slot: "A4",
+                  restBetweenRoundsSeconds: 90,
+                },
+                {
+                  name: "Fentes marchées",
+                  sets: 3,
+                  reps: "12 par jambe",
+                  restSeconds: 15,
+                  notes: null,
+                  circuit: "B",
+                  slot: "B1",
+                  restBetweenRoundsSeconds: 60,
+                },
+                {
+                  name: "Gainage planche",
+                  sets: 3,
+                  reps: "45 s",
+                  restSeconds: 15,
+                  notes: null,
+                  circuit: "B",
+                  slot: "B2",
+                  restBetweenRoundsSeconds: 60,
+                },
+                {
+                  name: "Étirements",
+                  sets: 1,
+                  reps: "5 min",
+                  restSeconds: 0,
+                  notes: null,
+                },
+              ],
+            },
+          ],
+          progressionRules:
+            "Ajoute un tour quand tu boucles les 4 sans t'arrêter. Ensuite, monte les répétitions d'une unité par exercice.",
+          deloadEveryWeeks: null,
+        },
+        { version: 1 },
+      ),
+    },
   ],
   "tool-swap_exercise": [
     {
@@ -243,6 +340,28 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
         },
         { version: 4, dayName: "Jour 1 — Push (pectoraux, épaules, triceps)" },
       ),
+    },
+    {
+      label: "Remplacement dans un circuit",
+      tool: done(
+        "tool-swap_exercise",
+        {
+          dayIndex: 0,
+          from: "Tractions",
+          to: {
+            name: "Tirage horizontal élastique",
+            sets: 4,
+            reps: "12",
+            restSeconds: 30,
+            notes: "Même place dans le circuit, épaule ménagée",
+            circuit: "A",
+            slot: "A4",
+            restBetweenRoundsSeconds: 90,
+          },
+        },
+        { version: 2, dayName: "Jour 1 — Circuits full body" },
+      ),
+      note: "`sets` vaut 4 TOURS : la carte ne doit jamais afficher « 4×12 ».",
     },
   ],
   "tool-explain_exercise": [
