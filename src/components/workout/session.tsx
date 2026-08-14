@@ -26,13 +26,14 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { betweenRoundsOf, groupCircuits, roundsOf } from "@/lib/circuits";
 import { formatShort } from "@/lib/dates";
 import { PR_LABELS, TROPHY } from "@/lib/prs";
 import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { ExerciseDemo, useExerciseDemos } from "./demo";
-import { seedSets, workingValues } from "./prescription";
+import { rowsOf, seedSets, sessionSteps, workingValues } from "./prescription";
 import { REST_OPTIONS, RestTimerBar, useRestOutro, useRestTimer } from "./rest-timer";
 
 type Values = { weight: number; reps: number };
@@ -117,6 +118,11 @@ export function Session({ date }: { date: string }) {
   // finished exercise).
   const [pick, setPick] = useState<number | null>(null);
   const [rest, setRest] = useState<number | null>(null);
+  // Which kind of rest is currently running. Captured at validation, because the
+  // séance pages to the next exercise of the tour on that very tap — reading it
+  // off the exercise on screen would rename a between-tours rest one frame after
+  // it started.
+  const [restingTours, setRestingTours] = useState(false);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -163,11 +169,14 @@ export function Session({ date }: { date: string }) {
     );
   }
 
-  const rowsFor = (name: string) =>
-    sets.filter((set) => set.exerciseName === name).sort((a, b) => a.index - b.index);
+  // Per *occurrence*: a circuit can run the same exercise twice in a day, and
+  // those two occurrences have their own rows.
+  const rowsFor = (exercise: { name: string; slot?: string }) => rowsOf(exercise, sets);
 
+  // Keyed on the NAME, unlike the rows: the working load is a property of the
+  // exercise's history, not of a slot or of a tour.
   const valuesFor = (name: string, repsSpec: string) =>
-    edits[name] ?? workingValues(rowsFor(name), repsSpec);
+    edits[name] ?? workingValues(rowsOf({ name }, sets), repsSpec);
 
   const done = sets.filter((set) => set.completed);
 
@@ -262,6 +271,42 @@ export function Session({ date }: { date: string }) {
           </section>
         ) : null}
 
+        {/* What was actually fait, exercice par exercice — and tour par tour for
+            a circuit, otherwise three lines of "0×12" say nothing about the
+            order they were done in. Nothing unchecked shows up. */}
+        {done.length > 0 ? (
+          <section className="rounded-lg border bg-card/55 p-3.5">
+            <p className="eyebrow">Le détail</p>
+            <ul className="mt-1 divide-y text-sm">
+              {groupCircuits(day.exercises).map((item) =>
+                item.kind === "exercise" ? (
+                  <RecapLine
+                    key={item.key}
+                    name={item.exercise.name}
+                    rows={rowsFor(item.exercise)}
+                  />
+                ) : (
+                  <li key={item.key} className="py-2.5">
+                    <p className="eyebrow">
+                      Circuit {item.label} — {roundsOf(item)} tours
+                    </p>
+                    <ul className="divide-y">
+                      {item.exercises.map((exercise, i) => (
+                        <RecapLine
+                          key={exercise.slot ?? `${exercise.name}-${i}`}
+                          name={exercise.name}
+                          rows={rowsFor(exercise)}
+                          tours
+                        />
+                      ))}
+                    </ul>
+                  </li>
+                ),
+              )}
+            </ul>
+          </section>
+        ) : null}
+
         {workout.notes ? <p className="text-sm text-muted-foreground">{workout.notes}</p> : null}
 
         {left.length > 0 ? (
@@ -292,22 +337,41 @@ export function Session({ date }: { date: string }) {
 
   // ── Live séance: one exercise at a time ──────────────────────────────────
   const exercises = day.exercises;
-  const firstOpen = exercises.findIndex((item) => rowsFor(item.name).some((r) => !r.completed));
-  const current = Math.min(pick ?? Math.max(firstOpen, 0), exercises.length - 1);
+  // The day in performed order — one step per set row, circuits rotating
+  // exercice 1 → 2 → 3 → tour suivant. Resuming is "first open step", so a
+  // reload mid-circuit lands on the right tour and not on the first exercise.
+  const steps = sessionSteps(exercises, sets);
+  const firstOpen = steps.find((step) => !step.row.completed);
+  const current = Math.min(pick ?? firstOpen?.at ?? 0, exercises.length - 1);
+  // First open step belonging to another occurrence — the next thing to do.
+  const nextOpen = () => steps.find((s) => !s.row.completed && s.at !== current)?.at ?? -1;
   const exercise = exercises[current];
-  const rows = rowsFor(exercise.name);
+  const rows = rowsFor(exercise);
+  // `at` rides along so a block can be matched back to the paged index.
+  const blocks = groupCircuits(exercises.map((item, at) => ({ ...item, at })));
+  const block = blocks.flatMap((candidate) =>
+    candidate.kind === "circuit" && candidate.exercises.some((item) => item.at === current)
+      ? [candidate]
+      : [],
+  )[0];
   const values = valuesFor(exercise.name, exercise.reps);
   const setValues = (next: Values) => setEdits((prev) => ({ ...prev, [exercise.name]: next }));
-  const restSeconds = rest ?? exercise.restSeconds;
+  // A tour ends on the block's LAST exercise: that's where the between-rounds
+  // rest goes, everywhere else it's the plain rest before the next exercise.
+  const betweenRounds =
+    block && block.exercises.at(-1)?.at === current ? betweenRoundsOf(block) : 0;
+  const restSeconds = rest ?? (betweenRounds > 0 ? betweenRounds : exercise.restSeconds);
   // No match (or not resolved yet) → no affordance at all.
   const demoUrl = demoUrlFor(exercise.name);
   const lastTime = data.prefill.find((p) => p.name === exercise.name);
   // The set the commit button will write. -1 when this exercise is done.
   const nextAt = rows.findIndex((row) => !row.completed);
   const activeId = nextAt === -1 ? null : rows[nextAt]._id;
-  // First exercise other than this one that still has work left.
-  const otherOpen = () =>
-    exercises.findIndex((item, i) => i !== current && rowsFor(item.name).some((r) => !r.completed));
+  // Tour of the row on screen; once bouclé it's the last one done. `round` is
+  // missing on rows seeded before provenance existed — index + 1 is the same
+  // number for a circuit, one set per tour.
+  const shown = nextAt === -1 ? rows.at(-1) : rows[nextAt];
+  const tour = shown ? (shown.round ?? shown.index + 1) : 1;
 
   // Nothing in the schema says an exercise is bodyweight, so the only honest
   // signal is the history: an exercise you've already loaded isn't a pull-up, so
@@ -323,6 +387,7 @@ export function Session({ date }: { date: string }) {
     }
     write({ setId: row._id, completed: true, weight: values.weight, reps: values.reps });
     navigator.vibrate?.(15);
+    setRestingTours(betweenRounds > 0);
     timer.start(restSeconds);
   };
 
@@ -402,10 +467,10 @@ export function Session({ date }: { date: string }) {
                 what you read, the button is what a thumb hits. */}
             <div className="flex min-w-0 flex-1 gap-1.5">
               {exercises.map((item, i) => {
-                const itemRows = rowsFor(item.name);
+                const itemRows = rowsFor(item);
                 return (
                   <button
-                    key={item.name}
+                    key={item.slot ?? `${item.name}-${i}`}
                     type="button"
                     className={cn(PRESS, "grid h-12 min-w-0 place-items-center active:scale-[0.9]")}
                     // Weighted by set count so every tick in the strip is the
@@ -451,14 +516,22 @@ export function Session({ date }: { date: string }) {
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <p className="eyebrow">
-                  Exercice {current + 1} sur {exercises.length}
+                  {block
+                    ? `Circuit ${block.label} · Tour ${tour}/${roundsOf(block)} · Exercice ${
+                        block.exercises.findIndex((item) => item.at === current) + 1
+                      }/${block.exercises.length}`
+                    : `Exercice ${current + 1} sur ${exercises.length}`}
                 </p>
                 {/* The page's <h1> now that the day name is an eyebrow, and the
                     largest *text* on the screen — but ~3.6:1 under the load
                     numeral, which is what makes the hierarchy read on a squint. */}
                 <h1 className="font-heading text-lg font-bold">{exercise.name}</h1>
+                {/* No set count inside a circuit: "4 × 10" would read as four
+                    straight séries when it's one set per tour. */}
                 <p className="text-sm text-muted-foreground">
-                  {exercise.sets} × {exercise.reps} · repos {restSeconds} s
+                  {block ? "" : `${exercise.sets} × `}
+                  {exercise.reps} · repos {betweenRounds > 0 ? "entre tours " : ""}
+                  {restSeconds} s
                 </p>
               </div>
               {demoUrl ? <ExerciseDemo name={exercise.name} gifUrl={demoUrl} /> : null}
@@ -471,8 +544,12 @@ export function Session({ date }: { date: string }) {
             <div className="flex flex-col gap-3">
               <p className="eyebrow">
                 {nextAt === -1
-                  ? `${rows.length} séries validées · exercice bouclé`
-                  : `Prochaine série · ${nextAt + 1} sur ${rows.length}`}
+                  ? block
+                    ? `${rows.length} tours validés · exercice bouclé`
+                    : `${rows.length} séries validées · exercice bouclé`
+                  : block
+                    ? `Tour ${tour} sur ${rows.length}`
+                    : `Prochaine série · ${nextAt + 1} sur ${rows.length}`}
               </p>
               <LoadField
                 label="kg"
@@ -532,7 +609,11 @@ export function Session({ date }: { date: string }) {
 
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-3 rounded-lg border bg-card/55 p-3.5">
-            <span className="text-sm text-muted-foreground">Repos</span>
+            {/* Between two tours is a different rest from between two exercises,
+                and the timer that runs after this set is the one named here. */}
+            <span className="text-sm text-muted-foreground">
+              {betweenRounds > 0 ? "Repos entre tours" : "Repos"}
+            </span>
             <Select
               items={REST_ITEMS}
               value={rest === null ? "auto" : String(rest)}
@@ -557,9 +638,10 @@ export function Session({ date }: { date: string }) {
             <p className="eyebrow">Ce qui reste</p>
             <ul className="mt-1 divide-y">
               {exercises.map((item, i) => {
-                const left = rowsFor(item.name).filter((row) => !row.completed).length;
+                const left = rowsFor(item).filter((row) => !row.completed).length;
+                const unit = item.circuit ? "tour" : "série";
                 return (
-                  <li key={item.name}>
+                  <li key={item.slot ?? `${item.name}-${i}`}>
                     <button
                       type="button"
                       onClick={() => setPick(i)}
@@ -571,7 +653,7 @@ export function Session({ date }: { date: string }) {
                     >
                       <span className="min-w-0 flex-1 truncate">{item.name}</span>
                       <span className="shrink-0 text-sm tabular-nums">
-                        {left === 0 ? "bouclé" : `${left} série${left > 1 ? "s" : ""}`}
+                        {left === 0 ? "bouclé" : `${left} ${unit}${left > 1 ? "s" : ""}`}
                       </span>
                     </button>
                   </li>
@@ -616,6 +698,7 @@ export function Session({ date }: { date: string }) {
             {outro.show ? (
               <RestTimerBar
                 timer={timer}
+                label={restingTours ? "Repos entre les tours" : undefined}
                 className={
                   outro.tail
                     ? "animate-out fade-out delay-[1500ms] duration-[140ms] ease-out fill-mode-forwards motion-reduce:animate-none"
@@ -630,24 +713,25 @@ export function Session({ date }: { date: string }) {
             base variant. */}
         <Button
           className="h-14 w-full text-base active:scale-[0.97]"
-          disabled={(nextAt === -1 && otherOpen() === -1) || zeroLoad}
+          disabled={(nextAt === -1 && nextOpen() === -1) || zeroLoad}
           onClick={() => {
             if (nextAt === -1) {
-              const upcoming = otherOpen();
+              const upcoming = nextOpen();
               if (upcoming !== -1) setPick(upcoming);
               return;
             }
             validate(rows[nextAt]);
-            // Bouclé by this very set → page forward. Read off the rows we
-            // already hold: the optimistic write lands after this returns.
-            if (rows.filter((row) => !row.completed).length === 1) {
-              const upcoming = otherOpen();
+            // A circuit rotates on EVERY validated set — that's the tour. A
+            // classic exercise only pages once this set bouclé it. Read off the
+            // rows we already hold: the optimistic write lands after this returns.
+            if (block || rows.filter((row) => !row.completed).length === 1) {
+              const upcoming = nextOpen();
               if (upcoming !== -1) setPick(upcoming);
             }
           }}
         >
           {nextAt === -1
-            ? otherOpen() === -1
+            ? nextOpen() === -1
               ? "Tout est validé, termine la séance"
               : "Passer à l'exercice suivant"
             : zeroLoad
@@ -684,6 +768,40 @@ export function Session({ date }: { date: string }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * One line of the récap: the sets that were actually validated. Renders nothing
+ * when none were — an exercise skipped is an exercise absent, not a zero.
+ */
+function RecapLine({
+  name,
+  rows,
+  tours,
+}: {
+  name: string;
+  rows: Doc<"sets">[];
+  tours?: boolean;
+}) {
+  const done = rows.filter((row) => row.completed);
+  if (done.length === 0) return null;
+  return (
+    // Two lines for a circuit, one for a classic exercise: four tours of
+    // "T1 0×15" leave 390px nothing for the name, and « Abdomina… » is not a
+    // récap. Same call History makes on its day names.
+    <li className={cn("min-h-11 py-2.5", !tours && "flex items-center gap-3")}>
+      <span className={cn("min-w-0 flex-1 truncate", tours && "block")}>{name}</span>
+      <span className={cn("shrink-0 text-muted-foreground tabular-nums", tours && "block")}>
+        {done
+          .map(
+            (row) =>
+              // `round` is absent on rows seeded before provenance existed.
+              `${tours ? `T${row.round ?? row.index + 1} ` : ""}${row.weight}×${row.reps}`,
+          )
+          .join(" · ")}
+      </span>
+    </li>
   );
 }
 
@@ -736,15 +854,38 @@ function ProgramPick({
           <ChevronDownIcon className="chevron" />
           Le détail
         </summary>
-        <ul className="divide-y">
-          {exercises.map((exercise) => (
-            <li key={exercise.name} className="flex min-h-11 items-center gap-3 py-2.5 text-sm">
-              <span className="min-w-0 flex-1 truncate">{exercise.name}</span>
-              <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
-                {exercise.sets} × {exercise.reps}
-              </span>
-            </li>
-          ))}
+        <ul className="divide-y text-sm">
+          {/* A circuit reads as one block: its exercises are done in order, one
+              set per tour, so a per-exercise "4 × 10" would be four séries. */}
+          {groupCircuits(exercises).map((block) =>
+            block.kind === "exercise" ? (
+              <li key={block.key} className="flex min-h-11 items-center gap-3 py-2.5">
+                <span className="min-w-0 flex-1 truncate">{block.exercise.name}</span>
+                <span className="shrink-0 text-muted-foreground tabular-nums">
+                  {block.exercise.sets} × {block.exercise.reps}
+                </span>
+              </li>
+            ) : (
+              <li key={block.key} className="py-2.5">
+                <p className="eyebrow">
+                  Circuit {block.label} — {roundsOf(block)} tours
+                </p>
+                <ul className="divide-y">
+                  {block.exercises.map((exercise, i) => (
+                    <li
+                      key={exercise.slot ?? `${exercise.name}-${i}`}
+                      className="flex min-h-11 items-center gap-3"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{exercise.name}</span>
+                      <span className="shrink-0 text-muted-foreground tabular-nums">
+                        {exercise.reps}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ),
+          )}
         </ul>
       </details>
 

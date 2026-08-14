@@ -216,6 +216,12 @@ export const start = mutation({
         index: v.number(),
         weight: v.number(),
         reps: v.number(),
+        // Circuit provenance, all optional: a payload without it is a classic
+        // séance, which is also what every PWA tab still running the previous
+        // bundle sends. Requiring any of them here would break those tabs.
+        circuit: v.optional(v.string()),
+        slot: v.optional(v.string()),
+        round: v.optional(v.number()),
       }),
     ),
   },

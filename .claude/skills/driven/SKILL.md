@@ -47,7 +47,10 @@ Two more resources every worktree shares, and one cannot be isolated:
   message you didn't type as contaminated.
 - **The dev port.** `next dev` probes 3000–3005 and takes the first free one, so
   the second server is not where its own QA expects. Pin `PORT` and pass the same
-  value to `bun run agent-login -- --browser --port <n>`.
+  value to `bun run agent-login -- --browser --port <n>`. And when you clean up,
+  **never `pkill -f "next dev"`** — it matches every worktree's dev server, so the
+  other agent's app dies mid-QA with nothing naming the cause. Kill your own pid,
+  or match your own port.
 
 ## Being driven
 

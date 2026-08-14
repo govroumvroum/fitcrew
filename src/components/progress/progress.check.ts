@@ -68,6 +68,36 @@ assert.equal(valueOf("Tractions", "max_weight"), undefined);
 assert.equal(valueOf("Tractions", "max_volume"), undefined);
 assert.equal(valueOf("Tractions", "est_1rm"), undefined);
 
+// A bodyweight circuit — "4 tours : 10 pompes, 15 abdos, 5 tractions" — claims a
+// reps record per exercise and nothing else. Provenance (circuit/slot/round) is
+// on the rows but never in the PR maths: records are per exercise, so the four
+// tours of pompes fold into one candidate, the best of them.
+const circuit = [
+  set("Pompes", 0, 12),
+  set("Pompes", 0, 10),
+  set("Abdos", 0, 15),
+  set("Tractions", 0, 5),
+  set("Tractions", 0, 4, false), // the tour he couldn't finish
+];
+assert.deepEqual(
+  prCandidates(circuit).map((c) => `${c.exerciseName}|${c.type}|${c.value}`),
+  ["Pompes|max_reps|12", "Abdos|max_reps|15", "Tractions|max_reps|5"],
+);
+
+// A weighted variant is a DIFFERENT exercise name, and that's the whole variant
+// mechanism: "Tractions lestées" competes on weight and 1RM, "Tractions" on reps,
+// and neither can take the other's record.
+const lested = prCandidates([set("Tractions", 0, 12), set("Tractions lestées", 10, 6)]);
+assert.deepEqual(
+  lested.map((c) => `${c.exerciseName}|${c.type}`).sort(),
+  [
+    "Tractions lestées|est_1rm",
+    "Tractions lestées|max_volume",
+    "Tractions lestées|max_weight",
+    "Tractions|max_reps",
+  ],
+);
+
 // THE POINT OF ALL THIS: junk-volume reps must not outrank real strength.
 // 50 reps at 1 kg beats nothing that 8 reps at 80 kg set.
 const silly = prCandidates([set("Curl", 1, 50)]);

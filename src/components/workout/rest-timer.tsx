@@ -255,7 +255,21 @@ function ToggleIcon({ running }: { running: boolean }) {
   );
 }
 
-export function RestTimerBar({ timer, className }: { timer: Timer; className?: string }) {
+/**
+ * `label` names the rest that's running — a circuit's rest between two tours is a
+ * different thing from the rest between two of its exercises, and they're
+ * routinely different durations. Defaults to plain "Repos", which is every
+ * classic séance.
+ */
+export function RestTimerBar({
+  timer,
+  className,
+  label = "Repos",
+}: {
+  timer: Timer;
+  className?: string;
+  label?: string;
+}) {
   const { remaining, total, running, endAt, pausedAt, toggle, stop } = timer;
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
@@ -272,7 +286,7 @@ export function RestTimerBar({ timer, className }: { timer: Timer; className?: s
         {/* The only announcement of rest ending: the digits are aria-live="off"
             (a per-second count is noise) and the buzz is silent to a reader. */}
         <span className="text-sm text-muted-foreground" aria-live="polite">
-          {remaining === 0 ? "Repos terminé, go" : "Repos"}
+          {remaining === 0 ? "Repos terminé, go" : label}
         </span>
         <div className="ml-auto flex gap-2">
           <Button
