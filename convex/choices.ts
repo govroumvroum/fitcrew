@@ -235,6 +235,18 @@ async function claim(ctx: MutationCtx, choicesId: Id<"choices">) {
   return row;
 }
 
+/** Draft save: this is what makes a reload find the card as the user left it. */
+export const answer = mutation({
+  args: { choicesId: v.id("choices"), answers: v.any() },
+  handler: async (ctx, args) => {
+    const row = await claim(ctx, args.choicesId);
+    await ctx.db.patch("choices", row._id, {
+      answers: sanitizeAnswers(args.answers, sanitizeQuestions(row.questions)),
+    });
+    return null;
+  },
+});
+
 /**
  * Closes the card, and that's all it does. Nothing is written anywhere else: the
  * answers go back into the conversation as a message, and the agent decides what

@@ -71,12 +71,17 @@ export function ChoicesCard({
     return <p className="text-sm text-muted-foreground">Abandonné, rien n&apos;a été envoyé.</p>;
   }
 
-  // Still open, so nothing has been sent: the taps live in React until « Envoyer ».
-  // A card holds at most three questions answered in one sitting — losing them to
-  // a reload costs three taps, where persisting each one cost a mutation, a
-  // seeded-state dance and a second copy of the truth.
+  // A separate component so its `useState` is seeded from the loaded answers:
+  // mounted only once the query has resolved, it can't start from `undefined`
+  // and then have to be re-synced in an effect.
   return (
-    <Choices choicesId={choicesId} threadId={q.threadId} questions={q.questions} send={send} />
+    <Choices
+      choicesId={choicesId}
+      threadId={q.threadId}
+      questions={q.questions}
+      initial={q.answers}
+      send={send}
+    />
   );
 }
 
@@ -84,25 +89,35 @@ function Choices({
   choicesId,
   threadId,
   questions,
+  initial,
   send: sendRef,
 }: {
   choicesId: Id<"choices">;
   threadId: string;
   questions: Question[];
+  initial: Answers;
   send: AgentApi["send"];
 }) {
+  const save = useMutation(api.choices.answer);
   const submit = useMutation(api.choices.submit);
   const abandon = useMutation(api.choices.abandon);
   const send = useAction(sendRef);
   const today = useLocalDate();
 
-  const [answers, setAnswers] = useState<Answers>(() => questions.map(() => null));
+  const [answers, setAnswers] = useState<Answers>(initial);
   const [pending, setPending] = useState(false);
 
   const complete = questions.every((_, i) => answers[i] !== null);
 
+  /** A tap has no blur to wait for — the choice IS the edit, so it saves right
+   *  away and a reload finds the card as it was left. No toast and no error
+   *  surfaced: the submit is what has to speak up if the server refuses. The
+   *  next state is built here rather than inside the updater, because a mutation
+   *  fired from a state updater runs twice under StrictMode. */
   function put(index: number, value: string[] | null) {
-    setAnswers((prev) => prev.map((a, i) => (i === index ? value : a)));
+    const next = answers.map((a, i) => (i === index ? value : a));
+    setAnswers(next);
+    void save({ choicesId, answers: next }).catch(() => {});
   }
 
   async function run(action: () => Promise<unknown>, ok: string) {
