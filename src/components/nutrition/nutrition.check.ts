@@ -3,6 +3,35 @@
 import assert from "node:assert/strict";
 import type { MealSlot } from "../../../convex/nutrition";
 import { groupBySlot, macroLine, parseNum, pct, remaining, macrosOnly } from "./macros";
+import { readChips, writeChips } from "./questionnaire";
+
+// --- the questionnaire's chips ----------------------------------------------
+// THE POINT: the pressed chips and the « Autre… » text are the SAME draft
+// string, so a reload can rebuild the card from it and `toAnswers` keeps
+// comma-splitting exactly what it split before.
+const goals = new Set(["perte", "maintien", "prise"]);
+assert.deepEqual(readChips("prise", goals, false), { chosen: ["prise"], typed: "" });
+// Nothing answered.
+assert.deepEqual(readChips("", goals, false), { chosen: [], typed: "" });
+// An answer the model never offered: it's the « Autre… » text, not a chip.
+assert.deepEqual(readChips("recomposition", goals, false), {
+  chosen: [],
+  typed: "recomposition",
+});
+
+const allergies = new Set(["arachides", "gluten"]);
+assert.deepEqual(readChips("arachides,gluten", allergies, true), {
+  chosen: ["arachides", "gluten"],
+  typed: "",
+});
+// Two chips plus something typed — and back to the same string.
+const mixed = writeChips(["arachides"], "kiwi");
+assert.equal(mixed, "arachides,kiwi");
+assert.deepEqual(readChips(mixed, allergies, true), { chosen: ["arachides"], typed: "kiwi" });
+// A blank « Autre… » must not leave a trailing comma, or the answer list grows
+// an empty entry.
+assert.equal(writeChips(["arachides"], "   "), "arachides");
+assert.equal(writeChips([], ""), "");
 
 // --- bar percentage ----------------------------------------------------------
 assert.equal(pct(0, 2000), 0);

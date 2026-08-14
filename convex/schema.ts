@@ -365,6 +365,15 @@ export default defineSchema({
     // necessarily the thread currently selected in the URL — and on /demo there
     // is no URL state at all.
     threadId: v.string(),
+    // The questions the model wrote for THIS card, on the row for the same reason
+    // as `threadId` and `answers`: durable state. The card must survive a reload
+    // and must never read them from the streamed tool part — `output-available`
+    // does not guarantee the input came back with it.
+    //
+    // `v.any()` like `answers`: the shape is validated at the boundary by
+    // `sanitizeQuestions`, which drops what the model got wrong, rather than by
+    // the table, which would reject the whole write for one bad option.
+    questions: v.any(),
     answers: v.any(),
     status: v.union(v.literal("open"), v.literal("completed"), v.literal("abandoned")),
   }).index("by_user_status", ["userId", "status"]),

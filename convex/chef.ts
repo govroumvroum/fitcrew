@@ -147,16 +147,24 @@ function chefTools(today: string) {
   return {
     ask_questionnaire: createTool({
       description:
-        "Affiche le formulaire de profil nutrition au user : toutes les questions d'un coup, dans une carte qu'il remplit lui-même. N'enregistre RIEN par lui-même — c'est la validation du formulaire qui écrit le profil et calcule ses cibles.",
+        "Affiche la carte de profil nutrition : c'est TOI qui écris les questions ET les réponses probables, et le user tape sur une puce au lieu d'écrire. Adapte-les à ce que la conversation a déjà révélé (s'il a dit vouloir sécher, mets « perte de poids » en premier) et n'inclus pas une question dont tu connais déjà la réponse. 2 à 4 options par question, jamais plus, et une option = une valeur que le champ accepte (\"prise\", pas « prise de masse »). age, heightCm et weightKg n'ont AUCUNE option : ils se saisissent au clavier. allergies et excluded sont les seules en multiple. N'enregistre RIEN par lui-même — c'est la validation de la carte qui écrit le profil et calcule ses cibles.",
       inputSchema: zAskQuestionnaire,
-      execute: async (ctx: ToolCtx) => {
+      execute: async (ctx: ToolCtx, { questions }) => {
         // The component injects `threadId` into every tool ctx it builds, but
         // types it optional because a tool can also run outside a thread. A
         // throw, not a fallback: the card sends its echo message back into this
         // conversation, and guessing which one would send it to the wrong place.
         if (!ctx.threadId) throw new Error("ask_questionnaire appelé hors conversation");
         return {
-          ...(await ctx.runMutation(internal.questionnaires.open, { threadId: ctx.threadId })),
+          ...(await ctx.runMutation(internal.questionnaires.open, {
+            threadId: ctx.threadId,
+            // Same null-stripping convention as the other tools: strict output
+            // can't say "absent", so `multiple: null` is just « non ».
+            questions: questions.map(({ multiple, ...q }) => ({
+              ...q,
+              multiple: multiple === true,
+            })),
+          })),
           note: "Le formulaire est à l'écran. Attends qu'il te dise l'avoir rempli — ne repose PAS les questions en prose par-dessus, et n'appelle PAS save_nutrition_profile : la validation du formulaire écrit le profil et ses cibles toute seule. SAUF s'il te dit qu'il ne veut pas le remplir : le formulaire est alors fermé, et c'est le seul cas où tu reprends les questions une par une, en prose.",
         };
       },
@@ -490,7 +498,8 @@ Le profil est déjà fait. S'il veut le refaire ou change de poids/objectif, app
 S'il refuse le formulaire ou l'abandonne, reprends les questions une par une, récapitule, et là OUI, appelle \`save_nutrition_profile\` à la fin : sans validation du formulaire, rien n'a été écrit.`
     : `PREMIÈRE CONVERSATION — LE PROFIL N'EXISTE PAS ENCORE
 Tu ne peux rien calculer sans lui. Déroule exactement ça :
-- TON TOUT PREMIER MESSAGE fait les deux à la fois : une ou deux phrases d'accueil ET l'appel à \`ask_questionnaire\`, dans le MÊME tour. N'attends pas qu'il te réponde pour l'appeler — il n'a rien à répondre, le formulaire EST ce que tu lui demandes. Le formulaire s'affiche dans la conversation, avec toutes les questions d'un coup.
+- TON TOUT PREMIER MESSAGE fait les deux à la fois : une ou deux phrases d'accueil ET l'appel à \`ask_questionnaire\`, dans le MÊME tour. N'attends pas qu'il te réponde pour l'appeler — il n'a rien à répondre, la carte EST ce que tu lui demandes. Elle s'affiche dans la conversation, avec toutes les questions d'un coup.
+- C'est toi qui écris ces questions ET les réponses probables : il tape sur une puce plutôt que d'écrire. 2 à 4 options par question, adaptées à ce qu'il a déjà dit ; age, heightCm et weightKg n'en prennent aucune (il les saisit) ; allergies et excluded sont en multiple. Une question par champ de la liste ci-dessous.
 - Tant qu'il est à l'écran, tu ne poses AUCUNE de ces questions en prose. Tu attends qu'il te dise l'avoir rempli.
 - Quand il te le dit : le profil et les cibles sont DÉJÀ enregistrés, n'appelle pas \`save_nutrition_profile\`. Annonce ses cibles en précisant que ce sont des estimations, puis propose de générer sa semaine de repas.
 - S'il refuse le formulaire ou l'abandonne, et SEULEMENT dans ce cas : pose les questions UNE PAR UNE, jamais deux dans le même message, en rebondissant sur chaque réponse. Puis récapitule, demande si c'est bon, et appelle \`save_nutrition_profile\` une fois validé.

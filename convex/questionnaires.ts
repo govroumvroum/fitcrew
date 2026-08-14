@@ -3,7 +3,13 @@ import { api } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Macros } from "./nutrition";
-import { assertOpen, missingFields, sanitizeAnswers, toProfileArgs } from "./questionnaireAnswers";
+import {
+  assertOpen,
+  missingFields,
+  sanitizeAnswers,
+  sanitizeQuestions,
+  toProfileArgs,
+} from "./questionnaireAnswers";
 import { requireCurrentUser, getCurrentUser } from "./users";
 
 // ---------------------------------------------------------------------------
@@ -17,7 +23,7 @@ import { requireCurrentUser, getCurrentUser } from "./users";
  * A user redoing their profile starts from what they already answered.
  */
 export const open = internalMutation({
-  args: { threadId: v.string() },
+  args: { threadId: v.string(), questions: v.any() },
   // Annotated for the same circular-inference reason as `submit` below: this
   // handler reads through `api`, whose type includes this module.
   handler: async (
@@ -45,6 +51,10 @@ export const open = internalMutation({
       // serializability rather than on a constraint we declared. Nothing here
       // depends on it: `assertOpen` is the real backstop on every write, and a
       // second validation re-saves the same profile rather than corrupting it.
+      //
+      // The QUESTIONS, on the other hand, stay exactly as they were: the user is
+      // mid-answer, and swapping the questions under him would strand the answers
+      // he already gave under labels that no longer match them.
       if (existing.threadId !== args.threadId) {
         await ctx.db.patch("questionnaires", existing._id, { threadId: args.threadId });
       }
@@ -56,6 +66,7 @@ export const open = internalMutation({
       userId: user._id,
       kind: "chef_onboarding",
       threadId: args.threadId,
+      questions: sanitizeQuestions(args.questions),
       answers: sanitizeAnswers(profile),
       status: "open",
     });
@@ -78,7 +89,14 @@ export const status = query({
     if (!user) return null;
     const row = await ctx.db.get("questionnaires", args.questionnaireId);
     if (!row || row.userId !== user._id) return null;
-    return { status: row.status, threadId: row.threadId, answers: sanitizeAnswers(row.answers) };
+    // `questions` comes from here too, never from the tool part: the card renders
+    // from the row, so a reload finds the same questions and the same answers.
+    return {
+      status: row.status,
+      threadId: row.threadId,
+      questions: sanitizeQuestions(row.questions),
+      answers: sanitizeAnswers(row.answers),
+    };
   },
 });
 

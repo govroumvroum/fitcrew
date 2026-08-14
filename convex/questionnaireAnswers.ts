@@ -7,7 +7,7 @@
  */
 import type { z } from "zod";
 import type { Doc } from "./_generated/dataModel";
-import { zSaveNutritionProfile } from "./chefToolSchemas";
+import { TYPED_KEYS, zQuestionKey, zSaveNutritionProfile } from "./chefToolSchemas";
 
 type Profile = z.infer<typeof zSaveNutritionProfile>;
 
@@ -72,6 +72,113 @@ export function sanitizeAnswers(raw: unknown): Answers {
   }
 
   return answers as Answers;
+}
+
+// ---------------------------------------------------------------------------
+// The questions themselves (written by the model, so: a trust boundary)
+// ---------------------------------------------------------------------------
+
+type QuestionKey = z.infer<typeof zQuestionKey>;
+
+/** One card question. `options: null` = the user types (see `TYPED_KEYS`). */
+export type Question = {
+  key: QuestionKey;
+  label: string;
+  options: { value: string; label: string; hint: string | null }[] | null;
+  multiple: boolean;
+};
+
+/** The card can only ask 13 things: one per profile field. */
+const MAX_QUESTIONS = zQuestionKey.options.length;
+const TYPED = new Set<string>(TYPED_KEYS);
+/** The only two answers that are a LIST, so the only two that can be ticked twice. */
+const MULTI = new Set<string>(["allergies", "excluded"]);
+/** The keys whose answer is a number once `toAnswers` has parsed the draft string. */
+const NUMERIC = new Set<string>([
+  "age",
+  "heightCm",
+  "weightKg",
+  "mealsPerDay",
+  "cookMinutes",
+  "people",
+]);
+
+/**
+ * The card holds a draft of `Record<key, string>` and `toAnswers` converts on the
+ * way out — numbers parsed, the two lists comma-split, the rest as-is. So an
+ * option's `value` is only usable if it survives that same trip: this replays it
+ * rather than restating the ranges, which live in `zSaveNutritionProfile`.
+ */
+function usableValue(key: QuestionKey, value: string): boolean {
+  const converted = MULTI.has(key) ? value.split(",") : NUMERIC.has(key) ? Number(value) : value;
+  // `sanitizeAnswers` keeps the key only if the value is a real answer for it.
+  return key in sanitizeAnswers({ [key]: converted });
+}
+
+/**
+ * The model writes the questions, so nothing here can be trusted: a question the
+ * card cannot answer is worse than a question it never asked. Everything bad is
+ * dropped silently — a partly usable card still gets the profile written.
+ */
+export function sanitizeQuestions(raw: unknown): Question[] {
+  if (!Array.isArray(raw)) return [];
+  const questions: Question[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const source = entry as Record<string, unknown>;
+
+    // THE case `zQuestionKey` exists for: an invented key would write a profile
+    // field that doesn't exist, and fail silently all the way down.
+    const parsed = zQuestionKey.safeParse(source.key);
+    if (!parsed.success) continue;
+    const key = parsed.data;
+    // First one wins: asking the same thing twice gives two answers for one field.
+    if (seen.has(key)) continue;
+
+    const label = typeof source.label === "string" ? source.label.trim() : "";
+    if (label === "") continue;
+
+    // The typed three open a keyboard, so options would be dead pixels even if
+    // the model insisted on sending some.
+    const typed = TYPED.has(key);
+    const options = typed ? null : cleanOptions(key, source.options);
+    if (!typed && options === null) continue;
+
+    seen.add(key);
+    questions.push({
+      key,
+      label,
+      options,
+      multiple: MULTI.has(key) && source.multiple === true,
+    });
+    if (questions.length === MAX_QUESTIONS) break;
+  }
+
+  return questions;
+}
+
+/** `null` = unusable, and its question dies with it: a chip nobody can tap. */
+function cleanOptions(key: QuestionKey, raw: unknown): Question["options"] {
+  if (!Array.isArray(raw)) return null;
+
+  // Bad options go one by one; the 2..4 rule is applied to what's left, so one
+  // hallucinated value doesn't cost the three good ones next to it.
+  const options: NonNullable<Question["options"]> = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const source = entry as Record<string, unknown>;
+    const label = typeof source.label === "string" ? source.label.trim() : "";
+    const value = typeof source.value === "string" ? source.value.trim() : "";
+    if (label === "" || value === "" || !usableValue(key, value)) continue;
+    if (options.some((o) => o.value === value)) continue;
+    const hint = typeof source.hint === "string" ? source.hint.trim() : "";
+    options.push({ value, label, hint: hint === "" ? null : hint });
+  }
+
+  // One option is not a choice, five turn the card back into the wall it replaced.
+  return options.length >= 2 && options.length <= 4 ? options : null;
 }
 
 /**

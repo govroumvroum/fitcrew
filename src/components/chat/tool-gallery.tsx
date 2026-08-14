@@ -298,7 +298,73 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
       label: "Formulaire ouvert",
       tool: done(
         "tool-ask_questionnaire",
-        {},
+        {
+          questions: [
+            {
+              key: "goal",
+              label: "Ton objectif ?",
+              multiple: null,
+              options: [
+                { value: "prise", label: "Prise de masse", hint: "Gagner du muscle" },
+                { value: "perte", label: "Perte de gras", hint: "Sécher sans perdre de force" },
+                { value: "maintien", label: "Maintien", hint: null },
+              ],
+            },
+            {
+              key: "sex",
+              label: "Tu es ?",
+              multiple: null,
+              options: [
+                { value: "h", label: "Un homme", hint: null },
+                { value: "f", label: "Une femme", hint: null },
+              ],
+            },
+            { key: "age", label: "Ton âge ?", multiple: null, options: null },
+            { key: "heightCm", label: "Ta taille, en cm ?", multiple: null, options: null },
+            { key: "weightKg", label: "Ton poids, en kg ?", multiple: null, options: null },
+            {
+              key: "activityLevel",
+              label: "Tes journées, hors muscu ?",
+              multiple: null,
+              options: [
+                { value: "sedentaire", label: "Assis toute la journée", hint: "Bureau, voiture" },
+                { value: "modere", label: "Un peu de marche", hint: "30 min à 1 h par jour" },
+                { value: "actif", label: "Debout toute la journée", hint: "Métier physique" },
+              ],
+            },
+            {
+              key: "mealsPerDay",
+              label: "Combien de repas par jour ?",
+              multiple: null,
+              options: [
+                { value: "3", label: "3 repas", hint: null },
+                { value: "4", label: "4 repas", hint: "Avec une collation" },
+                { value: "5", label: "5 repas", hint: null },
+              ],
+            },
+            {
+              key: "allergies",
+              label: "Des allergies ?",
+              multiple: true,
+              options: [
+                { value: "arachides", label: "Arachides", hint: null },
+                { value: "fruits de mer", label: "Fruits de mer", hint: null },
+                { value: "gluten", label: "Gluten", hint: null },
+                { value: "lactose", label: "Lactose", hint: null },
+              ],
+            },
+            {
+              key: "cookMinutes",
+              label: "Tu cuisines combien de temps par repas ?",
+              multiple: null,
+              options: [
+                { value: "10", label: "10 min", hint: "Le strict minimum" },
+                { value: "25", label: "25 min", hint: null },
+                { value: "45", label: "45 min", hint: "J'aime cuisiner" },
+              ],
+            },
+          ],
+        },
         {
           questionnaireId: "demo_fake_questionnaire_id" as Id<"questionnaires">,
           resumed: false,

@@ -6,15 +6,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocalDate } from "@/lib/dates";
+import { cn } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { missingFields, sanitizeAnswers, type Answers } from "../../../convex/questionnaireAnswers";
@@ -29,6 +23,11 @@ import { parseNum, runMutation } from "./macros";
  * in a message stream and is re-rendered on every reload, so what it shows comes
  * from the `status` subscription — never from local state, which would bring back
  * a blank form over an already-validated profile.
+ *
+ * The questions themselves come from the model, like Claude Code's
+ * `AskUserQuestion`: it writes the wording AND the likely answers, and the user
+ * TAPS a chip. Only `age`, `heightCm` and `weightKg` still open a keyboard —
+ * `estimateTargets` needs the figure, not a bracket.
  */
 
 const GOAL = {
@@ -55,19 +54,29 @@ const ACTIVITY = {
  */
 type Draft = Record<keyof Answers, string>;
 
-const NUMBERS = [
-  { key: "age", label: "Âge", unit: "ans", mode: "numeric" },
-  { key: "heightCm", label: "Taille", unit: "cm", mode: "numeric" },
-  { key: "weightKg", label: "Poids", unit: "kg", mode: "decimal" },
-  { key: "mealsPerDay", label: "Repas par jour", unit: null, mode: "numeric" },
-  { key: "cookMinutes", label: "Temps de cuisine par repas", unit: "min", mode: "numeric" },
-  { key: "people", label: "Nombre de couverts", unit: null, mode: "numeric" },
-] as const satisfies readonly {
+/**
+ * One question as the model wrote it, already sanitised server-side: the key is
+ * a real profile field, and each option's `value` is one `sanitizeAnswers` keeps.
+ * Declared here rather than imported so the card doesn't pull the backend in —
+ * same contract as `Answers`.
+ */
+type Question = {
   key: keyof Draft;
   label: string;
-  unit: string | null;
-  mode: "numeric" | "decimal";
-}[];
+  options: { value: string; label: string; hint: string | null }[] | null;
+  multiple: boolean | null;
+};
+
+/** Which keys deserve a digits keyboard — for the three typed questions AND for
+ *  an « Autre… » typed on a numeric field. Absent = plain text keyboard. */
+const KEYBOARD: Partial<Record<keyof Draft, "numeric" | "decimal">> = {
+  age: "numeric",
+  heightCm: "numeric",
+  weightKg: "decimal",
+  mealsPerDay: "numeric",
+  cookMinutes: "numeric",
+  people: "numeric",
+};
 
 const split = (raw: string) => raw.split(",").map((entry) => entry.trim());
 
@@ -167,17 +176,26 @@ export function OnboardingQuestionnaire({
   // A separate component so its `useState` is seeded from the loaded answers:
   // mounted only once the query has resolved, it can't start from `undefined`
   // and then have to be re-synced in an effect.
-  return <Form questionnaireId={questionnaireId} threadId={q.threadId} initial={q.answers} />;
+  return (
+    <Form
+      questionnaireId={questionnaireId}
+      threadId={q.threadId}
+      initial={q.answers}
+      questions={q.questions}
+    />
+  );
 }
 
 function Form({
   questionnaireId,
   threadId,
   initial,
+  questions,
 }: {
   questionnaireId: Id<"questionnaires">;
   threadId: string;
   initial: Answers;
+  questions: Question[];
 }) {
   const save = useMutation(api.questionnaires.save);
   const submit = useMutation(api.questionnaires.submit);
@@ -202,7 +220,7 @@ function Form({
     setDraft((prev) => ({ ...prev, [key]: value }));
   }
 
-  /** Selects have no blur worth waiting for — the choice IS the edit. The next
+  /** A tap has no blur worth waiting for — the choice IS the edit. The next
    *  draft is built here rather than inside the updater: a mutation fired from a
    *  state updater runs twice under StrictMode. */
   function choose(key: keyof Draft, value: string) {
@@ -225,96 +243,18 @@ function Form({
         garde ce que tu as déjà écrit.
       </p>
 
-      <div className="flex flex-col gap-3">
-        <Choice
-          id={`${id}-goal`}
-          label="Objectif"
-          items={GOAL}
-          value={draft.goal}
-          onChange={(value) => choose("goal", value)}
-        />
-        <Choice
-          id={`${id}-sex`}
-          label="Sexe"
-          items={SEX}
-          value={draft.sex}
-          onChange={(value) => choose("sex", value)}
-        />
-        <Choice
-          id={`${id}-activity`}
-          label="Niveau d'activité (hors muscu)"
-          items={ACTIVITY}
-          value={draft.activityLevel}
-          onChange={(value) => choose("activityLevel", value)}
-        />
-
-        {NUMBERS.map(({ key, label, unit, mode }) => (
-          <Field key={key} id={`${id}-${key}`} label={unit ? `${label} (${unit})` : label}>
-            <Input
-              id={`${id}-${key}`}
-              inputMode={mode}
-              value={draft[key]}
-              // 16px on the phone or iOS zooms the whole page when it focuses.
-              className="h-11 text-base tabular-nums sm:text-sm"
-              onChange={(e) => set(key, e.target.value)}
-              onBlur={() => persist(draft)}
-            />
-          </Field>
+      <div className="flex flex-col gap-4">
+        {questions.map((question) => (
+          <QuestionField
+            key={question.key}
+            id={`${id}-${question.key}`}
+            question={question}
+            value={draft[question.key]}
+            onType={(value) => set(question.key, value)}
+            onChoose={(value) => choose(question.key, value)}
+            onBlur={() => persist(draft)}
+          />
         ))}
-
-        <Field id={`${id}-diet`} label="Régime alimentaire">
-          <Input
-            id={`${id}-diet`}
-            value={draft.diet}
-            placeholder="végétarien, halal, sans lactose…"
-            className="h-11 text-base sm:text-sm"
-            onChange={(e) => set("diet", e.target.value)}
-            onBlur={() => persist(draft)}
-          />
-        </Field>
-
-        <Field id={`${id}-budget`} label="Budget courses">
-          <Input
-            id={`${id}-budget`}
-            value={draft.budget}
-            placeholder="serré, normal…"
-            className="h-11 text-base sm:text-sm"
-            onChange={(e) => set("budget", e.target.value)}
-            onBlur={() => persist(draft)}
-          />
-        </Field>
-
-        <Field
-          id={`${id}-allergies`}
-          label="Allergies"
-          hint="Sépare par des virgules. Je ne mettrai jamais ça dans un repas — laisse vide si tu n'en as aucune."
-        >
-          <Input
-            id={`${id}-allergies`}
-            aria-describedby={`${id}-allergies-hint`}
-            value={draft.allergies}
-            placeholder="arachides, fruits de mer…"
-            className="h-11 text-base sm:text-sm"
-            onChange={(e) => set("allergies", e.target.value)}
-            onBlur={() => persist(draft)}
-          />
-        </Field>
-
-        <Field
-          id={`${id}-excluded`}
-          label="Aliments que tu refuses"
-          hint="Sépare par des virgules. Je ne t'en proposerai pas."
-        >
-          <Input
-            id={`${id}-excluded`}
-            aria-describedby={`${id}-excluded-hint`}
-            value={draft.excluded}
-            placeholder="abats, coriandre…"
-            className="h-11 text-base sm:text-sm"
-            onChange={(e) => set("excluded", e.target.value)}
-            onBlur={() => persist(draft)}
-          />
-        </Field>
       </div>
 
       {missing.length > 0 && (
@@ -414,35 +354,163 @@ function Field({
   );
 }
 
-function Choice({
-  id,
-  label,
-  items,
-  value,
-  onChange,
-}: {
+type FieldProps = {
   id: string;
-  label: string;
-  items: Record<string, string>;
+  question: Question;
   value: string;
-  onChange: (value: string) => void;
-}) {
+  /** Typing: draft only, the blur is what saves — same as any Input here. */
+  onType: (value: string) => void;
+  /** Tapping: draft AND save, there is no blur to wait for. */
+  onChoose: (value: string) => void;
+  onBlur: () => void;
+};
+
+function QuestionField(props: FieldProps) {
+  const { id, question, value, onType, onBlur } = props;
+  const mode = KEYBOARD[question.key];
+
+  // `options === null` is age / heightCm / weightKg: the only keyboards left.
+  if (question.options === null) {
+    return (
+      <Field id={id} label={question.label}>
+        <Input
+          id={id}
+          inputMode={mode}
+          value={value}
+          // 16px on the phone or iOS zooms the whole page when it focuses.
+          className={cn("h-11 text-base sm:text-sm", mode && "tabular-nums")}
+          onChange={(e) => onType(e.target.value)}
+          onBlur={onBlur}
+        />
+      </Field>
+    );
+  }
+
+  return <Chips {...props} options={question.options} />;
+}
+
+/**
+ * The draft slot read as a selection: an entry matching an option is a pressed
+ * chip, anything else is what was typed in « Autre… ». Nothing is stored twice —
+ * a reload finds the card exactly as it was left, and the string is the one
+ * `toAnswers` already comma-splits for `allergies` / `excluded`.
+ */
+export function readChips(value: string, known: Set<string>, multiple: boolean) {
+  const entries = value === "" ? [] : multiple ? value.split(",") : [value];
+  return {
+    chosen: entries.filter((entry) => known.has(entry.trim())),
+    typed: entries.filter((entry) => !known.has(entry.trim())).join(","),
+  };
+}
+
+/** Back to one draft slot. A blank « Autre… » adds nothing, or every list would
+ *  end in a stray comma. */
+export const writeChips = (chosen: string[], other: string) =>
+  [...chosen, ...(other.trim() === "" ? [] : [other])].join(",");
+
+/**
+ * The tappable answers, in place of the Selects and the free-text Inputs this
+ * card used to be.
+ */
+function Chips({
+  id,
+  question,
+  options,
+  value,
+  onType,
+  onChoose,
+  onBlur,
+}: FieldProps & { options: NonNullable<Question["options"]> }) {
+  const multiple = question.multiple === true;
+  const known = new Set(options.map((option) => option.value));
+  const { chosen, typed } = readChips(value, known, multiple);
+
+  const [otherOpen, setOtherOpen] = useState(typed !== "");
+  const otherId = `${id}-other`;
+
+  function toggle(option: string) {
+    const isOn = chosen.some((entry) => entry.trim() === option);
+    if (multiple)
+      return onChoose(
+        writeChips(isOn ? chosen.filter((e) => e.trim() !== option) : [...chosen, option], typed),
+      );
+    // Single choice: tapping the pressed chip clears it — nothing else can unset
+    // an answer. And a chip wins over what was typed in « Autre… ».
+    setOtherOpen(false);
+    onChoose(isOn ? "" : option);
+  }
+
   return (
-    <Field id={id} label={label}>
-      {/* `items` because Base UI's <SelectValue> prints the value, not the
-          selected option's text — and the options aren't mounted while closed. */}
-      <Select items={items} value={value} onValueChange={(v) => onChange((v as string) ?? "")}>
-        <SelectTrigger id={id} className="h-11 w-full text-base sm:text-sm">
-          <SelectValue placeholder="Choisis…" />
-        </SelectTrigger>
-        <SelectContent>
-          {Object.entries(items).map(([key, text]) => (
-            <SelectItem key={key} value={key}>
-              {text}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </Field>
+    // A fieldset, not a <label>: chips are buttons and `htmlFor` points at ONE
+    // control, so the question belongs to the group — that's what a legend is.
+    <fieldset className="min-w-0">
+      <legend className="mb-1.5 text-[11px] text-muted-foreground">{question.label}</legend>
+
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => {
+          const selected = chosen.some((entry) => entry.trim() === option.value);
+          return (
+            <Button
+              key={option.value}
+              type="button"
+              variant={selected ? "secondary" : "outline"}
+              size="sm"
+              aria-pressed={selected}
+              // min-h-11 rather than the `after:-inset-*` trick: a chip is its
+              // own tap target, it isn't a 28px icon squeezed next to a badge.
+              className={cn(
+                "h-auto min-h-11 flex-col items-start gap-0.5 px-3 py-2 text-left whitespace-normal",
+                selected && "border-primary/50 ring-1 ring-primary/30",
+              )}
+              onClick={() => toggle(option.value)}
+            >
+              <span className="text-sm">{option.label}</span>
+              {option.hint ? (
+                <span className="text-[11px] font-normal text-muted-foreground">{option.hint}</span>
+              ) : null}
+            </Button>
+          );
+        })}
+
+        {/* Unconditional, and NOT the model's decision: it wrote 2 to 4 answers
+            it thought likely, and one it didn't think of must never trap the
+            user. Closing it drops what was typed — that's how an answer given
+            here gets unset. */}
+        <Button
+          type="button"
+          variant={otherOpen ? "secondary" : "outline"}
+          size="sm"
+          // No `aria-controls`: the input it reveals doesn't exist while closed,
+          // and pointing at a missing id is worse than not pointing at all.
+          aria-pressed={otherOpen}
+          className="h-auto min-h-11 px-3 py-2"
+          onClick={() => {
+            if (otherOpen && typed !== "") onChoose(multiple ? writeChips(chosen, "") : "");
+            setOtherOpen(!otherOpen);
+          }}
+        >
+          Autre…
+        </Button>
+      </div>
+
+      {otherOpen ? (
+        <div className="mt-1.5 flex flex-col gap-1">
+          {/* sr-only: the group's question is already on screen above, but the
+              input still needs a label of its own. */}
+          <Label htmlFor={otherId} className="sr-only">
+            {question.label} — autre réponse
+          </Label>
+          <Input
+            id={otherId}
+            inputMode={KEYBOARD[question.key]}
+            value={typed}
+            placeholder={multiple ? "sépare par des virgules" : "ta réponse"}
+            className="h-11 text-base sm:text-sm"
+            onChange={(e) => onType(multiple ? writeChips(chosen, e.target.value) : e.target.value)}
+            onBlur={onBlur}
+          />
+        </div>
+      ) : null}
+    </fieldset>
   );
 }

@@ -95,8 +95,9 @@ export const CHEF: AgentConfig = {
     "tool-shopping_list",
     "tool-suggest_recipes_from_ingredients",
     "tool-lookup_food",
-    // The form reads `questionnaireId` off the OUTPUT: the tool takes no
-    // arguments at all, so its input is `{}` and the guard would hide the card.
+    // The form reads everything off the OUTPUT — the questions included, via
+    // `api.questionnaires.status`. Its input is a long array that streams in
+    // piece by piece, and the guard would hide the card until it lands.
     "tool-ask_questionnaire",
   ],
   toolLabels: {
