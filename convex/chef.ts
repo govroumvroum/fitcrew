@@ -139,7 +139,7 @@ const SLOT_LABEL = {
  * `execute` they are invisible to the model, which is where every use below is;
  * the dates the model needs to WRITE are at the end of the system prompt.
  */
-function chefTools(today: string) {
+export function chefTools(today: string) {
   const monday = weekStart(today);
   const week = { weekStart: monday };
 
@@ -449,7 +449,11 @@ const GOAL_LABEL = { perte: "perte de poids", maintien: "maintien", prise: "pris
  * The dates are the only dynamic values left and they sit at the very END (see
  * the comment above the return).
  */
-function systemPrompt(user: Doc<"users">, profile: Doc<"nutritionProfiles"> | null, today: string) {
+export function systemPrompt(
+  user: Doc<"users">,
+  profile: Doc<"nutritionProfiles"> | null,
+  today: string,
+) {
   const p = profile;
   const monday = weekStart(today);
 
@@ -543,6 +547,7 @@ function chef() {
         inputTokens: usage.inputTokens ?? 0,
         outputTokens: usage.outputTokens ?? 0,
         reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+        cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens,
         costUsd: costUsdFrom(providerMetadata),
       });
     },

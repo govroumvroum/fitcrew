@@ -346,8 +346,8 @@ export default defineSchema({
     confirmed: v.boolean(),
   }).index("by_user", ["userId"]),
 
-  // One row per LLM call, so we know who spends what. Written by the coach's
-  // `usageHandler` and by hand at the two `generateObject` sites.
+  // One row per LLM call, so we know who spends what. Written by the coach's and
+  // the chef's `usageHandler`, and by hand at every `generateObject` site.
   //
   // `userId` is absent for `demos`: demo matching is a cache shared by everyone,
   // and billing the first person who triggered it would be a wrong number. Same
@@ -360,6 +360,9 @@ export default defineSchema({
     outputTokens: v.number(),
     // Billed as output. Separate because it's invisible in the transcript.
     reasoningTokens: v.optional(v.number()),
+    // The part of `inputTokens` the provider already had cached, exactly as the
+    // provider reports it — never computed here.
+    cachedInputTokens: v.optional(v.number()),
     // OpenRouter's own figure when it returns one — never tokens x a hardcoded
     // rate, which would rot at the next model change.
     costUsd: v.optional(v.number()),
