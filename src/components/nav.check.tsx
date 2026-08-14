@@ -113,9 +113,15 @@ assert.equal(isActive("/chef", ["/nutrition", "/chef"]), true);
 const hrefsOf = (tab: (typeof TABS)[number]) =>
   "items" in tab ? tab.items.map((i) => i.href) : [tab.href];
 
-// Not app routes: the offline fallback, the component playground, the public
-// share link, and Clerk's two auth screens — none of them show the nav.
-const OUTSIDE_NAV = new Set(["~offline", "demo", "p", "sign-in", "sign-up"]);
+// Routes that legitimately light no tab, each for its own reason. The offline
+// fallback, the component playground, the public share link and Clerk's two auth
+// screens don't show the nav at all. `/changelog` does show it, but has no tab on
+// purpose: TABS is full at 7 and the only way in is the link at the bottom of the
+// home page (see `app/page.tsx`) — so it lights nothing, and that is correct.
+//
+// The guard survives either way: a route added without a tab and without a line
+// here still fails the loop below.
+const OUTSIDE_NAV = new Set(["~offline", "demo", "p", "sign-in", "sign-up", "changelog"]);
 const routes = ["/"].concat(
   readdirSync(new URL("../app/", import.meta.url), { withFileTypes: true })
     .filter((e) => e.isDirectory() && !OUTSIDE_NAV.has(e.name))
