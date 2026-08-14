@@ -1,9 +1,8 @@
-# Le Chef te pose ses questions d'un coup
+# Le Chef te propose les réponses, tu tapes
 
-Pour te connaître, il t'en posait onze, une par une. Maintenant il affiche un
-formulaire dans la conversation : tu remplis ce que tu veux, dans l'ordre que tu
-veux, et tu valides quand tu as fini.
+Pour te connaître, il posait onze questions, une par une. Maintenant il affiche
+une carte : il écrit lui-même les réponses probables, et tu tapes dessus.
 
-Tu peux t'arrêter en route et revenir plus tard, il garde tes réponses. Et tant
-qu'il manque quelque chose d'essentiel, il te dit quoi plutôt que de calculer
-des cibles sur du vide.
+Seuls ton âge, ta taille et ton poids se saisissent — pour le reste, une puce
+suffit, et il y a toujours un « Autre… » si rien ne te correspond. Tu peux
+t'arrêter en route et revenir plus tard, il garde tes réponses.
