@@ -87,6 +87,39 @@ const done = (type: string, input: unknown, output?: unknown): ToolPart => ({
 });
 
 export const COACH_FIXTURES: Record<string, Fixture[]> = {
+  "tool-ask_choices": [
+    {
+      label: "Deux questions d'entraînement",
+      tool: done(
+        "tool-ask_choices",
+        {
+          questions: [
+            {
+              label: "Combien de séances par semaine ?",
+              multiple: false,
+              options: [
+                { label: "2", hint: "Le minimum qui progresse" },
+                { label: "3", hint: null },
+                { label: "4", hint: "Push/pull" },
+                { label: "5 ou plus", hint: null },
+              ],
+            },
+            {
+              label: "En salle ou à la maison ?",
+              multiple: false,
+              options: [
+                { label: "En salle", hint: "Barres, machines, poulies" },
+                { label: "À la maison", hint: "Haltères et élastiques" },
+                { label: "Les deux", hint: null },
+              ],
+            },
+          ],
+        },
+        { choicesId: "demo_fake_choices_id" as Id<"choices"> },
+      ),
+      note: "État live, dépend d'une vraie ligne Convex : l'id est faux, la carte s'abonne à `api.choices.status`.",
+    },
+  ],
   "tool-save_onboarding": [
     {
       label: "Profil complet",
@@ -167,8 +200,20 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
                   restSeconds: 180,
                   notes: null,
                 },
-                { name: "Rowing barre", sets: 4, reps: "8", restSeconds: 150, notes: "Dos à 45°" },
-                { name: "Curl haltères", sets: 3, reps: "10-12", restSeconds: 60, notes: null },
+                {
+                  name: "Rowing barre",
+                  sets: 4,
+                  reps: "8",
+                  restSeconds: 150,
+                  notes: "Dos à 45°",
+                },
+                {
+                  name: "Curl haltères",
+                  sets: 3,
+                  reps: "10-12",
+                  restSeconds: 60,
+                  notes: null,
+                },
               ],
             },
           ],
@@ -277,7 +322,10 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
     },
     {
       label: "Zéro résultat",
-      tool: done("tool-search_web", null, { query: "cardio à jeun 2026", results: [] }),
+      tool: done("tool-search_web", null, {
+        query: "cardio à jeun 2026",
+        results: [],
+      }),
       note: "`SourcesCard` renvoie null quand la liste est vide — rien ne s'affiche, c'est voulu.",
     },
   ],
@@ -293,6 +341,48 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
 };
 
 export const CHEF_FIXTURES: Record<string, Fixture[]> = {
+  "tool-ask_choices": [
+    {
+      label: "Trois questions, dont une à choix multiple",
+      tool: done(
+        "tool-ask_choices",
+        {
+          questions: [
+            {
+              label: "Ton objectif ?",
+              multiple: false,
+              options: [
+                { label: "Prise de masse", hint: "Gagner du muscle" },
+                { label: "Perte de gras", hint: "Sécher sans perdre de force" },
+                { label: "Maintien", hint: null },
+              ],
+            },
+            {
+              label: "Des allergies ?",
+              multiple: true,
+              options: [
+                { label: "Arachides", hint: null },
+                { label: "Fruits de mer", hint: null },
+                { label: "Gluten", hint: null },
+                { label: "Lactose", hint: null },
+              ],
+            },
+            {
+              label: "Tu cuisines combien de temps par repas ?",
+              multiple: false,
+              options: [
+                { label: "10 min", hint: "Le strict minimum" },
+                { label: "25 min", hint: null },
+                { label: "45 min", hint: "J'aime cuisiner" },
+              ],
+            },
+          ],
+        },
+        { choicesId: "demo_fake_choices_id" as Id<"choices"> },
+      ),
+      note: "État live, dépend d'une vraie ligne Convex : l'id est faux, la carte s'abonne à `api.choices.status`.",
+    },
+  ],
   "tool-save_nutrition_profile": [
     {
       label: "Profil complet, cibles 2220 kcal",

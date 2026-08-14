@@ -3,6 +3,7 @@
 import {
   ArrowLeftRightIcon,
   CheckIcon,
+  ClipboardListIcon,
   DumbbellIcon,
   ImageIcon,
   InfoIcon,
@@ -15,6 +16,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { Entry } from "../../../convex/screenshots";
 import { AgentChat, type AgentConfig } from "@/components/chat/agent-chat";
+import { ChoicesCard } from "@/components/chat/choices-card";
 import {
   LoggedCard,
   ProfileCard,
@@ -54,10 +56,18 @@ export const COACH: AgentConfig = {
   thinking: "Le coach réfléchit…",
   unreachable: "Le coach ne répond pas.",
   sidebarEmpty: "Pas encore de conversation. Écris au coach, elle apparaîtra ici.",
-  // The screenshot review and the sources list are the two cards that read the
-  // output rather than the input.
-  outputOnly: ["tool-extract_screenshot", "tool-search_web"],
+  // The screenshot review, the sources list and the chips read the output rather
+  // than the input — the chips because their id is in it, and their input streams
+  // in piece by piece, which the guard would read as "not landed yet".
+  outputOnly: ["tool-extract_screenshot", "tool-search_web", "tool-ask_choices"],
   toolLabels: {
+    "tool-ask_choices": {
+      icon: ClipboardListIcon,
+      pending: "Je prépare mes questions…",
+      running: "Je te pose mes questions…",
+      done: "Questions du coach",
+      failed: "Les questions n'ont pas pu s'afficher.",
+    },
     "tool-save_onboarding": {
       icon: CheckIcon,
       pending: "Je récapitule…",
@@ -112,9 +122,10 @@ export const COACH: AgentConfig = {
       failed: "Le Chef n'a pas répondu.",
     },
   },
-  // Only the screenshot review: nothing lands in the profile until the user
-  // confirms inside it, so it must not open behind a click.
-  needsValidation: ["tool-extract_screenshot"],
+  // The screenshot review, because nothing lands in the profile until the user
+  // confirms inside it; and the chips, because chips nobody can see are chips
+  // nobody taps. Neither may open behind a click.
+  needsValidation: ["tool-extract_screenshot", "tool-ask_choices"],
   renderTool: (tool, isNew) => {
     // Cards read the tool's input, which carries the whole program/profile; the
     // output only holds the resulting version number.
@@ -130,6 +141,17 @@ export const COACH: AgentConfig = {
         const done = output as { screenshotId: Id<"screenshots">; entries: Entry[] };
         return <ExtractedReview screenshotId={done.screenshotId} entries={done.entries} />;
       }
+      // The tappable answers. Their state lives in Convex, so the card only needs
+      // the id — everything else comes from `api.choices.status`. `send` is passed
+      // because the card is shared with the Chef and the echo has to land in THIS
+      // agent's thread.
+      case "tool-ask_choices":
+        return (
+          <ChoicesCard
+            choicesId={(output as { choicesId: Id<"choices"> }).choicesId}
+            send={api.coach.send}
+          />
+        );
       case "tool-generate_program":
         return (
           <ProgramCard

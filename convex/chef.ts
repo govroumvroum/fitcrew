@@ -24,6 +24,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
+import { askChoices } from "./choices";
 import {
   zAddFoodLogEntry,
   zAnalyzeImage,
@@ -144,6 +145,9 @@ export function chefTools(today: string) {
   const week = { weekStart: monday };
 
   return {
+    // Shared with the Coach, definition and all — see `convex/choices.ts`.
+    ask_choices: askChoices,
+
     save_nutrition_profile: createTool({
       description:
         "Enregistre le profil nutrition et calcule ses cibles caloriques. À appeler UNIQUEMENT après que le user a validé ton récapitulatif.",
@@ -206,7 +210,7 @@ export function chefTools(today: string) {
           hydrationMl: dashboard.hydrationMl,
           note: p
             ? null
-            : "Pas encore de profil nutrition : aucune cible, donc pas de « restant » (remaining est null). Le reste de la journée est bien réel. Déroule le questionnaire et appelle save_nutrition_profile.",
+            : "Pas encore de profil nutrition : aucune cible, donc pas de « restant » (remaining est null). Le reste de la journée est bien réel. Pose-lui les questions du profil, puis save_nutrition_profile.",
           hints:
             "Une liste vide veut dire « rien », pas « je ne sais pas » : ne complète pas de mémoire. Les totaux et le restant sont déjà calculés, ne refais pas les soustractions. Tous ces chiffres sont des estimations.",
         };
@@ -472,15 +476,18 @@ ${
 
 CIBLES QUOTIDIENNES (estimées, Mifflin-St Jeor) : ${p.targets.calories} kcal — ${p.targets.protein} g de protéines, ${p.targets.carbs} g de glucides, ${p.targets.fat} g de lipides.
 
-Le profil est déjà fait. S'il veut le refaire ou change de poids/objectif, reprends les questions une par une et rappelle \`save_nutrition_profile\` à la fin.`
+Le profil est déjà fait. S'il veut le refaire ou change de poids/objectif, reprends les questions et rappelle \`save_nutrition_profile\` à la fin.`
     : `PREMIÈRE CONVERSATION — LE PROFIL N'EXISTE PAS ENCORE
 Tu ne peux rien calculer sans lui. Déroule exactement ça :
 - Accueille en une ou deux phrases.
-- Pose les questions suivantes UNE PAR UNE. Jamais deux questions dans le même message, jamais de liste à cocher. Tu rebondis sur la réponse avant d'enchaîner.
+- Pose les questions suivantes UNE PAR UNE en prose, en rebondissant sur chaque réponse. Celles dont l'éventail des réponses est connu (l'objectif, le sexe, le niveau d'activité, le nombre de repas, le régime, le budget) passent par \`ask_choices\` — c'est fait pour ça et ça lui évite de taper ; un même appel peut en porter 2 ou 3 quand elles vont ensemble. Le reste en prose, une à la fois.
 ${QUESTIONS}
-- Puis fais un récapitulatif de ce que tu as compris et demande si c'est bon.
-- Une fois validé, appelle \`save_nutrition_profile\`, annonce ses cibles en précisant que ce sont des estimations, puis propose de générer sa semaine de repas.`
+- Puis récapitule ce que tu as compris et demande si c'est bon.
+- Une fois validé, appelle \`save_nutrition_profile\`, annonce ses cibles en précisant que ce sont des estimations, et propose de générer sa semaine de repas.`
 }
+
+\`ask_choices\` : QUAND UNE QUESTION EST FERMÉE
+Une question dont tu connais déjà l'éventail des réponses (objectif, sexe, niveau d'activité, nombre de repas, budget) → \`ask_choices\`, avec 2 à 4 puces, 1 à 3 questions par appel. Tout le reste — son âge, son poids, sa taille, ce qu'il aime, ce qu'il ressent — se tape dans la conversation, en prose. Le test est simple : si tu t'apprêtes à énumérer toi-même les réponses possibles dans ta phrase, c'est une question fermée, donc \`ask_choices\`. Et quand tu l'appelles, NE REPOSE PAS la question en prose : les puces la posent déjà. S'il abandonne une carte ou choisit « je préfère t'expliquer », NE lui en repropose PAS une autre dans la foulée : il vient de te dire qu'il préfère écrire, alors continue en prose. Ne lui demande jamais ce qu'il t'a déjà dit. Ses réponses te reviennent dans le fil comme s'il les avait écrites : c'est à TOI d'enchaîner et d'appeler \`save_nutrition_profile\` le moment venu, l'outil n'enregistre rien.
 
 CE PROMPT NE CONTIENT PAS SA JOURNÉE — TU VAS LA CHERCHER
 Ses repas prévus, ce qu'il a déjà mangé, ses totaux du jour, son hydratation et son frigo ne sont PAS écrits ici. Tu y as accès, mais par outil, et un outil qu'on n'appelle pas ne renvoie rien.
@@ -694,24 +701,41 @@ export const send = action({
     /** Photos joined to this message. Kept out of the prompt so the user's bubble
      * stays readable — the ids reach the model as unsaved context. */
     storageIds: v.optional(v.array(v.id("_storage"))),
+    /**
+     * For a message the app sends ON the user's behalf — today only the answers
+     * a card echoes back. It is a real, visible user turn (unlike a sentinel),
+     * but it must not name the conversation: « le premier message de
+     * l'utilisateur nomme la conversation » means HIS words, and a card can be
+     * the first user-role message there is.
+     *
+     * Optional, so an already-loaded bundle that never sends it keeps today's
+     * behaviour exactly.
+     */
+    skipTitle: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    await stream(ctx, args.threadId, args.today, {
-      prompt: args.prompt,
-      ...(args.storageIds?.length && {
-        messages: [
-          {
-            role: "user" as const,
-            // Unlike the coach there are four analysis tools, so the marker says
-            // to CHOOSE rather than naming one: only the user's own words say
-            // whether this is a plate, a fridge, a label or a shopping bag. That
-            // choice stays with the model — guessing the intent server-side from
-            // a filename would be worse than asking.
-            content: `${CHEF_ATTACHMENTS}, à analyser avec l'outil qui correspond à ce que le user décrit — analyze_plate, analyze_fridge, read_nutrition_label ou analyze_groceries : ${args.storageIds.join(", ")})`,
-          },
-        ],
-      }),
-    });
+    await stream(
+      ctx,
+      args.threadId,
+      args.today,
+      {
+        prompt: args.prompt,
+        ...(args.storageIds?.length && {
+          messages: [
+            {
+              role: "user" as const,
+              // Unlike the coach there are four analysis tools, so the marker says
+              // to CHOOSE rather than naming one: only the user's own words say
+              // whether this is a plate, a fridge, a label or a shopping bag. That
+              // choice stays with the model — guessing the intent server-side from
+              // a filename would be worse than asking.
+              content: `${CHEF_ATTACHMENTS}, à analyser avec l'outil qui correspond à ce que le user décrit — analyze_plate, analyze_fridge, read_nutrition_label ou analyze_groceries : ${args.storageIds.join(", ")})`,
+            },
+          ],
+        }),
+      },
+      args.skipTitle === true,
+    );
     return null;
   },
 });
@@ -735,6 +759,7 @@ async function stream(
   promptArgs:
     | { prompt: string; messages?: { role: "user"; content: string }[] }
     | { messages: { role: "user"; content: string }[] },
+  skipTitle = false,
 ) {
   // Only the user and the profile are read — for real: `streamContext` reads
   // nothing else. Today's meals, the log, hydration and the fridge are fetched
@@ -743,7 +768,7 @@ async function stream(
   const { user, profile } = await ctx.runQuery(internal.chef.streamContext, {});
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
-  if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);
+  if ("prompt" in promptArgs && !skipTitle) await ensureTitle(ctx, threadId, promptArgs.prompt);
 
   const result = await chef().streamText(
     ctx,

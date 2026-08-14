@@ -153,11 +153,15 @@ export function AgentChat({ agent }: { agent: AgentConfig }) {
   }, [threadId, today, status, results.length, greet, agent.unreachable]);
 
   // Derived, not cleared in an effect: the echo disappears the moment the real
-  // message shows up at the end of the thread.
+  // message shows up in the thread.
+  // Anywhere in the thread, not merely at its end: a card can write a user-role
+  // message of its own (`choices-card.tsx`), which takes the last place and would
+  // make this message look like it never landed — the composer's echo would come
+  // back for good, spinner included.
   // ponytail: sending the exact same text twice in a row hides the second echo.
   // The spinner still shows, and the real message lands a moment later.
-  const lastUser = results.findLast((m) => m.role === "user");
-  const echo = pending !== null && lastUser?.text !== pending ? pending : null;
+  const landed = results.some((m) => m.role === "user" && m.text === pending);
+  const echo = pending !== null && !landed ? pending : null;
 
   /** Uploads to Convex storage; the id travels out of band, never in the prompt. */
   async function upload(file: { url: string; mediaType?: string }) {

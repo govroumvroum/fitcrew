@@ -6,6 +6,7 @@ import {
   BoxIcon,
   CalendarDaysIcon,
   CheckIcon,
+  ClipboardListIcon,
   DatabaseIcon,
   DumbbellIcon,
   NotebookPenIcon,
@@ -47,6 +48,7 @@ import {
   type ReplaceMealInput,
   type ShoppingListOutput,
 } from "@/components/chat/chef-tool-cards";
+import { ChoicesCard } from "@/components/chat/choices-card";
 import { VisionReview } from "@/components/nutrition/vision-review";
 
 /** What `api.vision.analyze` hands back — the four photo tools all return it. */
@@ -93,8 +95,19 @@ export const CHEF: AgentConfig = {
     "tool-shopping_list",
     "tool-suggest_recipes_from_ingredients",
     "tool-lookup_food",
+    // The card reads its id off the OUTPUT, and everything else from
+    // `api.choices.status`. Its input streams in piece by piece, and the guard
+    // would hide the card until it lands.
+    "tool-ask_choices",
   ],
   toolLabels: {
+    "tool-ask_choices": {
+      icon: ClipboardListIcon,
+      pending: "Je prépare mes questions…",
+      running: "Je te pose mes questions…",
+      done: "Questions du Chef",
+      failed: "Les questions n'ont pas pu s'afficher.",
+    },
     "tool-save_nutrition_profile": {
       icon: CheckIcon,
       pending: "Je récapitule…",
@@ -219,6 +232,9 @@ export const CHEF: AgentConfig = {
     "tool-analyze_fridge",
     "tool-read_nutrition_label",
     "tool-analyze_groceries",
+    // Chips nobody can see are chips nobody taps: the whole point of the tool is
+    // that the user acts on it.
+    "tool-ask_choices",
   ],
   renderTool: (tool, isNew) => {
     const { input, output } = tool;
@@ -243,6 +259,18 @@ export const CHEF: AgentConfig = {
           />
         );
       }
+
+      // The tappable answers. Their state lives in Convex, so the card only needs
+      // the id — everything else comes from `api.choices.status`. `send` is
+      // passed because the card is shared with the Coach and the echo has to land
+      // in THIS agent's thread.
+      case "tool-ask_choices":
+        return (
+          <ChoicesCard
+            choicesId={(output as { choicesId: Id<"choices"> }).choicesId}
+            send={api.chef.send}
+          />
+        );
 
       case "tool-save_nutrition_profile":
         return (

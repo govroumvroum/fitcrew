@@ -346,6 +346,32 @@ export default defineSchema({
     confirmed: v.boolean(),
   }).index("by_user", ["userId"]),
 
+  // One batch of tapped questions, same durable-state contract as
+  // `visionAnalyses`: the card lives forever in a message stream, so a reload has
+  // to find it exactly as the user left it — never blank, never re-tappable once
+  // sent.
+  //
+  // `questions` (written by the model) and `answers` (written by the client) are
+  // `v.any()` for the same reason as `visionAnalyses.items`: they're validated at
+  // the boundary by `sanitizeQuestions` / `sanitizeAnswers`, which drop what's
+  // wrong, rather than by the table, which would reject the whole write for one
+  // bad option.
+  choices: defineTable({
+    userId: v.id("users"),
+    // Carried on the row, not read from the client: the card sends its answers
+    // back into ITS OWN conversation, which is not necessarily the thread
+    // currently selected in the URL — and on /demo there is no URL state at all.
+    threadId: v.string(),
+    questions: v.any(),
+    // Aligned with `questions`: null = not answered, [] = « je préfère
+    // t'expliquer », [...] = the labels chosen.
+    answers: v.any(),
+    // No index: a card is always reached by its id, which the tool part carries.
+    // The « one open card at a time » lookup that needed one is gone — several
+    // may be open, and each is read on its own.
+    status: v.union(v.literal("open"), v.literal("completed"), v.literal("abandoned")),
+  }),
+
   // One row per LLM call, so we know who spends what. Written by the coach's and
   // the chef's `usageHandler`, and by hand at every `generateObject` site.
   //
