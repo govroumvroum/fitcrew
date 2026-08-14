@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { groupCircuits, roundsOf } from "@/lib/circuits";
 import { formatFull, formatShort } from "@/lib/dates";
 import { PR_LABELS, TROPHY } from "@/lib/prs";
 import { cn, formatNumber } from "@/lib/utils";
@@ -147,22 +148,7 @@ export function Today({ date }: { date: string }) {
                 </div>
               </div>
             ) : (
-              <ul className="divide-y">
-                {day.exercises.map((exercise) => {
-                  const last = prefill.find((entry) => entry.name === exercise.name);
-                  return (
-                    <li key={exercise.name} className="flex items-center gap-3 py-1.5 text-sm">
-                      <span className="min-w-0 flex-1 truncate">{exercise.name}</span>
-                      <span className="shrink-0 tabular-nums text-muted-foreground">
-                        {exercise.sets} × {exercise.reps}
-                      </span>
-                      <span className="w-18 shrink-0 text-right tabular-nums">
-                        {last ? `${formatNumber(last.weight, 1)} kg` : "—"}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
+              <DayPreview exercises={day.exercises} prefill={prefill} />
             )}
 
             {running ? (
@@ -303,6 +289,80 @@ export function Today({ date }: { date: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+type PreviewExercise = {
+  name: string;
+  sets: number;
+  reps: string;
+  circuit?: string | null;
+  slot?: string | null;
+};
+
+/**
+ * The "à suivre" list. Pure (no hook, no Convex) so `program.check.ts` can render
+ * it and assert a circuit never prints a set count.
+ *
+ * `sets` on a circuit exercise is a ROUND count, not straight sets: printing
+ * "4 × 10" here would say the opposite of what the circuit prescribes. The rounds
+ * are stated once, by the block header. Card density, so no between-rounds line —
+ * /programme is where the circuit is spelled out.
+ */
+export function DayPreview({
+  exercises,
+  prefill,
+}: {
+  exercises: readonly PreviewExercise[];
+  prefill: readonly { name: string; weight: number }[];
+}) {
+  const weight = (name: string) => {
+    const last = prefill.find((entry) => entry.name === name);
+    return last ? `${formatNumber(last.weight, 1)} kg` : "—";
+  };
+
+  return (
+    <ul className="divide-y">
+      {groupCircuits(exercises).map((block) =>
+        block.kind === "exercise" ? (
+          <li key={block.key} className="flex items-center gap-3 py-1.5 text-sm">
+            <span className="min-w-0 flex-1 truncate">{block.exercise.name}</span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">
+              {block.exercise.sets} × {block.exercise.reps}
+            </span>
+            <span className="w-18 shrink-0 text-right tabular-nums">
+              {weight(block.exercise.name)}
+            </span>
+          </li>
+        ) : (
+          <li key={block.key} className="py-1.5 text-sm">
+            <div className="flex items-center gap-3">
+              <span className="min-w-0 flex-1 truncate font-medium">Circuit {block.label}</span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                {roundsOf(block)} tour{roundsOf(block) > 1 ? "s" : ""}
+              </span>
+            </div>
+            <ol className="mt-0.5 border-l pl-2.5">
+              {block.exercises.map((exercise, index) => (
+                // The slot tells two occurrences of the same exercise apart.
+                <li
+                  key={exercise.slot ?? `${exercise.name}-${index}`}
+                  className="flex items-center gap-3 py-0.5"
+                >
+                  <span className="min-w-0 flex-1 truncate">{exercise.name}</span>
+                  <span className="shrink-0 tabular-nums text-muted-foreground">
+                    {exercise.reps}
+                  </span>
+                  <span className="w-18 shrink-0 text-right tabular-nums">
+                    {weight(exercise.name)}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </li>
+        ),
+      )}
+    </ul>
   );
 }
 

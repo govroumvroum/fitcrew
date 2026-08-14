@@ -10,6 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { swapInDays, toDays } from "../../../convex/coach";
 import { latestPerLineage, lineageMembers, lineageOf } from "../../../convex/programs";
 import { daySeconds, groupCircuits } from "@/lib/circuits";
+import { DayPreview } from "@/components/home/today";
 import { formatLoose } from "@/lib/dates";
 import { ProgramCard } from "./tool-cards";
 
@@ -230,5 +231,28 @@ assert.doesNotMatch(text, /4\s*×\s*AMRAP/);
 assert.match(text, /1×5 min/);
 // Both rests are distinguishable: 20 s between exercises, 1 min 30 between rounds.
 assert.match(text, /Entre deux tours/);
+
+// Same guard on the accueil card ("à suivre"), the most-seen renderer of `sets`
+// and the sixth one — it was the one missed when the other five were fixed. It's
+// asserted here rather than in a file of its own so the rule has ONE home: a
+// seventh renderer should extend this block, not start a new check.
+const preview = renderToStaticMarkup(
+  createElement(DayPreview, { exercises: circuitDay, prefill: [{ name: "Pompes", weight: 0 }] }),
+).replace(/<[^>]+>/g, " ");
+assert.match(preview, /Circuit A/);
+assert.equal(preview.match(/4 tours/g)?.length, 1, "les tours s'annoncent une seule fois");
+assert.doesNotMatch(
+  preview,
+  /4\s*×\s*(10|15|AMRAP)/,
+  "un exercice de circuit ne doit jamais afficher ses tours comme des séries",
+);
+// The same exercise twice in one circuit stays two rows.
+assert.equal(preview.match(/Pompes/g)?.length, 2);
+// A classic day is untouched: still `sets × reps`, spaces included.
+const classicPreview = renderToStaticMarkup(
+  createElement(DayPreview, { exercises: classicDay, prefill: [] }),
+).replace(/<[^>]+>/g, " ");
+assert.match(classicPreview, /4 × 8/);
+assert.match(classicPreview, /3 × 10/);
 
 console.log("circuits ok");
