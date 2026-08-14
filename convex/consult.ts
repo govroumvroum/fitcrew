@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { z } from "zod";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { circuitGroups } from "./coach";
+import { circuitRuns } from "./toolSchemas";
 import { type ActionCtx, internalAction, internalQuery } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
 import { MODEL_ID, languageModel } from "./model";
@@ -92,7 +92,7 @@ const zConsultAnswer = z.object({
  * `sets` is the round count. A day with no circuit is untouched.
  */
 export function flattenExercises(exercises: Doc<"programs">["days"][number]["exercises"]) {
-  return circuitGroups(exercises).flatMap((g) =>
+  return circuitRuns(exercises).flatMap((g) =>
     g.circuit
       ? `circuit ${g.circuit} (${g.items[0].sets} tours : ${g.items.map((e) => `${e.name} ${e.reps}`).join(", ")})`
       : g.items.map((e) => `${e.name} ${e.sets}×${e.reps}`),

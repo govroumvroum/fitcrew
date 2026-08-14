@@ -9,10 +9,11 @@ import {
   activeProgramsNote,
   lookupHistory,
   renderProgram,
+  swapInDays,
   systemPrompt,
   toDays,
 } from "./coach";
-import { zGenerateProgram, zSwapExercise } from "./toolSchemas";
+import { circuitErrors, zGenerateProgram, zSwapExercise } from "./toolSchemas";
 import type { Doc } from "./_generated/dataModel";
 
 type Status = "active" | "archived" | "completed";
@@ -291,7 +292,7 @@ assert.equal(
   Circuit A — 4 tours, dans l'ordre :
     2. Pompes — 15 (repos 30s avant l'exo suivant)
     3. Abdos — 20 (repos 30s avant l'exo suivant)
-    4. Tractions — 8 (repos 30s avant l'exo suivant)
+    4. Tractions — 8
     repos entre les tours : 120s
 Progression : +2,5 kg
 Deload : non défini`,
@@ -388,6 +389,55 @@ assert.equal(
   }).success,
   false,
 );
+
+// (e) The second write path. `swap_exercise` rewrites a day without ever going
+// through `zGenerateProgram`, so the same invariants are re-checked on the
+// RESULTING day — the swap validator sees one exercise and cannot know any of
+// this. `swapInDays` is what the mutation calls, so testing it tests the guard.
+const swapDay = toDays([
+  {
+    name: "Jour 1 — Circuit",
+    exercises: [
+      ex("Squat"),
+      inCircuit("Pompes", "A1", { reps: "15" }),
+      inCircuit("Abdos", "A2", { reps: "20" }),
+    ],
+  },
+]);
+const swapTo = (name: string, over: Partial<ModelExercise> = {}) =>
+  toDays([{ name: "x", exercises: [ex(name, over)] }])[0].exercises[0];
+
+// A slot already taken by another exercise of the day.
+assert.throws(
+  () => swapInDays(swapDay, 0, "Pompes", swapTo("Dips", { circuit: "A", slot: "A2", sets: 4 })),
+  /portent le slot/,
+);
+// `sets` is the round count: a swap can't disagree with the rest of the circuit.
+assert.throws(
+  () => swapInDays(swapDay, 0, "Pompes", swapTo("Dips", { circuit: "A", slot: "A1", sets: 3 })),
+  /nombre de TOURS/,
+);
+// Swapping a member of a 2-exercise circuit out leaves a circuit of one.
+assert.throws(() => swapInDays(swapDay, 0, "Pompes", swapTo("Dips")), /qu'un exercice/);
+// A legitimate swap inside the circuit goes through…
+const swappedIn = swapInDays(
+  swapDay,
+  0,
+  "Pompes",
+  swapTo("Dips", { circuit: "A", slot: "A1", sets: 4, restBetweenRoundsSeconds: 120 }),
+);
+assert.deepEqual(
+  swappedIn[0].exercises.map((e) => e.name),
+  ["Squat", "Dips", "Abdos"],
+);
+// …and so does a classic swap outside it.
+assert.equal(swapInDays(swapDay, 0, "Squat", swapTo("Presse"))[0].exercises[0].name, "Presse");
+// A day with no circuit at all is untouched by any of this.
+assert.equal(swapInDays(classicDays, 0, "Dips", swapTo("Pompes"))[0].exercises[1].name, "Pompes");
+
+// The pure function under it all: valid day, no messages.
+assert.deepEqual(circuitErrors(swapDay[0].exercises), []);
+assert.equal(circuitErrors([{ sets: 4, circuit: "A", slot: "A1" }]).length, 1);
 
 // ---------------------------------------------------------------------------
 // The prompt rule the issue makes an acceptance criterion

@@ -34,22 +34,26 @@ export const zExercise = z.object({
     ),
 });
 
-type Exercise = z.infer<typeof zExercise>;
+/** The only fields the circuit rules read. A zod input and a Convex row both fit. */
+type CircuitFields = { sets: number; circuit?: string | null; slot?: string | null };
 
 /**
- * A circuit the model got subtly wrong produces an unrunnable séance, so it is
- * rejected here rather than in a downstream check: the model sees the message
- * and retries. Messages are addressed to it, in French.
+ * The circuit invariants of ONE day, as model-facing French messages (empty =
+ * valid). Pure and shape-agnostic on purpose: `zGenerateProgram` is not the only
+ * write path — `coach.swapExercise` rewrites a day too, and a swap that steals a
+ * slot or breaks a 2-exercise circuit is just as unrunnable. Both call this.
  */
-export function checkDayCircuits(exercises: Exercise[], ctx: z.RefinementCtx) {
+export function circuitErrors(exercises: readonly CircuitFields[]): string[] {
+  const errors: string[] = [];
+  const issue = (message: string) => errors.push(message);
+
   const seen = new Set<string>();
   for (const e of exercises) {
     if (!e.slot) continue;
     if (seen.has(e.slot))
-      ctx.addIssue({
-        code: "custom",
-        message: `Deux exercices du jour portent le slot « ${e.slot} ». Chaque occurrence doit avoir un slot unique dans le jour.`,
-      });
+      issue(
+        `Deux exercices du jour portent le slot « ${e.slot} ». Chaque occurrence doit avoir un slot unique dans le jour.`,
+      );
     seen.add(e.slot);
   }
 
@@ -59,7 +63,6 @@ export function checkDayCircuits(exercises: Exercise[], ctx: z.RefinementCtx) {
   });
 
   for (const [label, at] of circuits) {
-    const issue = (message: string) => ctx.addIssue({ code: "custom", message });
     if (at.length < 2)
       issue(
         `Le circuit « ${label} » ne contient qu'un exercice : un circuit en enchaîne au moins 2, sinon c'est un exercice classique (circuit: null).`,
@@ -76,6 +79,35 @@ export function checkDayCircuits(exercises: Exercise[], ctx: z.RefinementCtx) {
     if (at.some((i) => !exercises[i].slot?.trim()))
       issue(`Chaque exercice du circuit « ${label} » doit porter un \`slot\` non vide.`);
   }
+  return errors;
+}
+
+/**
+ * A circuit the model got subtly wrong produces an unrunnable séance, so it is
+ * rejected here rather than in a downstream check: the model sees the message
+ * and retries. Messages are addressed to it, in French.
+ */
+export function checkDayCircuits(exercises: readonly CircuitFields[], ctx: z.RefinementCtx) {
+  for (const message of circuitErrors(exercises)) ctx.addIssue({ code: "custom", message });
+}
+
+/**
+ * The day's exercises cut into runs: consecutive exercises sharing a `circuit`
+ * label are one circuit, everything else is a run of classic exercises. That
+ * grouping IS the data model — there is no circuit object anywhere. Lives here,
+ * with no Convex import, so both the backend render and `src/lib/circuits.ts`
+ * read the rule from one place.
+ */
+export function circuitRuns<E extends { circuit?: string | null }>(exercises: readonly E[]) {
+  const runs: { circuit?: string; items: E[] }[] = [];
+  for (const e of exercises) {
+    // `null` (zod input) and `undefined` (Convex row) are the same "no circuit".
+    const circuit = e.circuit || undefined;
+    const last = runs.at(-1);
+    if (last && last.circuit === circuit) last.items.push(e);
+    else runs.push({ ...(circuit ? { circuit } : {}), items: [e] });
+  }
+  return runs;
 }
 
 export const zSaveOnboarding = z.object({

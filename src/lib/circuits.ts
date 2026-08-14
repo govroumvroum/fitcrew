@@ -8,6 +8,8 @@
  * public share page, the coach cards and `program.check.ts`.
  */
 
+import { circuitRuns } from "../../convex/toolSchemas";
+
 /** The only fields grouping needs. Anything wider (a Convex row, a zod input) fits. */
 type Grouped = {
   name: string;
@@ -19,28 +21,26 @@ export type Block<E> =
   | { kind: "exercise"; key: string; exercise: E }
   | { kind: "circuit"; key: string; label: string; exercises: E[] };
 
+/**
+ * Blocks for rendering. The grouping rule itself lives in `circuitRuns` — one
+ * implementation for the backend render and this one — and a run only becomes a
+ * block here: a classic run is one block per exercise, a circuit run is one
+ * block. Same label but NOT consecutive is therefore two blocks, on purpose:
+ * merging them would reorder the day, the one thing a circuit day can't survive.
+ */
 export function groupCircuits<E extends Grouped>(exercises: readonly E[]): Block<E>[] {
-  const blocks: Block<E>[] = [];
-  for (const [index, exercise] of exercises.entries()) {
-    const label = exercise.circuit;
-    if (!label) {
-      blocks.push({ kind: "exercise", key: `${exercise.name}-${index}`, exercise });
-      continue;
-    }
-    const last = blocks.at(-1);
-    // Same label but NOT consecutive → a second block with the same name. Rare,
-    // but merging them would reorder the day, which is the one thing a circuit
-    // day cannot survive.
-    if (last?.kind === "circuit" && last.label === label) last.exercises.push(exercise);
-    else
-      blocks.push({
-        kind: "circuit",
-        key: `circuit-${label}-${index}`,
-        label,
-        exercises: [exercise],
-      });
-  }
-  return blocks;
+  let i = 0;
+  return circuitRuns(exercises).flatMap<Block<E>>(({ circuit, items }) => {
+    const start = i;
+    i += items.length;
+    return circuit
+      ? [{ kind: "circuit", key: `circuit-${circuit}-${start}`, label: circuit, exercises: items }]
+      : items.map((exercise, k) => ({
+          kind: "exercise" as const,
+          key: `${exercise.name}-${start + k}`,
+          exercise,
+        }));
+  });
 }
 
 /** Rounds of a circuit block: one set per round, so it's the first exercise's `sets`. */
