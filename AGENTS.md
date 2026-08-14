@@ -118,33 +118,17 @@ Self-check: `bun scripts/agent-login.check.ts`.
 
 # A second worktree is not a second backend
 
-`.worktreeinclude` copies `.env.local` into every new worktree so the app can run
-there. That also copies `CONVEX_DEPLOYMENT`, so **every worktree points at the same
-dev deployment by default** — and a Convex push replaces the whole schema and
-function set. Two agents working in parallel therefore don't conflict, they
-overwrite: neither sees an error, and the loser's app fails later with
-`Could not find public function`, which says nothing about the cause.
+`.worktreeinclude` copies `.env.local` into every new worktree, `CONVEX_DEPLOYMENT`
+included — so **every worktree pushes to the same dev deployment by default**, and a
+Convex push replaces the whole schema and function set. Two worktrees don't
+conflict, they overwrite, with no error at either one.
 
-Before running `convex dev` in a second worktree, give it its own deployment:
+So before `convex dev`, `bun run dev` or `agent-browser` anywhere other than the
+main checkout, read `.agents/skills/driven/SKILL.md`. It covers taking your own
+deployment, the environment variables a fresh one lacks, and the two resources
+that stay shared whatever you do — the browser and the dev port.
 
-```sh
-bunx convex deployment create dev/<slug> --type dev --select --expiration "in 5 days"
-```
-
-It starts empty and with no environment variables. `CLERK_JWT_ISSUER_DOMAIN` is
-required (`convex/users.ts` throws without it), plus `OPENROUTER_API_KEY` and
-`SEARXNG_URL` for the agents; copy them with `bunx convex env get/set`.
-`CLERK_WEBHOOK_SECRET` is not needed — no webhook points there, and signing in
-creates the user from the client anyway. Empty is often what you want: it's a
-profile-less user, which is the only way to test an onboarding.
-
-Two more things every worktree shares. `agent-browser --session-name` does **not**
-isolate — there is one session and one tab whatever you pass, so two agents drive
-the same window and one's typing lands in the other's chat. Serialize it. And
-`next dev` probes 3000–3005, so pin `PORT` per worktree or the second server lands
-where its own QA doesn't expect it.
-
-Driving several worktrees at once: `.agents/skills/drive/SKILL.md`.
+Driving several worktrees yourself: `.agents/skills/drive/SKILL.md`.
 
 # Pull requests
 

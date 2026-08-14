@@ -39,40 +39,29 @@ Convex push replaces the whole schema and function set, so two workers do not
 conflict, they overwrite: no error at either one, and the loser's app fails later
 with `Could not find public function`, which names nothing about the cause.
 
-Give each worker its own dev deployment before it runs anything:
+`driven` is the worker's half of this: the deployment it must take, the
+environment variables a fresh one lacks, and the browser and port it cannot
+isolate. Name it in every brief instead of restating it, and read it yourself —
+what follows is only the part that is yours to decide.
 
-```sh
-# from the worktree. See docs.convex.dev/cli/agent-mode
-bunx convex deployment create dev/<slug> --type dev --select --expiration "in 5 days"
-```
+**Who gets the populated deployment.** A fresh one is empty, which is a gift for
+testing an onboarding and a cost for verifying a read path (`read_programs` and
+`read_today` have nothing to read). Leave the shared deployment to the worker that
+needs real history, isolate the others, and tell each one what it now owns —
+otherwise its first instinct on any trouble is to re-point at the deployment it can
+see in the other worktree.
 
-- **It is empty.** A gift for testing an onboarding, a cost for verifying a read
-  path — `read_programs` and `read_today` need real history. Leave the shared
-  deployment to the worker that needs data, isolate the others.
-- **It inherits no environment variables.** `CLERK_JWT_ISSUER_DOMAIN` (auth
-  throws without it), `OPENROUTER_API_KEY` and `SEARXNG_URL` must be copied.
-  Copying means reading secret values, which will be refused — hand the author the
-  exact command with a `!` prefix and keep the worker parked until they land.
-  `CLERK_WEBHOOK_SECRET` is not needed: no webhook points there, and
-  `convex/users.ts` creates the user from the client on sign-in anyway.
-- **Tell the worker what it now owns**, and that the shared deployment belongs to
-  someone else — otherwise its first instinct on any trouble is to re-point at the
-  deployment it can see in the other worktree.
+**Who holds the browser**, since it cannot be split. One worker at a time, an
+explicit "browser released" before the next starts. Order it so the worker that
+needs it last isn't the one blocking everyone.
 
-Two more resources every worktree shares, and one of them cannot be isolated:
+**Copying the secrets is yours too**, because reading their values will be refused:
+hand the author the command with a `!` prefix and keep the worker parked until they
+land, rather than letting it improvise.
 
-- **The browser.** `agent-browser --session-name` does **not** give a worker its
-  own browser — there is one `default` session with one tab whatever you pass, so
-  concurrent workers drive the same window and one agent's typing lands in the
-  other's chat thread. Serialize it: one worker on the browser at a time, an
-  explicit "browser released" before the next one starts, and treat any capture
-  containing a message the worker did not type as contaminated.
-- **The dev port** `next dev` probes for (3000–3005), so the second server lands
-  somewhere its own QA does not expect. Pin it per worker with `PORT`.
-
-When isolation is impossible, serialize out loud: name the holder, tell it to
-signal release in plain words, tell the waiter to say it is waiting rather than
-route around you.
+When something else turns out to be shared, serialize out loud: name the holder,
+tell it to signal release in plain words, tell the waiter to say it is waiting
+rather than route around you.
 
 Done when every shared mutable resource is per-worker, or under a named
 serialization with an explicit release signal.
@@ -95,8 +84,10 @@ bug a comment already records. This repo is full of them and `AGENTS.md` names
 the worst — the two-deploy rule for removing a Convex function, the vendored
 `ai-elements/` directory, the migrations list.
 
-Then give each worker the files it must not touch, which deployment it owns,
-`bun run build` green as the bar (typecheck and lint both pass while builds
+Open every brief with `run the driven skill first` — that carries the shared-backend
+procedure and the worker protocol, so the brief itself only has to hold what is
+specific to this worker: the files it must not touch, which deployment and port are
+its own, `bun run build` green as the bar (typecheck and lint both pass while builds
 fail), and what is out of scope so a capable agent does not widen the diff.
 
 Done when every worker is running and you have its terminal handle.
