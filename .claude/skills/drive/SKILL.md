@@ -141,9 +141,14 @@ You are done when nothing is left holding something: no serialization
 unreleased, no worker parked on a wait that is over, every expiring deployment
 noted with its expiry.
 
-What was learned goes in the repo, not in the conversation — a rule in
-`AGENTS.md` beats remembering, and a `convex deployment create` in the repo's
-setup hook beats the rule.
+What was learned goes in the repo, not in the conversation: a rule in `AGENTS.md`
+beats remembering, because the repo is the only thing that reaches a teammate.
+
+Automating it is tempting and only half works here. Orca's per-repo setup script
+(`bun install` today) would provision the deployment on every new worktree, but it
+lives in Orca's own settings under `commandSourcePolicy: local-only` — machine
+local, not committed, so it protects you and nobody else. Write the rule first;
+add the automation on top for yourself.
 
 Then the handoff, which is all they read:
 
