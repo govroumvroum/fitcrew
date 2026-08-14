@@ -183,7 +183,8 @@ assert.deepEqual(
 );
 
 // An extra set beyond the prescription stays reachable: rounds never fall below
-// the rows on hand.
+// the rows on hand. Only for a row that carries its slot — which is the shape
+// this app has no writer for yet, see the unprovenanced case right below.
 const extra = seedSets(circuitDay, []).map((set) => ({ ...set, completed: false }));
 extra.push({
   exerciseName: "Pompes",
@@ -196,5 +197,23 @@ extra.push({
   completed: false,
 });
 assert.equal(sessionSteps(circuitDay, extra).length, 13);
+
+// The real shape `workouts.addSet` writes — no circuit, no slot, no round — and
+// the limit it hits, asserted rather than implied: appended to an occurrence
+// whose sibling rows DO carry a slot, it resolves to no occurrence and stays out
+// of the walk. Nothing in the app can produce it today (`addSet`'s only caller
+// is the Coach's retroactive log, which has no day to walk), so this is the
+// documented boundary, not a bug to route around: the day a UI adds sets during
+// a circuit, `addSet` stamps the provenance and this assertion is what flips.
+const unstamped = seedSets(circuitDay, []).map((set) => ({ ...set, completed: false }));
+unstamped.push({ exerciseName: "Pompes", index: 4, weight: 0, reps: 10, completed: false });
+assert.equal(sessionSteps(circuitDay, unstamped).length, 12);
+assert.equal(rowsOf(circuitDay[0], unstamped).length, 4);
+// …whereas on a CLASSIC exercise the same row lands, because nothing there
+// carries a slot and the name is the identity.
+const classicExtra = seedSets(classic, []).map((set) => ({ ...set, completed: false }));
+classicExtra.push({ exerciseName: "Squat", index: 3, weight: 0, reps: 5, completed: false });
+assert.equal(rowsOf(classic[0], classicExtra).length, 4);
+assert.equal(sessionSteps(classic, classicExtra).length, 6);
 
 console.log("prescription.ts ok");
