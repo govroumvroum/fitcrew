@@ -48,7 +48,7 @@ import {
   type ReplaceMealInput,
   type ShoppingListOutput,
 } from "@/components/chat/chef-tool-cards";
-import { OnboardingQuestionnaire } from "@/components/nutrition/questionnaire";
+import { ChoicesCard } from "@/components/chat/choices-card";
 import { VisionReview } from "@/components/nutrition/vision-review";
 
 /** What `api.vision.analyze` hands back — the four photo tools all return it. */
@@ -95,18 +95,18 @@ export const CHEF: AgentConfig = {
     "tool-shopping_list",
     "tool-suggest_recipes_from_ingredients",
     "tool-lookup_food",
-    // The form reads everything off the OUTPUT — the questions included, via
-    // `api.questionnaires.status`. Its input is a long array that streams in
-    // piece by piece, and the guard would hide the card until it lands.
-    "tool-ask_questionnaire",
+    // The card reads its id off the OUTPUT, and everything else from
+    // `api.choices.status`. Its input streams in piece by piece, and the guard
+    // would hide the card until it lands.
+    "tool-ask_choices",
   ],
   toolLabels: {
-    "tool-ask_questionnaire": {
+    "tool-ask_choices": {
       icon: ClipboardListIcon,
-      pending: "Je prépare tes questions…",
-      running: "J'ouvre ton questionnaire…",
-      done: "Questionnaire nutrition",
-      failed: "Le questionnaire n'a pas pu s'ouvrir.",
+      pending: "Je prépare mes questions…",
+      running: "Je te pose mes questions…",
+      done: "Questions du Chef",
+      failed: "Les questions n'ont pas pu s'afficher.",
     },
     "tool-save_nutrition_profile": {
       icon: CheckIcon,
@@ -232,9 +232,9 @@ export const CHEF: AgentConfig = {
     "tool-analyze_fridge",
     "tool-read_nutrition_label",
     "tool-analyze_groceries",
-    // A form nobody can see is a form nobody fills in: the whole point of the
-    // tool is that the user acts on it.
-    "tool-ask_questionnaire",
+    // Chips nobody can see are chips nobody taps: the whole point of the tool is
+    // that the user acts on it.
+    "tool-ask_choices",
   ],
   renderTool: (tool, isNew) => {
     const { input, output } = tool;
@@ -260,12 +260,15 @@ export const CHEF: AgentConfig = {
         );
       }
 
-      // The onboarding form. Its state lives in Convex, so the card only needs
-      // the id — everything else comes from `api.questionnaires.status`.
-      case "tool-ask_questionnaire":
+      // The tappable answers. Their state lives in Convex, so the card only needs
+      // the id — everything else comes from `api.choices.status`. `send` is
+      // passed because the card is shared with the Coach and the echo has to land
+      // in THIS agent's thread.
+      case "tool-ask_choices":
         return (
-          <OnboardingQuestionnaire
-            questionnaireId={(output as { questionnaireId: Id<"questionnaires"> }).questionnaireId}
+          <ChoicesCard
+            choicesId={(output as { choicesId: Id<"choices"> }).choicesId}
+            send={api.chef.send}
           />
         );
 

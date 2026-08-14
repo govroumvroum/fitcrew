@@ -25,6 +25,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
+import { askChoices } from "./choices";
 import { CONTEXT_OPTIONS, languageModel } from "./model";
 import { latestPerLineage, lineageOf, userPrograms } from "./programs";
 import { programExercise } from "./schema";
@@ -476,8 +477,11 @@ export const programHistory = internalQuery({
  * cache every midnight just as surely as a date-stamped system prompt. Inside
  * `execute` it is invisible to the model, which is where every use below is.
  */
-function coachTools(today: string) {
+export function coachTools(today: string) {
   return {
+    // Shared with the Chef, definition and all — see `convex/choices.ts`.
+    ask_choices: askChoices,
+
     save_onboarding: createTool({
       description:
         "Enregistre le profil du user et le ton de coaching. À appeler UNIQUEMENT après que le user a validé ton récapitulatif.",
@@ -708,7 +712,7 @@ Deload : ${program.deloadEveryWeeks ? `toutes les ${program.deloadEveryWeeks} se
  * `today` is the ONE dynamic value left, and it sits at the very END on purpose
  * (see the comment above the return). Do not move it back up.
  */
-function systemPrompt(user: Doc<"users">, today: string) {
+export function systemPrompt(user: Doc<"users">, today: string) {
   const onboarding = user.onboarding;
 
   return `Tu es le coach sportif de ${user.name} dans l'app FitCrew. Tu parles français, tu tutoies, tu es bref : c'est une conversation sur un téléphone, pas un article de blog. 2-6 phrases par message, sauf quand tu présentes un programme.
@@ -735,6 +739,9 @@ ${QUESTIONS}
 - Une fois validé, propose un ton de coaching : motivant, neutre (orienté chiffres) ou direct (sans bullshit). Laisse-le décrire autre chose et range-le dans celui des trois qui colle le mieux.
 - Appelle alors \`save_onboarding\`, puis propose de générer son programme.`
 }
+
+\`ask_choices\` : QUAND UNE QUESTION EST FERMÉE
+Une question dont tu connais déjà l'éventail des réponses (« combien de séances par semaine ? », « en salle ou à la maison ? », « quel matériel ? », « quelle durée de séance ? ») → \`ask_choices\`, avec 2 à 4 puces, 1 à 3 questions par appel. Tout le reste — ses objectifs, ses blessures, ce qu'il ressent après une séance — se tape dans la conversation, en prose. Ne lui demande jamais ce qu'il t'a déjà dit. Ses réponses te reviennent dans le fil comme s'il les avait écrites : c'est à TOI d'enchaîner et d'appeler \`save_onboarding\` le moment venu, l'outil n'enregistre rien.
 
 CE PROMPT NE CONTIENT PAS SES DONNÉES — TU VAS LES CHERCHER
 Ses programmes, son cardio et ses pesées ne sont PAS écrits ici. Tu y as accès, mais par outil, et un outil qu'on n'appelle pas ne renvoie rien.
@@ -942,19 +949,36 @@ export const send = action({
     /** Captures joined to this message. Kept out of the prompt so the user's
      * bubble stays readable — the ids reach the model as unsaved context. */
     storageIds: v.optional(v.array(v.id("_storage"))),
+    /**
+     * For a message the app sends ON the user's behalf — today only the answers
+     * a choices card echoes back. It is a real, visible user turn (unlike a
+     * sentinel), but it must not name the conversation: « le premier message de
+     * l'utilisateur nomme la conversation » means HIS words, and a card can be
+     * the first user-role message there is.
+     *
+     * Optional, so an already-loaded bundle that never sends it keeps today's
+     * behaviour exactly.
+     */
+    skipTitle: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    await stream(ctx, args.threadId, args.today, {
-      prompt: args.prompt,
-      ...(args.storageIds?.length && {
-        messages: [
-          {
-            role: "user" as const,
-            content: `${COACH_ATTACHMENTS}, à lire avec extract_screenshot : ${args.storageIds.join(", ")})`,
-          },
-        ],
-      }),
-    });
+    await stream(
+      ctx,
+      args.threadId,
+      args.today,
+      {
+        prompt: args.prompt,
+        ...(args.storageIds?.length && {
+          messages: [
+            {
+              role: "user" as const,
+              content: `${COACH_ATTACHMENTS}, à lire avec extract_screenshot : ${args.storageIds.join(", ")})`,
+            },
+          ],
+        }),
+      },
+      args.skipTitle === true,
+    );
     return null;
   },
 });
@@ -978,6 +1002,7 @@ async function stream(
   promptArgs:
     | { prompt: string; messages?: { role: "user"; content: string }[] }
     | { messages: { role: "user"; content: string }[] },
+  skipTitle = false,
 ) {
   // Only `user` is read — for real: `streamContext` reads nothing else. The
   // programs and the cardio the prompt used to inject are fetched by
@@ -986,7 +1011,7 @@ async function stream(
   const { user } = await ctx.runQuery(internal.coach.streamContext, {});
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
-  if ("prompt" in promptArgs) await ensureTitle(ctx, threadId, promptArgs.prompt);
+  if ("prompt" in promptArgs && !skipTitle) await ensureTitle(ctx, threadId, promptArgs.prompt);
 
   const result = await coach().streamText(
     ctx,

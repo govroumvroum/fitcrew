@@ -87,6 +87,39 @@ const done = (type: string, input: unknown, output?: unknown): ToolPart => ({
 });
 
 export const COACH_FIXTURES: Record<string, Fixture[]> = {
+  "tool-ask_choices": [
+    {
+      label: "Deux questions d'entraînement",
+      tool: done(
+        "tool-ask_choices",
+        {
+          questions: [
+            {
+              label: "Combien de séances par semaine ?",
+              multiple: false,
+              options: [
+                { label: "2", hint: "Le minimum qui progresse" },
+                { label: "3", hint: null },
+                { label: "4", hint: "Push/pull" },
+                { label: "5 ou plus", hint: null },
+              ],
+            },
+            {
+              label: "En salle ou à la maison ?",
+              multiple: false,
+              options: [
+                { label: "En salle", hint: "Barres, machines, poulies" },
+                { label: "À la maison", hint: "Haltères et élastiques" },
+                { label: "Les deux", hint: null },
+              ],
+            },
+          ],
+        },
+        { choicesId: "demo_fake_choices_id" as Id<"choices"> },
+      ),
+      note: "État live, dépend d'une vraie ligne Convex : l'id est faux, la carte s'abonne à `api.choices.status`.",
+    },
+  ],
   "tool-save_onboarding": [
     {
       label: "Profil complet",
@@ -167,8 +200,20 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
                   restSeconds: 180,
                   notes: null,
                 },
-                { name: "Rowing barre", sets: 4, reps: "8", restSeconds: 150, notes: "Dos à 45°" },
-                { name: "Curl haltères", sets: 3, reps: "10-12", restSeconds: 60, notes: null },
+                {
+                  name: "Rowing barre",
+                  sets: 4,
+                  reps: "8",
+                  restSeconds: 150,
+                  notes: "Dos à 45°",
+                },
+                {
+                  name: "Curl haltères",
+                  sets: 3,
+                  reps: "10-12",
+                  restSeconds: 60,
+                  notes: null,
+                },
               ],
             },
           ],
@@ -277,7 +322,10 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
     },
     {
       label: "Zéro résultat",
-      tool: done("tool-search_web", null, { query: "cardio à jeun 2026", results: [] }),
+      tool: done("tool-search_web", null, {
+        query: "cardio à jeun 2026",
+        results: [],
+      }),
       note: "`SourcesCard` renvoie null quand la liste est vide — rien ne s'affiche, c'est voulu.",
     },
   ],
@@ -293,85 +341,46 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
 };
 
 export const CHEF_FIXTURES: Record<string, Fixture[]> = {
-  "tool-ask_questionnaire": [
+  "tool-ask_choices": [
     {
-      label: "Formulaire ouvert",
+      label: "Trois questions, dont une à choix multiple",
       tool: done(
-        "tool-ask_questionnaire",
+        "tool-ask_choices",
         {
           questions: [
             {
-              key: "goal",
               label: "Ton objectif ?",
-              multiple: null,
+              multiple: false,
               options: [
-                { value: "prise", label: "Prise de masse", hint: "Gagner du muscle" },
-                { value: "perte", label: "Perte de gras", hint: "Sécher sans perdre de force" },
-                { value: "maintien", label: "Maintien", hint: null },
+                { label: "Prise de masse", hint: "Gagner du muscle" },
+                { label: "Perte de gras", hint: "Sécher sans perdre de force" },
+                { label: "Maintien", hint: null },
               ],
             },
             {
-              key: "sex",
-              label: "Tu es ?",
-              multiple: null,
-              options: [
-                { value: "h", label: "Un homme", hint: null },
-                { value: "f", label: "Une femme", hint: null },
-              ],
-            },
-            { key: "age", label: "Ton âge ?", multiple: null, options: null },
-            { key: "heightCm", label: "Ta taille, en cm ?", multiple: null, options: null },
-            { key: "weightKg", label: "Ton poids, en kg ?", multiple: null, options: null },
-            {
-              key: "activityLevel",
-              label: "Tes journées, hors muscu ?",
-              multiple: null,
-              options: [
-                { value: "sedentaire", label: "Assis toute la journée", hint: "Bureau, voiture" },
-                { value: "modere", label: "Un peu de marche", hint: "30 min à 1 h par jour" },
-                { value: "actif", label: "Debout toute la journée", hint: "Métier physique" },
-              ],
-            },
-            {
-              key: "mealsPerDay",
-              label: "Combien de repas par jour ?",
-              multiple: null,
-              options: [
-                { value: "3", label: "3 repas", hint: null },
-                { value: "4", label: "4 repas", hint: "Avec une collation" },
-                { value: "5", label: "5 repas", hint: null },
-              ],
-            },
-            {
-              key: "allergies",
               label: "Des allergies ?",
               multiple: true,
               options: [
-                { value: "arachides", label: "Arachides", hint: null },
-                { value: "fruits de mer", label: "Fruits de mer", hint: null },
-                { value: "gluten", label: "Gluten", hint: null },
-                { value: "lactose", label: "Lactose", hint: null },
+                { label: "Arachides", hint: null },
+                { label: "Fruits de mer", hint: null },
+                { label: "Gluten", hint: null },
+                { label: "Lactose", hint: null },
               ],
             },
             {
-              key: "cookMinutes",
               label: "Tu cuisines combien de temps par repas ?",
-              multiple: null,
+              multiple: false,
               options: [
-                { value: "10", label: "10 min", hint: "Le strict minimum" },
-                { value: "25", label: "25 min", hint: null },
-                { value: "45", label: "45 min", hint: "J'aime cuisiner" },
+                { label: "10 min", hint: "Le strict minimum" },
+                { label: "25 min", hint: null },
+                { label: "45 min", hint: "J'aime cuisiner" },
               ],
             },
           ],
         },
-        {
-          questionnaireId: "demo_fake_questionnaire_id" as Id<"questionnaires">,
-          resumed: false,
-          note: "Le formulaire est à l'écran.",
-        },
+        { choicesId: "demo_fake_choices_id" as Id<"choices"> },
       ),
-      note: "État live, dépend d'une vraie ligne Convex : l'id est faux, la carte s'abonne à `api.questionnaires.status`.",
+      note: "État live, dépend d'une vraie ligne Convex : l'id est faux, la carte s'abonne à `api.choices.status`.",
     },
   ],
   "tool-save_nutrition_profile": [

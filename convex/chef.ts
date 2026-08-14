@@ -24,11 +24,11 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
+import { askChoices } from "./choices";
 import {
   zAddFoodLogEntry,
   zAnalyzeImage,
   zAskCoach,
-  zAskQuestionnaire,
   zGenerateMealPlan,
   zLogPlannedMeal,
   zLookupFood,
@@ -140,35 +140,13 @@ const SLOT_LABEL = {
  * `execute` they are invisible to the model, which is where every use below is;
  * the dates the model needs to WRITE are at the end of the system prompt.
  */
-function chefTools(today: string) {
+export function chefTools(today: string) {
   const monday = weekStart(today);
   const week = { weekStart: monday };
 
   return {
-    ask_questionnaire: createTool({
-      description:
-        "Affiche la carte de profil nutrition : c'est TOI qui écris les questions ET les réponses probables, et le user tape sur une puce au lieu d'écrire. Adapte-les à ce que la conversation a déjà révélé (s'il a dit vouloir sécher, mets « perte de poids » en premier) et n'inclus pas une question dont tu connais déjà la réponse. 2 à 4 options par question, jamais plus, et une option = une valeur que le champ accepte (\"prise\", pas « prise de masse »). age, heightCm et weightKg n'ont AUCUNE option : ils se saisissent au clavier. allergies et excluded sont les seules en multiple. N'enregistre RIEN par lui-même — c'est la validation de la carte qui écrit le profil et calcule ses cibles.",
-      inputSchema: zAskQuestionnaire,
-      execute: async (ctx: ToolCtx, { questions }) => {
-        // The component injects `threadId` into every tool ctx it builds, but
-        // types it optional because a tool can also run outside a thread. A
-        // throw, not a fallback: the card sends its echo message back into this
-        // conversation, and guessing which one would send it to the wrong place.
-        if (!ctx.threadId) throw new Error("ask_questionnaire appelé hors conversation");
-        return {
-          ...(await ctx.runMutation(internal.questionnaires.open, {
-            threadId: ctx.threadId,
-            // Same null-stripping convention as the other tools: strict output
-            // can't say "absent", so `multiple: null` is just « non ».
-            questions: questions.map(({ multiple, ...q }) => ({
-              ...q,
-              multiple: multiple === true,
-            })),
-          })),
-          note: "Le formulaire est à l'écran. Attends qu'il te dise l'avoir rempli — ne repose PAS les questions en prose par-dessus, et n'appelle PAS save_nutrition_profile : la validation du formulaire écrit le profil et ses cibles toute seule. SAUF s'il te dit qu'il ne veut pas le remplir : le formulaire est alors fermé, et c'est le seul cas où tu reprends les questions une par une, en prose.",
-        };
-      },
-    }),
+    // Shared with the Coach, definition and all — see `convex/choices.ts`.
+    ask_choices: askChoices,
 
     save_nutrition_profile: createTool({
       description:
@@ -232,7 +210,7 @@ function chefTools(today: string) {
           hydrationMl: dashboard.hydrationMl,
           note: p
             ? null
-            : "Pas encore de profil nutrition : aucune cible, donc pas de « restant » (remaining est null). Le reste de la journée est bien réel. Appelle ask_questionnaire pour lui afficher le formulaire de profil.",
+            : "Pas encore de profil nutrition : aucune cible, donc pas de « restant » (remaining est null). Le reste de la journée est bien réel. Pose-lui les questions du profil, puis save_nutrition_profile.",
           hints:
             "Une liste vide veut dire « rien », pas « je ne sais pas » : ne complète pas de mémoire. Les totaux et le restant sont déjà calculés, ne refais pas les soustractions. Tous ces chiffres sont des estimations.",
         };
@@ -475,7 +453,7 @@ const GOAL_LABEL = { perte: "perte de poids", maintien: "maintien", prise: "pris
  * The dates are the only dynamic values left and they sit at the very END (see
  * the comment above the return).
  */
-function systemPrompt(user: Doc<"users">, profile: Doc<"nutritionProfiles"> | null, today: string) {
+export function systemPrompt(user: Doc<"users">, profile: Doc<"nutritionProfiles"> | null, today: string) {
   const p = profile;
   const monday = weekStart(today);
 
@@ -494,17 +472,18 @@ ${
 
 CIBLES QUOTIDIENNES (estimées, Mifflin-St Jeor) : ${p.targets.calories} kcal — ${p.targets.protein} g de protéines, ${p.targets.carbs} g de glucides, ${p.targets.fat} g de lipides.
 
-Le profil est déjà fait. S'il veut le refaire ou change de poids/objectif, appelle \`ask_questionnaire\` : le formulaire s'ouvre pré-rempli avec ce qu'il a déjà. Sa validation réécrit le profil et les cibles — n'appelle pas \`save_nutrition_profile\` derrière.
-S'il refuse le formulaire ou l'abandonne, reprends les questions une par une, récapitule, et là OUI, appelle \`save_nutrition_profile\` à la fin : sans validation du formulaire, rien n'a été écrit.`
+Le profil est déjà fait. S'il veut le refaire ou change de poids/objectif, reprends les questions et rappelle \`save_nutrition_profile\` à la fin.`
     : `PREMIÈRE CONVERSATION — LE PROFIL N'EXISTE PAS ENCORE
 Tu ne peux rien calculer sans lui. Déroule exactement ça :
-- TON TOUT PREMIER MESSAGE fait les deux à la fois : une ou deux phrases d'accueil ET l'appel à \`ask_questionnaire\`, dans le MÊME tour. N'attends pas qu'il te réponde pour l'appeler — il n'a rien à répondre, la carte EST ce que tu lui demandes. Elle s'affiche dans la conversation, avec toutes les questions d'un coup.
-- C'est toi qui écris ces questions ET les réponses probables : il tape sur une puce plutôt que d'écrire. 2 à 4 options par question, adaptées à ce qu'il a déjà dit ; age, heightCm et weightKg n'en prennent aucune (il les saisit) ; allergies et excluded sont en multiple. Une question par champ de la liste ci-dessous.
-- Tant qu'il est à l'écran, tu ne poses AUCUNE de ces questions en prose. Tu attends qu'il te dise l'avoir rempli.
-- Quand il te le dit : le profil et les cibles sont DÉJÀ enregistrés, n'appelle pas \`save_nutrition_profile\`. Annonce ses cibles en précisant que ce sont des estimations, puis propose de générer sa semaine de repas.
-- S'il refuse le formulaire ou l'abandonne, et SEULEMENT dans ce cas : pose les questions UNE PAR UNE, jamais deux dans le même message, en rebondissant sur chaque réponse. Puis récapitule, demande si c'est bon, et appelle \`save_nutrition_profile\` une fois validé.
-${QUESTIONS}`
+- Accueille en une ou deux phrases.
+- Pose les questions suivantes UNE PAR UNE. Jamais deux questions dans le même message. Tu rebondis sur la réponse avant d'enchaîner.
+${QUESTIONS}
+- Puis récapitule ce que tu as compris et demande si c'est bon.
+- Une fois validé, appelle \`save_nutrition_profile\`, annonce ses cibles en précisant que ce sont des estimations, et propose de générer sa semaine de repas.`
 }
+
+\`ask_choices\` : QUAND UNE QUESTION EST FERMÉE
+Une question dont tu connais déjà l'éventail des réponses (objectif, sexe, niveau d'activité, nombre de repas, budget) → \`ask_choices\`, avec 2 à 4 puces, 1 à 3 questions par appel. Tout le reste — son âge, son poids, sa taille, ce qu'il aime, ce qu'il ressent — se tape dans la conversation, en prose. Ne lui demande jamais ce qu'il t'a déjà dit. Ses réponses te reviennent dans le fil comme s'il les avait écrites : c'est à TOI d'enchaîner et d'appeler \`save_nutrition_profile\` le moment venu, l'outil n'enregistre rien.
 
 CE PROMPT NE CONTIENT PAS SA JOURNÉE — TU VAS LA CHERCHER
 Ses repas prévus, ce qu'il a déjà mangé, ses totaux du jour, son hydratation et son frigo ne sont PAS écrits ici. Tu y as accès, mais par outil, et un outil qu'on n'appelle pas ne renvoie rien.
@@ -718,11 +697,11 @@ export const send = action({
      * stays readable — the ids reach the model as unsaved context. */
     storageIds: v.optional(v.array(v.id("_storage"))),
     /**
-     * For a message the app sends ON the user's behalf — today only the
-     * questionnaire's recap echo. It is a real, visible user turn (unlike a
-     * sentinel), but it must not name the conversation: « le premier message de
-     * l'utilisateur nomme la conversation » means HIS words, and on the
-     * onboarding path the echo is the first user-role message there is.
+     * For a message the app sends ON the user's behalf — today only the answers
+     * a card echoes back. It is a real, visible user turn (unlike a sentinel),
+     * but it must not name the conversation: « le premier message de
+     * l'utilisateur nomme la conversation » means HIS words, and a card can be
+     * the first user-role message there is.
      *
      * Optional, so an already-loaded bundle that never sends it keeps today's
      * behaviour exactly.

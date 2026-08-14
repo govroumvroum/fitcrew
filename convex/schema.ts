@@ -346,34 +346,25 @@ export default defineSchema({
     confirmed: v.boolean(),
   }).index("by_user", ["userId"]),
 
-  // The onboarding form card, same durable-state contract as `visionAnalyses`:
-  // the card lives forever in a message stream, so a reload has to find it
-  // exactly as the user left it.
+  // One batch of tapped questions, same durable-state contract as
+  // `visionAnalyses`: the card lives forever in a message stream, so a reload has
+  // to find it exactly as the user left it — never blank, never re-tappable once
+  // sent.
   //
-  // `answers` is partial by nature — that's the point of a form you fill in over
-  // several minutes — and gets the same treatment as `visionAnalyses.items`:
-  // validated at the boundary (`sanitizeAnswers`), not by the table. The client
-  // writes this field, so nothing here is trusted.
-  //
-  // `kind` is a single literal today; a second questionnaire adds a literal, not
-  // a form engine.
-  questionnaires: defineTable({
+  // `questions` (written by the model) and `answers` (written by the client) are
+  // `v.any()` for the same reason as `visionAnalyses.items`: they're validated at
+  // the boundary by `sanitizeQuestions` / `sanitizeAnswers`, which drop what's
+  // wrong, rather than by the table, which would reject the whole write for one
+  // bad option.
+  choices: defineTable({
     userId: v.id("users"),
-    kind: v.literal("chef_onboarding"),
-    // Carried on the row, not read from the client: the card sends an echo
-    // message back into ITS OWN conversation after a submit, which is not
-    // necessarily the thread currently selected in the URL — and on /demo there
-    // is no URL state at all.
+    // Carried on the row, not read from the client: the card sends its answers
+    // back into ITS OWN conversation, which is not necessarily the thread
+    // currently selected in the URL — and on /demo there is no URL state at all.
     threadId: v.string(),
-    // The questions the model wrote for THIS card, on the row for the same reason
-    // as `threadId` and `answers`: durable state. The card must survive a reload
-    // and must never read them from the streamed tool part — `output-available`
-    // does not guarantee the input came back with it.
-    //
-    // `v.any()` like `answers`: the shape is validated at the boundary by
-    // `sanitizeQuestions`, which drops what the model got wrong, rather than by
-    // the table, which would reject the whole write for one bad option.
     questions: v.any(),
+    // Aligned with `questions`: null = not answered, [] = « je préfère
+    // t'expliquer », [...] = the labels chosen.
     answers: v.any(),
     status: v.union(v.literal("open"), v.literal("completed"), v.literal("abandoned")),
   }).index("by_user_status", ["userId", "status"]),

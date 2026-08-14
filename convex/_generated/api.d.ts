@@ -11,6 +11,7 @@
 import type * as aiUsage from "../aiUsage.js";
 import type * as chef from "../chef.js";
 import type * as chefToolSchemas from "../chefToolSchemas.js";
+import type * as choices from "../choices.js";
 import type * as coach from "../coach.js";
 import type * as consult from "../consult.js";
 import type * as crew from "../crew.js";
@@ -24,8 +25,6 @@ import type * as model from "../model.js";
 import type * as nutrition from "../nutrition.js";
 import type * as programs from "../programs.js";
 import type * as progress from "../progress.js";
-import type * as questionnaireAnswers from "../questionnaireAnswers.js";
-import type * as questionnaires from "../questionnaires.js";
 import type * as screenshots from "../screenshots.js";
 import type * as search from "../search.js";
 import type * as sentinels from "../sentinels.js";
@@ -45,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   aiUsage: typeof aiUsage;
   chef: typeof chef;
   chefToolSchemas: typeof chefToolSchemas;
+  choices: typeof choices;
   coach: typeof coach;
   consult: typeof consult;
   crew: typeof crew;
@@ -58,8 +58,6 @@ declare const fullApi: ApiFromModules<{
   nutrition: typeof nutrition;
   programs: typeof programs;
   progress: typeof progress;
-  questionnaireAnswers: typeof questionnaireAnswers;
-  questionnaires: typeof questionnaires;
   screenshots: typeof screenshots;
   search: typeof search;
   sentinels: typeof sentinels;
