@@ -126,6 +126,20 @@ never shows. Ask for the shot, or drive it yourself with `qa`.
 Answering a worker's question with a guess about product intent is worse than
 parking it. Two failed attempts at the same wall is the signal to park.
 
+**A redesign mid-flight leaves sediment.** Each superseded instruction stays in the
+worker's context and competes with the current one, so a worker on its third design
+carries two it must not follow — and will occasionally follow one. After a real
+change of direction, have it write a handoff into the PR body (what is verified, the
+traps that took review rounds to find, what its deployment and browser are doing),
+then get its context compacted, naming what to keep and what to drop. A worker
+**cannot run `/compact` on itself** — ask the author to type it in that terminal. The
+handoff goes first: the PR survives the compaction, the session does not.
+
+**Your own hobby-horses cost the worker hours.** Reviewing a shrinking diff, chasing
+a line count, polishing a measurement — if the author has not asked for it, it is
+your bias spending someone else's turns. When you notice you have sent two messages
+about something the author never raised, drop it out loud so the worker stops too.
+
 ## 6. Land
 
 You are done when nothing is left holding something: no serialization
