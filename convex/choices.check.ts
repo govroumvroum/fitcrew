@@ -52,6 +52,19 @@ const two = [{ label: "Oui", hint: null }, { label: "Non" }];
   );
 }
 
+// Everything dropped leaves NOTHING, and `open` refuses to insert that rather
+// than showing an empty card: `complete` is true on an empty list, so « Envoyer »
+// would be enabled and would send an empty turn to the agent.
+{
+  assert.deepEqual(
+    sanitizeQuestions([
+      { label: "   ", options: two },
+      { label: "Une seule option", options: [{ label: "Oui" }] },
+    ]),
+    [],
+  );
+}
+
 const questions = sanitizeQuestions([
   { label: "Où ?", options: [{ label: "Salle" }, { label: "Maison" }] },
   { label: "Matériel ?", options: [{ label: "Haltères" }, { label: "Barre" }], multiple: true },

@@ -188,6 +188,13 @@ export const open = internalMutation({
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
     const questions = sanitizeQuestions(args.questions);
+    // A card with nothing left to ask is worse than no card: `complete` is true
+    // on an empty list, so « Envoyer » is enabled and sends an EMPTY user turn.
+    // A loud tool error instead — the client says the questions could not be
+    // shown, and the model gets to write them again.
+    if (questions.length === 0) {
+      throw new Error("Aucune question exploitable : il en faut au moins une, avec un libellé et 2 options.");
+    }
     const choicesId = await ctx.db.insert("choices", {
       userId: user._id,
       threadId: args.threadId,
