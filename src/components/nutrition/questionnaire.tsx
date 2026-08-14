@@ -153,10 +153,13 @@ export function OnboardingQuestionnaire({
   if (q.status === "completed") {
     return <p className="text-sm text-muted-foreground">Profil enregistré.</p>;
   }
+  // Scoped to the FORM, not to the profile: abandoning sends the Chef back to the
+  // prose questions, which end in `save_nutrition_profile`. « rien n'a été
+  // enregistré » would then sit above a saved profile and lie.
   if (q.status === "abandoned") {
     return (
       <p className="text-sm text-muted-foreground">
-        Questionnaire abandonné, rien n&apos;a été enregistré.
+        Questionnaire abandonné : ce formulaire n&apos;a rien enregistré.
       </p>
     );
   }

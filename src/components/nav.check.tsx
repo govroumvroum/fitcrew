@@ -116,7 +116,7 @@ const hrefsOf = (tab: (typeof TABS)[number]) =>
 // Routes that legitimately light no tab, each for its own reason. The offline
 // fallback, the component playground, the public share link and Clerk's two auth
 // screens don't show the nav at all. `/changelog` does show it, but has no tab on
-// purpose: TABS is full at 7 and the only way in is the link at the bottom of the
+// purpose: TABS is full at 6 and the only way in is the link at the bottom of the
 // home page (see `app/page.tsx`) — so it lights nothing, and that is correct.
 //
 // The guard survives either way: a route added without a tab and without a line

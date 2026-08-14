@@ -57,7 +57,7 @@ export default function Home() {
           {date ? <Today date={date} /> : <TodaySkeleton />}
         </Show>
 
-        {/* The only way in to /changelog: TABS is full (7 entries) and a list of
+        {/* The only way in to /changelog: TABS is full (6 entries) and a list of
             what shipped is not a destination you go to every day. Signed-in only —
             /changelog is behind Clerk, so signed out the link is a trip to /sign-in. */}
         <Show when="signed-in">
