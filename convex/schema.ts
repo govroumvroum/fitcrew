@@ -21,6 +21,22 @@ export const programExercise = v.object({
   reps: v.string(), // "8" or "8-12" or "AMRAP"
   restSeconds: v.number(),
   notes: v.optional(v.string()),
+  // Circuit metadata, all optional and all absent on a classic exercise: a day
+  // without them IS a classic day, so no program ever needs migrating.
+  //
+  // `circuit` is a label local to the day ("A", "B"). Exercises sharing it AND
+  // consecutive in `exercises` form one circuit, in array order.
+  circuit: v.optional(v.string()),
+  // The identity of THIS occurrence in the day, unique across the day. An array
+  // index isn't enough: the same exercise can appear twice in one circuit.
+  slot: v.optional(v.string()),
+  // Rest after the last exercise of a round, as opposed to `restSeconds` which
+  // is the rest before the circuit's NEXT exercise. Carried on every exercise of
+  // the circuit; readers take the first one's.
+  restBetweenRoundsSeconds: v.optional(v.number()),
+  // No `rounds` field on purpose: `sets` is the round count (one set per round),
+  // identical across the circuit. A second source of truth would drift, and
+  // totalSets/duration arithmetic keeps working untouched.
 });
 
 export const challengeMetric = v.union(
@@ -194,6 +210,12 @@ export default defineSchema({
     weight: v.number(),
     reps: v.number(),
     completed: v.boolean(),
+    // Circuit provenance of the set. Written by nobody yet — the séance screen
+    // (part 2 of #93) populates them; declared here so that PR can be frontend
+    // only. Optional forever: a classic set carries none of them.
+    circuit: v.optional(v.string()),
+    slot: v.optional(v.string()), // the occurrence inside the day, see programExercise
+    round: v.optional(v.number()), // 1-based tour number
   })
     .index("by_workout", ["workoutId"])
     .index("by_user_and_exercise", ["userId", "exerciseName"]),

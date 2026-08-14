@@ -2,7 +2,8 @@ import { generateObject } from "ai";
 import { v } from "convex/values";
 import { z } from "zod";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
+import { circuitRuns } from "./toolSchemas";
 import { type ActionCtx, internalAction, internalQuery } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
 import { MODEL_ID, languageModel } from "./model";
@@ -85,6 +86,20 @@ const zConsultAnswer = z.object({
 // ---------------------------------------------------------------------------
 
 /**
+ * A day's exercises, one string each, for the prompt. A circuit collapses into a
+ * SINGLE entry: rendered one by one as `${sets}×${reps}` it would read as four
+ * straight sets then move on, which is precisely the opposite of a circuit —
+ * `sets` is the round count. A day with no circuit is untouched.
+ */
+export function flattenExercises(exercises: Doc<"programs">["days"][number]["exercises"]) {
+  return circuitRuns(exercises).flatMap((g) =>
+    g.circuit
+      ? `circuit ${g.circuit} (${g.items[0].sets} tours : ${g.items.map((e) => `${e.name} ${e.reps}`).join(", ")})`
+      : g.items.map((e) => `${e.name} ${e.sets}×${e.reps}`),
+  );
+}
+
+/**
  * What the Coach is allowed to see of the training side when the Chef asks.
  * Issue #31 asks to "ne partager entre agents que le contexte nécessaire", so
  * this projection IS the boundary: cardio imports, bodyweight, PRs and the food
@@ -109,7 +124,7 @@ export const coachGrounding = internalQuery({
         name: program.name,
         days: program.days.map((day) => ({
           name: day.name,
-          exercises: day.exercises.map((e) => `${e.name} ${e.sets}×${e.reps}`),
+          exercises: flattenExercises(day.exercises),
         })),
         progressionRules: program.progressionRules,
       },

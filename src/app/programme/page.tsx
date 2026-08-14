@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExerciseDemo, useExerciseDemos } from "@/components/workout/demo";
+import type { Block } from "@/lib/circuits";
+import { betweenRoundsOf, daySeconds, groupCircuits, roundsOf } from "@/lib/circuits";
 import { formatDay, useLocalDate } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
@@ -194,6 +196,83 @@ function Programme({ date }: { date: string }) {
   );
 }
 
+type DayExercise = Program["days"][number]["exercises"][number];
+
+/**
+ * A circuit, read as one thing: the block header carries the rounds, the rows
+ * carry the order, and the rest between two rounds sits on its own line at the
+ * bottom — never in the same register as the rest between two exercices, which
+ * is the one confusion this screen has to prevent.
+ */
+function CircuitBlock({
+  block,
+  demoUrlFor,
+}: {
+  block: Extract<Block<DayExercise>, { kind: "circuit" }>;
+  demoUrlFor: (name: string) => string | null;
+}) {
+  const rounds = roundsOf(block);
+  const betweenRounds = betweenRoundsOf(block);
+
+  return (
+    <div className="rounded-md border bg-card/45 p-2.5">
+      <div className="flex items-baseline gap-2">
+        <p className="eyebrow min-w-0 flex-1">Circuit {block.label}</p>
+        <Badge variant="secondary" className="shrink-0 tabular-nums">
+          {rounds} tour{rounds > 1 ? "s" : ""}
+        </Badge>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Tu enchaînes les exercices dans l&apos;ordre, puis tu recommences.
+      </p>
+      <ol className="mt-2 divide-y">
+        {block.exercises.map((exercise, index) => {
+          const demoUrl = demoUrlFor(exercise.name);
+          // The last exercise of a round isn't followed by another exercise, so
+          // its own `restSeconds` doesn't apply — the between-rounds rest does.
+          const last = index === block.exercises.length - 1;
+          return (
+            // The slot is what tells two occurrences of the same exercise apart;
+            // the index only backs it up for a circuit written before slots.
+            <li
+              key={exercise.slot ?? `${exercise.name}-${index}`}
+              className="flex min-h-11 items-center gap-3 py-2"
+            >
+              <span className="w-4 shrink-0 text-sm text-muted-foreground tabular-nums">
+                {index + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{exercise.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-semibold tabular-nums text-foreground">
+                    {exercise.reps}
+                  </span>
+                  {last ? null : (
+                    <>
+                      {" "}
+                      · puis <span className="tabular-nums">{restLabel(exercise.restSeconds)}</span>
+                    </>
+                  )}
+                </p>
+                {exercise.notes ? (
+                  <p className="text-sm text-muted-foreground">{exercise.notes}</p>
+                ) : null}
+              </div>
+              {demoUrl ? <ExerciseDemo name={exercise.name} gifUrl={demoUrl} /> : null}
+            </li>
+          );
+        })}
+      </ol>
+      <p className="mt-2 border-t pt-2 text-sm text-muted-foreground">
+        Entre deux tours&#8239;:{" "}
+        <span className="tabular-nums text-foreground">
+          {betweenRounds > 0 ? restLabel(betweenRounds) : "enchaîne"}
+        </span>
+      </p>
+    </div>
+  );
+}
+
 function ProgramSection({
   program,
   demoUrlFor,
@@ -227,15 +306,11 @@ function ProgramSection({
     (sum, day) => sum + day.exercises.reduce((n, ex) => n + ex.sets, 0),
     0,
   );
-  // A set costs its rest plus ~35 s of work. Estimated from the prescription,
-  // never presented as a measurement — hence the caveat under the numbers.
+  // Estimated from the prescription, never presented as a measurement — hence
+  // the caveat under the numbers. A circuit doesn't pay its between-exercises
+  // rest once per set, so the arithmetic lives in `daySeconds`.
   const avgMinutes =
-    days.reduce(
-      (sum, day) => sum + day.exercises.reduce((n, ex) => n + ex.sets * (ex.restSeconds + 35), 0),
-      0,
-    ) /
-    60 /
-    days.length;
+    days.reduce((sum, day) => sum + daySeconds(day.exercises), 0) / 60 / days.length;
 
   return (
     <section className="flex flex-col gap-5">
@@ -261,7 +336,9 @@ function ProgramSection({
           It must never grow into a week view. */}
       <div className={cn("flex flex-col gap-3", isLoop && "slab")}>
         <div className="min-w-0">
-          <p className="eyebrow">{isLoop ? "La rotation" : "Un seul jour, répété à chaque séance"}</p>
+          <p className="eyebrow">
+            {isLoop ? "La rotation" : "Un seul jour, répété à chaque séance"}
+          </p>
           {isLoop ? (
             <p className="text-sm text-muted-foreground">
               Le jour qui vient, puis le suivant. Tu ne peux pas être en retard sur une boucle.
@@ -374,11 +451,18 @@ function ProgramSection({
                 </summary>
                 <div className="px-3 pb-3">
                   <ul className="divide-y">
-                    {day.exercises.map((exercise) => {
+                    {groupCircuits(day.exercises).map((block) => {
+                      if (block.kind === "circuit")
+                        return (
+                          <li key={block.key} className="py-2.5">
+                            <CircuitBlock block={block} demoUrlFor={demoUrlFor} />
+                          </li>
+                        );
+                      const exercise = block.exercise;
                       // No match (or not resolved yet) → no affordance at all.
                       const demoUrl = demoUrlFor(exercise.name);
                       return (
-                        <li key={exercise.name} className="flex min-h-11 items-center gap-3 py-2.5">
+                        <li key={block.key} className="flex min-h-11 items-center gap-3 py-2.5">
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium">{exercise.name}</p>
                             <p className="text-sm text-muted-foreground">

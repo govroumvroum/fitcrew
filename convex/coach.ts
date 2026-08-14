@@ -30,7 +30,14 @@ import { CONTEXT_OPTIONS, languageModel } from "./model";
 import { latestPerLineage, lineageOf, userPrograms } from "./programs";
 import { programExercise } from "./schema";
 import { searchWeb } from "./search";
-import { zGenerateProgram, zLogWorkout, zSaveOnboarding, zSwapExercise } from "./toolSchemas";
+import {
+  circuitErrors,
+  circuitRuns,
+  zGenerateProgram,
+  zLogWorkout,
+  zSaveOnboarding,
+  zSwapExercise,
+} from "./toolSchemas";
 import { KICKOFF, COACH_ATTACHMENTS, isSentinel } from "./sentinels";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
@@ -44,22 +51,46 @@ type ModelExercise = {
   reps: string;
   restSeconds: number;
   notes: string | null;
+  circuit?: string | null;
+  slot?: string | null;
+  restBetweenRoundsSeconds?: number | null;
 };
 type ModelDay = { name: string; exercises: ModelExercise[] };
 type Days = Doc<"programs">["days"];
+type Exercise = Days[number]["exercises"][number];
 
 /** Strict structured output can't express "optional", so nulls come back instead. */
+export function toExercise({
+  notes,
+  circuit,
+  slot,
+  restBetweenRoundsSeconds,
+  ...rest
+}: ModelExercise): Exercise {
+  return {
+    ...rest,
+    ...(notes ? { notes } : {}),
+    ...(circuit ? { circuit } : {}),
+    ...(slot ? { slot } : {}),
+    ...(restBetweenRoundsSeconds != null ? { restBetweenRoundsSeconds } : {}),
+  };
+}
+
 export function toDays(days: ModelDay[]): Days {
   return days.map((day) => ({
     name: day.name,
-    exercises: day.exercises.map(({ notes, ...rest }) => ({
-      ...rest,
-      ...(notes ? { notes } : {}),
-    })),
+    exercises: day.exercises.map(toExercise),
   }));
 }
 
-/** Exported for the self-check in `src/components/chat/program.check.ts`. */
+/**
+ * Exported for the self-check in `src/components/chat/program.check.ts`, and the
+ * single write path of `swapExercise` — which is why the circuit invariants are
+ * re-checked here. `zSwapExercise` only sees one exercise, so it cannot know the
+ * slot it carries is already taken, that its `sets` disagrees with the rest of
+ * the circuit, or that swapping it out leaves a one-exercise circuit behind.
+ * Only the resulting day knows, and part 2 walks the rounds of that day.
+ */
 export function swapInDays(
   days: Days,
   dayIndex: number,
@@ -72,9 +103,15 @@ export function swapInDays(
     (e) => e.name.toLowerCase().trim() === from.toLowerCase().trim(),
   );
   if (i === -1) throw new Error(`Exercice « ${from} » introuvable dans « ${day.name} »`);
-  return days.map((d, j) =>
+  const next = days.map((d, j) =>
     j === dayIndex ? { ...d, exercises: d.exercises.map((e, k) => (k === i ? to : e)) } : d,
   );
+  const errors = circuitErrors(next[dayIndex].exercises);
+  if (errors.length)
+    throw new Error(
+      `Ce remplacement casserait les circuits de « ${day.name} » : ${errors.join(" ")}`,
+    );
+  return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -517,14 +554,12 @@ export function coachTools(today: string) {
       description:
         "Remplace un exercice du programme le plus récemment travaillé par un autre. Crée une nouvelle version de CE programme, sans toucher aux autres.",
       inputSchema: zSwapExercise,
-      execute: async (ctx: ToolCtx, { dayIndex, from, to }) => {
-        const { notes, ...rest } = to;
-        return await ctx.runMutation(internal.coach.swapExercise, {
+      execute: async (ctx: ToolCtx, { dayIndex, from, to }) =>
+        await ctx.runMutation(internal.coach.swapExercise, {
           dayIndex,
           from,
-          to: { ...rest, ...(notes ? { notes } : {}) },
-        });
-      },
+          to: toExercise(to),
+        }),
     }),
 
     read_programs: createTool({
@@ -689,17 +724,38 @@ const QUESTIONS = `1. Niveau (débutant / intermédiaire / avancé)
 6. Durée de séance préférée (30 min / 45 min / 1 h / 1 h+)
 7. Matériel dispo (salle complète, haltères, poids du corps…)`;
 
+/**
+ * One day's exercises. A circuit rendered as `4×10 (repos 30s)` per line reads as
+ * "four sets then move on", which is the opposite of what it is — so it gets a
+ * labelled block instead. A day with no circuit metadata renders exactly as it
+ * did before circuits existed (asserted in coach.check.ts).
+ */
+const renderDay = (exercises: Days[number]["exercises"]) => {
+  let n = 0;
+  return circuitRuns(exercises)
+    .map((g) => {
+      if (!g.circuit)
+        return g.items
+          .map((e) => `  ${++n}. ${e.name} — ${e.sets}×${e.reps} (repos ${e.restSeconds}s)`)
+          .join("\n");
+      const first = g.items[0];
+      // No "avant l'exo suivant" on the last one of the round: what follows it is
+      // the between-rounds rest, not its own. Same rule as the frontend renderers.
+      const lines = g.items.map(
+        (e, i) =>
+          `    ${++n}. ${e.name} — ${e.reps}${i < g.items.length - 1 ? ` (repos ${e.restSeconds}s avant l'exo suivant)` : ""}`,
+      );
+      if (first.restBetweenRoundsSeconds !== undefined)
+        lines.push(`    repos entre les tours : ${first.restBetweenRoundsSeconds}s`);
+      return `  Circuit ${g.circuit} — ${first.sets} tours, dans l'ordre :\n${lines.join("\n")}`;
+    })
+    .join("\n");
+};
+
 /** One program, written out for the model. */
-const renderProgram = (program: Doc<"programs">, lastTrained: boolean) =>
+export const renderProgram = (program: Doc<"programs">, lastTrained: boolean) =>
   `« ${program.name} » (v${program.version}, ${program.days.length} jours)${lastTrained ? " — le plus récemment travaillé" : ""}
-${program.days
-  .map(
-    (day, i) =>
-      `[jour ${i}] ${day.name}\n${day.exercises
-        .map((e, j) => `  ${j + 1}. ${e.name} — ${e.sets}×${e.reps} (repos ${e.restSeconds}s)`)
-        .join("\n")}`,
-  )
-  .join("\n")}
+${program.days.map((day, i) => `[jour ${i}] ${day.name}\n${renderDay(day.exercises)}`).join("\n")}
 Progression : ${program.progressionRules}
 Deload : ${program.deloadEveryWeeks ? `toutes les ${program.deloadEveryWeeks} semaines` : "non défini"}`;
 
@@ -758,6 +814,14 @@ RÈGLES PROGRAMME (quand tu appelles generate_program)
 - Respecte le matériel dispo, la durée de séance et les limitations. Un exercice contre-indiqué est une faute.
 - Si le user fait un sport, le programme doit le servir (boxe = explosivité, gainage, épaules solides, pas de jambes détruites la veille d'un sparring).
 - Après \`generate_program\`, résume le programme jour par jour dans ton message : le user ne voit que ce que tu écris.
+
+CIRCUITS (enchaîner des exercices et répéter le bloc)
+- Tu proposes un circuit UNIQUEMENT quand le profil, l'objectif ou la demande le réclament : peu de temps, renfo/cardio, poids du corps, ou « je veux enchaîner ». Sinon, séance classique.
+- Tu ne transformes JAMAIS en silence une séance classique en circuit. Tu annonces la structure que tu proposes, tu expliques pourquoi elle sert son objectif, et le user peut la refuser.
+- Format : les exercices d'un circuit se suivent dans \`exercises\` et portent le même \`circuit\` ("A", "B"), 2 exercices minimum. Chacun a un \`slot\` unique dans le jour ("A1", "A2"…) — le même exercice deux fois dans un circuit, c'est deux slots.
+- \`sets\` EST le nombre de tours du circuit : un exercice, une série par tour. La même valeur sur tous les exercices du circuit, sinon le circuit est impossible.
+- \`restSeconds\` = repos avant l'exercice suivant du circuit. \`restBetweenRoundsSeconds\` = repos entre deux tours, identique sur tous les exercices du circuit.
+- Les exercices au poids du corps (pompes, abdos, tractions, dips) sont des exercices comme les autres et font de très bons circuits.
 
 AUTRES OUTILS
 - \`swap_exercise\` dès qu'il déteste ou ne peut pas faire un exercice. Propose un remplaçant équivalent, ne demande pas 3 fois confirmation. Il agit sur le programme le plus récemment travaillé — celui que \`read_programs\` marque \`lastTrained\` : si l'exercice appartient à un autre, dis-le-lui plutôt que de le faire au mauvais endroit.

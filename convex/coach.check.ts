@@ -1,9 +1,20 @@
 /**
- * Self-check for the pure selection in convex/coach.ts — `lookupHistory` and
- * `activeLineages`. Run: `bun convex/coach.check.ts`
+ * Self-check for the pure parts of convex/coach.ts — `lookupHistory`,
+ * `activeLineages`, and the circuit round-trip (schema -> toDays -> render).
+ * Run: `bun convex/coach.check.ts`
  */
 import assert from "node:assert/strict";
-import { activeLineages, activeProgramsNote, lookupHistory } from "./coach";
+import {
+  activeLineages,
+  activeProgramsNote,
+  lookupHistory,
+  renderProgram,
+  swapInDays,
+  systemPrompt,
+  toDays,
+} from "./coach";
+import { circuitErrors, zGenerateProgram, zSwapExercise } from "./toolSchemas";
+import type { Doc } from "./_generated/dataModel";
 
 type Status = "active" | "archived" | "completed";
 let t = 0;
@@ -193,4 +204,249 @@ assert.match(capped, /lookup_program_history/);
 // The rendered count is a parameter, not a hardcoded 5 in the prose.
 assert.match(activeProgramsNote(4, 2), /il a 4 programmes actifs et seuls 2 sont rendus/);
 
-console.log("convex/coach.ts lookupHistory + activeLineages + activeProgramsNote ok");
+// ---------------------------------------------------------------------------
+// Circuits — schema -> toDays -> renderProgram, and what the schema refuses
+// ---------------------------------------------------------------------------
+
+type ModelExercise = Parameters<typeof toDays>[0][number]["exercises"][number];
+const ex = (name: string, over: Partial<ModelExercise> = {}): ModelExercise => ({
+  name,
+  sets: 4,
+  reps: "10",
+  restSeconds: 90,
+  notes: null,
+  circuit: null,
+  slot: null,
+  restBetweenRoundsSeconds: null,
+  ...over,
+});
+const inCircuit = (name: string, slot: string, over: Partial<ModelExercise> = {}) =>
+  ex(name, {
+    circuit: "A",
+    slot,
+    sets: 4,
+    restSeconds: 30,
+    restBetweenRoundsSeconds: 120,
+    ...over,
+  });
+
+const program = (days: { name: string; exercises: ModelExercise[] }[]) =>
+  ({
+    name: "Test",
+    version: 1,
+    days: toDays(days),
+    progressionRules: "+2,5 kg",
+  }) as unknown as Doc<"programs">;
+
+// (a) A classic program renders EXACTLY as it did before circuits existed, and
+// stores exactly the same keys — that's the whole no-migration promise.
+const classicDays = toDays([
+  {
+    name: "Jour 1 — Push",
+    exercises: [ex("Développé couché"), ex("Dips", { sets: 3, reps: "8-12", restSeconds: 60 })],
+  },
+]);
+assert.deepEqual(classicDays, [
+  {
+    name: "Jour 1 — Push",
+    exercises: [
+      { name: "Développé couché", sets: 4, reps: "10", restSeconds: 90 },
+      { name: "Dips", sets: 3, reps: "8-12", restSeconds: 60 },
+    ],
+  },
+]);
+assert.equal(
+  renderProgram(program([{ name: "Jour 1 — Push", exercises: [ex("Développé couché")] }]), false),
+  `« Test » (v1, 1 jours)
+[jour 0] Jour 1 — Push
+  1. Développé couché — 4×10 (repos 90s)
+Progression : +2,5 kg
+Deload : non défini`,
+);
+
+// (b) A circuit survives generate -> toDays -> render: label, order, tours, and
+// the two rest kinds, which a reader must not confuse.
+const circuitDay = {
+  name: "Jour 1 — Circuit",
+  exercises: [
+    ex("Squat"),
+    inCircuit("Pompes", "A1", { reps: "15" }),
+    inCircuit("Abdos", "A2", { reps: "20" }),
+    inCircuit("Tractions", "A3", { reps: "8" }),
+  ],
+};
+assert.equal(
+  zGenerateProgram.safeParse({
+    name: "P",
+    progressionRules: "x",
+    deloadEveryWeeks: null,
+    days: [circuitDay],
+  }).success,
+  true,
+);
+assert.equal(
+  renderProgram(program([circuitDay]), false),
+  `« Test » (v1, 1 jours)
+[jour 0] Jour 1 — Circuit
+  1. Squat — 4×10 (repos 90s)
+  Circuit A — 4 tours, dans l'ordre :
+    2. Pompes — 15 (repos 30s avant l'exo suivant)
+    3. Abdos — 20 (repos 30s avant l'exo suivant)
+    4. Tractions — 8
+    repos entre les tours : 120s
+Progression : +2,5 kg
+Deload : non défini`,
+);
+
+// The regression this whole issue exists to prevent: `sets` doubles as the round
+// count, so any renderer that keeps the `4×10` form on a circuit exercise tells
+// the user "four straight sets then move on" — the opposite of a circuit. The
+// count belongs in the block header, as tours, and nowhere else.
+const circuitRender = renderProgram(program([circuitDay]), false);
+assert.match(circuitRender, /Circuit A — 4 tours/);
+for (const line of circuitRender.split("\n").filter((l) => /Pompes|Abdos|Tractions/.test(l)))
+  assert.doesNotMatch(line, /\d+×/, `un exercice de circuit rendu en séries×reps : ${line}`);
+
+// Nulls never reach the document, and the metadata does.
+const stored = toDays([circuitDay])[0].exercises;
+assert.deepEqual(stored[0], {
+  name: "Squat",
+  sets: 4,
+  reps: "10",
+  restSeconds: 90,
+});
+assert.deepEqual(stored[1], {
+  name: "Pompes",
+  sets: 4,
+  reps: "15",
+  restSeconds: 30,
+  circuit: "A",
+  slot: "A1",
+  restBetweenRoundsSeconds: 120,
+});
+
+// (c) The same exercise twice in one circuit stays two distinguishable rows.
+const twice = toDays([
+  {
+    name: "Jour 1",
+    exercises: [
+      inCircuit("Pompes", "A1", { reps: "15" }),
+      inCircuit("Gainage", "A2", { reps: "30s" }),
+      inCircuit("Pompes", "A3", { reps: "10" }),
+    ],
+  },
+])[0].exercises;
+assert.deepEqual(
+  twice.map((e) => e.slot),
+  ["A1", "A2", "A3"],
+);
+assert.equal(twice.filter((e) => e.name === "Pompes").length, 2);
+
+// (d) What the schema refuses. Each is a circuit the séance screen could not run.
+const day = (exercises: ModelExercise[]) => ({
+  name: "Jour 1",
+  exercises,
+});
+const rejects = (exercises: ModelExercise[], why: RegExp) => {
+  const r = zGenerateProgram.safeParse({
+    name: "P",
+    progressionRules: "x",
+    deloadEveryWeeks: null,
+    days: [day(exercises)],
+  });
+  assert.equal(r.success, false, `attendu rejeté : ${why}`);
+  assert.match(r.error?.issues.map((i) => i.message).join(" | ") ?? "", why);
+};
+
+// One exercise alone under a label is not a circuit.
+rejects([inCircuit("Pompes", "A1"), ex("Squat"), ex("Rowing")], /qu'un exercice/);
+// `sets` is the round count: it can't differ inside a circuit.
+rejects(
+  [inCircuit("Pompes", "A1"), inCircuit("Abdos", "A2", { sets: 3 }), ex("Squat")],
+  /nombre de TOURS/,
+);
+// A circuit exercise without a slot has no identity in the séance.
+rejects([inCircuit("Pompes", "A1"), inCircuit("Abdos", "  "), ex("Squat")], /`slot` non vide/);
+// Two occurrences claiming the same slot would merge in the séance log.
+rejects([inCircuit("Pompes", "A1"), inCircuit("Abdos", "A1"), ex("Squat")], /portent le slot/);
+// Interrupted then resumed: array order IS the circuit, so this is unrunnable.
+rejects([inCircuit("Pompes", "A1"), ex("Squat"), inCircuit("Abdos", "A2")], /interrompu/);
+
+// A swap has no day context; the one rule it can enforce is circuit ⇒ slot.
+assert.equal(
+  zSwapExercise.safeParse({
+    dayIndex: 0,
+    from: "Pompes",
+    to: inCircuit("Dips", "A1"),
+  }).success,
+  true,
+);
+assert.equal(
+  zSwapExercise.safeParse({
+    dayIndex: 0,
+    from: "Pompes",
+    to: ex("Dips", { circuit: "A" }),
+  }).success,
+  false,
+);
+
+// (e) The second write path. `swap_exercise` rewrites a day without ever going
+// through `zGenerateProgram`, so the same invariants are re-checked on the
+// RESULTING day — the swap validator sees one exercise and cannot know any of
+// this. `swapInDays` is what the mutation calls, so testing it tests the guard.
+const swapDay = toDays([
+  {
+    name: "Jour 1 — Circuit",
+    exercises: [
+      ex("Squat"),
+      inCircuit("Pompes", "A1", { reps: "15" }),
+      inCircuit("Abdos", "A2", { reps: "20" }),
+    ],
+  },
+]);
+const swapTo = (name: string, over: Partial<ModelExercise> = {}) =>
+  toDays([{ name: "x", exercises: [ex(name, over)] }])[0].exercises[0];
+
+// A slot already taken by another exercise of the day.
+assert.throws(
+  () => swapInDays(swapDay, 0, "Pompes", swapTo("Dips", { circuit: "A", slot: "A2", sets: 4 })),
+  /portent le slot/,
+);
+// `sets` is the round count: a swap can't disagree with the rest of the circuit.
+assert.throws(
+  () => swapInDays(swapDay, 0, "Pompes", swapTo("Dips", { circuit: "A", slot: "A1", sets: 3 })),
+  /nombre de TOURS/,
+);
+// Swapping a member of a 2-exercise circuit out leaves a circuit of one.
+assert.throws(() => swapInDays(swapDay, 0, "Pompes", swapTo("Dips")), /qu'un exercice/);
+// A legitimate swap inside the circuit goes through…
+const swappedIn = swapInDays(
+  swapDay,
+  0,
+  "Pompes",
+  swapTo("Dips", { circuit: "A", slot: "A1", sets: 4, restBetweenRoundsSeconds: 120 }),
+);
+assert.deepEqual(
+  swappedIn[0].exercises.map((e) => e.name),
+  ["Squat", "Dips", "Abdos"],
+);
+// …and so does a classic swap outside it.
+assert.equal(swapInDays(swapDay, 0, "Squat", swapTo("Presse"))[0].exercises[0].name, "Presse");
+// A day with no circuit at all is untouched by any of this.
+assert.equal(swapInDays(classicDays, 0, "Dips", swapTo("Pompes"))[0].exercises[1].name, "Pompes");
+
+// The pure function under it all: valid day, no messages.
+assert.deepEqual(circuitErrors(swapDay[0].exercises), []);
+assert.equal(circuitErrors([{ sets: 4, circuit: "A", slot: "A1" }]).length, 1);
+
+// ---------------------------------------------------------------------------
+// The prompt rule the issue makes an acceptance criterion
+// ---------------------------------------------------------------------------
+
+const prompt = systemPrompt({ name: "Basile" } as unknown as Doc<"users">, "2026-08-14");
+assert.match(prompt, /Tu ne transformes JAMAIS en silence une séance classique en circuit/);
+assert.match(prompt, /Tu annonces la structure que tu proposes/);
+assert.match(prompt, /UNIQUEMENT quand le profil, l'objectif ou la demande le réclament/);
+assert.match(prompt, /`sets` EST le nombre de tours/);
+
+console.log("convex/coach.ts lookupHistory + activeLineages + activeProgramsNote + circuits ok");

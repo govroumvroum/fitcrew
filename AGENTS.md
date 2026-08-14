@@ -83,6 +83,36 @@ Then drive `agent-browser --session-name fitcrew` as usual. The session name mak
 `agent-browser` persist cookies, so run this only when the saved session has lapsed.
 `--browser <name>` targets a different session name.
 
+**Use a session name of your own as soon as you are not the only worktree.**
+`--session-name` names a *profile*, it does not isolate a *window*: two agents
+passing `fitcrew` drive the same Chrome window, so the other one's navigation
+lands in your tab mid-run. It doesn't fail — you keep evaluating, against their
+page. The tell is a capture holding content you never asked for (another app
+entirely, a route you didn't open). Name the session after the work and sign that
+one in:
+
+```sh
+bun run agent-login -- --browser circuits-93   # then --session-name circuits-93 throughout
+```
+
+Anything captured before you noticed is suspect even if it looked right — retake
+it after the switch rather than reasoning about which shots were clean.
+
+**The dev port collides the same way.** `next dev` probes 3000–3005 and takes the
+first free one, so a second worktree silently lands somewhere its own QA isn't
+looking — and `agent-login`'s probe finds the *other* worktree's server, which
+signs you in against their app. Pin an explicit port nobody else has and pass it
+through to both the login and the browser:
+
+```sh
+PORT=3006 bun run dev
+bun run agent-login -- --browser circuits-93 --port 3006
+agent-browser --session-name circuits-93 open http://localhost:3006/
+```
+
+`EADDRINUSE` on 3000 is the loud version of this; a screenshot of someone else's
+branch is the quiet one.
+
 Do **not** try `agent-browser open <task-url>` instead: Chrome silently drops
 Clerk's handshake cookies on `http://localhost` (they're `SameSite=None` without
 `Secure`), and the page loops back to signed-out. `--browser` consumes the ticket
