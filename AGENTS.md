@@ -124,11 +124,8 @@ Convex push replaces the whole schema and function set. Two worktrees don't
 conflict, they overwrite, with no error at either one.
 
 So before `convex dev`, `bun run dev` or `agent-browser` anywhere other than the
-main checkout, read `.agents/skills/driven/SKILL.md`. It covers taking your own
-deployment, the environment variables a fresh one lacks, and the two resources
-that stay shared whatever you do — the browser and the dev port.
-
-Driving several worktrees yourself: `.agents/skills/drive/SKILL.md`.
+main checkout, read `.agents/skills/driven/SKILL.md`. To drive several worktrees
+yourself, `.agents/skills/drive/SKILL.md`.
 
 # Pull requests
 
