@@ -107,8 +107,11 @@ tell thinking from finished. Then act on exactly one of:
 - **resource released** — hand the deployment or the session to whoever waited.
 - **dead or interrupted** — say so; do not restart it blind.
 
-Pace it to the work: a worker runs tens of minutes, so tick every 20–30, not
-every minute. Speak only when something changed — a quiet tick is `noop: true`.
+**Tick every 5 minutes.** The instinct is to pace ticks to how long a worker runs —
+tens of minutes — but that is the wrong clock. A tick costs two commands; a worker
+sitting blocked on a question costs the whole gap. Pace to how long you are willing
+to leave one stuck, not to how long it works. Speak only when something changed: a
+quiet tick is `noop: true`, and they collapse in the author's view.
 
 Done when the loop is set with a reason that names what you are watching.
 
