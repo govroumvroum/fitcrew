@@ -366,8 +366,11 @@ export default defineSchema({
     // Aligned with `questions`: null = not answered, [] = « je préfère
     // t'expliquer », [...] = the labels chosen.
     answers: v.any(),
+    // No index: a card is always reached by its id, which the tool part carries.
+    // The « one open card at a time » lookup that needed one is gone — several
+    // may be open, and each is read on its own.
     status: v.union(v.literal("open"), v.literal("completed"), v.literal("abandoned")),
-  }).index("by_user_status", ["userId", "status"]),
+  }),
 
   // One row per LLM call, so we know who spends what. Written by the coach's and
   // the chef's `usageHandler`, and by hand at every `generateObject` site.
