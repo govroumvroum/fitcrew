@@ -22,3 +22,4 @@
 - For injected system or machine messages, preserve contracts that distinguish user-originated messages, such as first-user-message naming and user-visible history semantics. (PR #91)
 - When reviewing cached prompts or tool definitions, include every provider-serialized field, especially input schemas, in the dynamic-content guard; test that the serialized prefix is stable across changing dates. (PR #90)
 - Validate calendar dates by round-tripping a UTC parse to the original YYYY-MM-DD string; Date.parse alone can normalize impossible days into a different valid date. (PR #88)
+- Ground tests and fixes in shapes real writers can produce; do not require metadata or behavior from a hypothetical caller with no applicable context, and make deliberate out-of-scope boundaries explicit. (PR #97)
