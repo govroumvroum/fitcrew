@@ -4,7 +4,13 @@ import { ChevronDownIcon } from "lucide-react";
 import { Component, type ReactNode } from "react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { Entry } from "../../../convex/screenshots";
-import type { AgentConfig, AgentToolLabel, ToolPart } from "@/components/chat/agent-chat";
+import {
+  type AgentConfig,
+  type AgentToolLabel,
+  FALLBACK,
+  toolErrored,
+  type ToolPart,
+} from "@/components/chat/agent-chat";
 import { CHEF } from "@/components/chat/chef-chat";
 import { COACH } from "@/components/chat/coach-chat";
 import { ToolLine } from "@/components/chat/tool-cards";
@@ -937,6 +943,10 @@ function Completed({
       </p>
     );
   }
+  // Same guard as the thread: an error carried in the output is a failure, even
+  // though the part state says `output-available`.
+  if (toolErrored(tool))
+    return <ToolLine Icon={label.icon} text={label.failed ?? FALLBACK.failed!} tone="failed" />;
   const card = config.renderTool(tool, false);
   if (!card) return <ToolLine Icon={label.icon} text={label.done} tone="done" />;
   if (config.needsValidation.includes(tool.type)) return <CardBoundary>{card}</CardBoundary>;
@@ -987,11 +997,7 @@ function ToolBlock({
         <ToolLine Icon={label.icon} text={label.running ?? label.pending} shimmer />
       </State>
       <State name="failed — output-error">
-        <ToolLine
-          Icon={label.icon}
-          text={label.failed ?? "Une action n'a pas marché."}
-          tone="failed"
-        />
+        <ToolLine Icon={label.icon} text={label.failed ?? FALLBACK.failed!} tone="failed" />
       </State>
 
       {fixtures.length === 0 ? (
