@@ -160,8 +160,8 @@ const BROWSER_HEADERS = {
   "Upgrade-Insecure-Requests": "1",
 };
 
-/** `localhost`, `::1`, et le `.local` du mDNS. */
-const PRIVATE_NAME = /^(?:localhost|\[?::1?\]?)$|\.local$/i;
+/** `localhost` et le `.local` du mDNS ; les littéraux IP ont leur propre test. */
+const PRIVATE_NAME = /^localhost$|\.local$/i;
 
 /**
  * Boucle, réseau local, et l'adresse de métadonnées cloud (169.254.169.254) qui
@@ -190,6 +190,30 @@ function isPrivateIPv4(host: string): boolean {
   );
 }
 
+/**
+ * Les mêmes plages, en IPv6 : loopback, l'adresse non spécifiée, les ULA
+ * (`fc00::/7`) et le link-local (`fe80::/10`).
+ *
+ * Toute IPv4 mappée (`::ffff:…`) est refusée en bloc, publique comprise : `URL`
+ * normalise `::ffff:127.0.0.1` en `::ffff:7f00:1`, donc reconnaître la plage
+ * privée demanderait de reconvertir des hextets en octets — pour une forme
+ * d'adresse à laquelle aucune page ne renvoie jamais. Refuser tout est plus
+ * court ET plus sûr que convertir.
+ */
+function isPrivateIPv6(host: string): boolean {
+  // `URL` met toujours un littéral IPv6 entre crochets ; sans crochets, ce n'est
+  // pas une IPv6.
+  if (!host.startsWith("[")) return false;
+  const ip = host.slice(1, -1).toLowerCase();
+  return (
+    ip === "::1" ||
+    ip === "::" ||
+    ip.startsWith("::ffff:") ||
+    /^f[cd]/.test(ip) ||
+    /^fe[89ab]/.test(ip)
+  );
+}
+
 /** Cinq sauts, largement de quoi couvrir un www → https → CDN honnête. */
 const MAX_HOPS = 5;
 
@@ -211,8 +235,9 @@ export function assertFetchable(url: string): string {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error(`Je ne sais ouvrir que des liens http(s), pas du « ${parsed.protocol} ».`);
   }
-  if (PRIVATE_NAME.test(parsed.hostname) || isPrivateIPv4(parsed.hostname)) {
-    throw new Error(`« ${parsed.hostname} » est une adresse interne : je ne l'ouvre pas.`);
+  const host = parsed.hostname;
+  if (PRIVATE_NAME.test(host) || isPrivateIPv4(host) || isPrivateIPv6(host)) {
+    throw new Error(`« ${host} » est une adresse interne : je ne l'ouvre pas.`);
   }
   return parsed.toString();
 }

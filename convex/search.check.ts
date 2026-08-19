@@ -120,6 +120,17 @@ for (const host of [
   "http://172.31.255.255/",
   "http://[::1]:8080/",
   "http://convex.local/",
+  // IPv6 : loopback, non spécifiée, ULA fc00::/7, link-local fe80::/10, et les
+  // IPv4 mappées — refusées en bloc, publiques comprises, cf. isPrivateIPv6.
+  "http://[::1]:8080/",
+  "http://[::]/",
+  "http://[fd00::1]/",
+  "http://[fc00::1]/",
+  "http://[fe80::1]/",
+  "http://[febf::1]/",
+  "http://[::ffff:127.0.0.1]/",
+  "http://[::ffff:169.254.169.254]/",
+  "http://[::ffff:8.8.8.8]/", // publique, refusée quand même : voir isPrivateIPv6
 ]) {
   assert.throws(() => assertFetchable(host), /adresse interne/, host);
 }
@@ -131,6 +142,9 @@ for (const host of [
   "https://notlocalhost.com/",
   "https://mylocalhost.dev/",
   "https://10.example.com/",
+  // 2001:db8:: est de la doc publique, et fe00:: n'est pas dans fe80::/10.
+  "https://[2001:db8::1]/",
+  "https://[fe00::1]/",
 ]) {
   assert.equal(assertFetchable(host), host, host);
 }
