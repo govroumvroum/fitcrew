@@ -29,7 +29,7 @@ import { askChoices } from "./choices";
 import { CONTEXT_OPTIONS, languageModel } from "./model";
 import { latestPerLineage, lineageOf, userPrograms } from "./programs";
 import { programExercise } from "./schema";
-import { searchWeb } from "./search";
+import { fetchPage, searchWeb } from "./search";
 import {
   circuitErrors,
   circuitRuns,
@@ -702,6 +702,24 @@ export function coachTools(today: string) {
         }
       },
     }),
+
+    fetch_url: createTool({
+      description:
+        "Ouvre un lien et t'en renvoie le texte. Sert à lire une page que `search_web` t'a rendue quand le résumé ne suffit pas à répondre. Une page, celle qui compte : n'ouvre pas chaque résultat de la recherche.",
+      inputSchema: z.object({
+        url: z.string().describe("L'URL complète (http ou https) d'un résultat de search_web"),
+      }),
+      execute: async (_ctx: ToolCtx, { url }) => {
+        try {
+          return await fetchPage(url);
+        } catch (error) {
+          // Returned, not thrown: a dead page must not abort the coach's turn.
+          const message = error instanceof Error ? error.message : String(error);
+          console.error("fetch_url", message);
+          return { url, title: "", text: "", error: message };
+        }
+      },
+    }),
   };
 }
 
@@ -831,6 +849,7 @@ AUTRES OUTILS
 - \`extract_screenshot\` dès qu'une capture est jointe à son message. Si l'outil renvoie des entrées, dis-lui juste de vérifier et valider la fiche affichée — tu n'enregistres rien toi-même. Si il renvoie une liste vide, NE LUI PARLE PAS de fiche à valider : il n'y en a aucune à l'écran. Dis-lui ce que tu vois sur la capture et ce qui manque (une pesée a besoin du poids réel, pas du poids idéal ni de la masse musculaire), et propose-lui de te donner le chiffre directement.
 - \`ask_chef\` seulement quand la réponse dépend vraiment de son alimentation (quoi manger autour d'une séance, si ses apports servent son objectif). Une seule question, avec le minimum de contexte : le Chef ne voit pas votre conversation. Ce n'est pas ton domaine : tu relaies sa réponse, tu ne la corriges pas, et tu rappelles que ses chiffres sont des estimations. La nutrition d'une pathologie ne se règle ni avec lui ni avec toi : c'est un professionnel de santé.
 - \`search_web\` seulement pour ce que tu ne peux pas savoir : une recommandation à jour, un complément ou un terme dont il te parle, la technique d'un exercice précis. Jamais pour l'état du user : son profil est ci-dessus, et son programme, ses records et son cardio se lisent avec \`read_programs\`, \`explain_exercise\` et \`read_cardio_and_bodyweight\`. Jamais non plus pour du conseil d'entraînement générique que tu connais déjà — une recherche inutile, c'est de l'attente et des tokens pour rien.
+- \`fetch_url\` quand le résumé d'un résultat de \`search_web\` ne suffit pas à répondre : ça t'ouvre la page et t'en donne le texte. Une seule page, la plus sérieuse — ouvrir chaque résultat, c'est de l'attente et des tokens pour rien. Si la page ne s'ouvre pas, dis-le et réponds avec ce que le résumé t'avait déjà donné.
 - Quand tu t'appuies sur une recherche, cite tes sources dans ta réponse (le nom du site ou le lien) pour qu'il puisse vérifier. Si l'outil renvoie une erreur ou zéro résultat, dis-lui simplement que la recherche ne marche pas là et continue avec ce que tu sais.
 - TU N'ES PAS MÉDECIN. Douleur, blessure, symptôme, médicament : tu dis clairement que ça demande un professionnel (médecin, kiné) et tu ne présentes JAMAIS un résultat de recherche comme un diagnostic ou un protocole de soin. Tu peux adapter le programme pour ménager la zone, c'est tout.
 

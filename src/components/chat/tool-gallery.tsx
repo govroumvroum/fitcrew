@@ -4,7 +4,13 @@ import { ChevronDownIcon } from "lucide-react";
 import { Component, type ReactNode } from "react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { Entry } from "../../../convex/screenshots";
-import type { AgentConfig, AgentToolLabel, ToolPart } from "@/components/chat/agent-chat";
+import {
+  type AgentConfig,
+  type AgentToolLabel,
+  FALLBACK,
+  toolErrored,
+  type ToolPart,
+} from "@/components/chat/agent-chat";
 import { CHEF } from "@/components/chat/chef-chat";
 import { COACH } from "@/components/chat/coach-chat";
 import { ToolLine } from "@/components/chat/tool-cards";
@@ -446,6 +452,26 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
         results: [],
       }),
       note: "`SourcesCard` renvoie null quand la liste est vide — rien ne s'affiche, c'est voulu.",
+    },
+  ],
+  "tool-fetch_url": [
+    {
+      label: "Une page ouverte",
+      tool: done("tool-fetch_url", null, {
+        url: "https://examine.com/supplements/creatine/",
+        title: "Créatine : 3 à 5 g par jour, sans phase de charge",
+        text: "La dose d'entretien couvre la saturation musculaire en 3 à 4 semaines.\n\nLa phase de charge accélère la saturation de quelques jours, sans bénéfice à moyen terme.",
+      }),
+    },
+    {
+      label: "Page injoignable",
+      tool: done("tool-fetch_url", null, {
+        url: "https://exemple.invalide/article",
+        title: "",
+        text: "",
+        error: "La page a répondu 403. Elle est peut-être hors ligne, ou elle bloque les robots.",
+      }),
+      note: "Erreur renvoyée et non levée : le tour du coach continue. La carte ne s'affiche pas, et la ligne d'outil prend son libellé d'échec — un `error` dans l'output vaut `output-error`.",
     },
   ],
   "tool-ask_chef": [
@@ -917,6 +943,10 @@ function Completed({
       </p>
     );
   }
+  // Same guard as the thread: an error carried in the output is a failure, even
+  // though the part state says `output-available`.
+  if (toolErrored(tool))
+    return <ToolLine Icon={label.icon} text={label.failed ?? FALLBACK.failed!} tone="failed" />;
   const card = config.renderTool(tool, false);
   if (!card) return <ToolLine Icon={label.icon} text={label.done} tone="done" />;
   if (config.needsValidation.includes(tool.type)) return <CardBoundary>{card}</CardBoundary>;
@@ -967,11 +997,7 @@ function ToolBlock({
         <ToolLine Icon={label.icon} text={label.running ?? label.pending} shimmer />
       </State>
       <State name="failed — output-error">
-        <ToolLine
-          Icon={label.icon}
-          text={label.failed ?? "Une action n'a pas marché."}
-          tone="failed"
-        />
+        <ToolLine Icon={label.icon} text={label.failed ?? FALLBACK.failed!} tone="failed" />
       </State>
 
       {fixtures.length === 0 ? (

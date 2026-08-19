@@ -55,6 +55,16 @@ import { useLocalDate } from "@/lib/dates";
 export type ToolPart = { type: string; state: string; input?: unknown; output?: unknown };
 
 /**
+ * A tool that RETURNS its error instead of throwing — `search_web`, `fetch_url`
+ * and `lookup_food` do, so a dead page can't abort the turn — never reaches
+ * `output-error`. Without this the row read "Page lue" in success green over a
+ * 429. Exported because the `/demo` gallery mirrors this branch by hand, and a
+ * duplicated predicate is how the two drifted apart in the first place.
+ */
+export const toolErrored = (tool: ToolPart) =>
+  Boolean((tool.output as { error?: string } | null)?.error);
+
+/**
  * What a tool says about itself while it works.
  *
  * `pending` is the model still writing the arguments — it hasn't committed to the
@@ -335,7 +345,7 @@ function PendingAttachments() {
  * Copy for a tool with no entry in `toolLabels`. A tool added to the backend and
  * forgotten here still shows something rather than nothing.
  */
-const FALLBACK: AgentToolLabel = {
+export const FALLBACK: AgentToolLabel = {
   icon: WrenchIcon,
   pending: "Un instant…",
   done: "C'est fait.",
@@ -411,9 +421,29 @@ function AgentMessage({ message, agent }: { message: UIMessage; agent: AgentConf
               return (
                 <ToolLine key={i} Icon={label.icon} text={label.running ?? label.pending} shimmer />
               );
+            // `tone="failed"` is what puts the line in red AND adds the warning
+            // triangle beside the tool's icon — without it a failure rendered
+            // grey and indistinguishable from an in-flight row.
             case "output-error":
-              return <ToolLine key={i} Icon={label.icon} text={label.failed ?? FALLBACK.failed!} />;
+              return (
+                <ToolLine
+                  key={i}
+                  Icon={label.icon}
+                  text={label.failed ?? FALLBACK.failed!}
+                  tone="failed"
+                />
+              );
             case "output-available":
+              // See `toolErrored`: an error in the output, not a thrown one.
+              if (toolErrored(tool))
+                return (
+                  <ToolLine
+                    key={i}
+                    Icon={label.icon}
+                    text={label.failed ?? FALLBACK.failed!}
+                    tone="failed"
+                  />
+                );
               break;
             // approval-* / output-denied: no tool here asks for approval, so these
             // never occur. Rendering nothing beats inventing copy for them.
