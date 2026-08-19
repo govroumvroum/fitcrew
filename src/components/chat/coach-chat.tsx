@@ -7,6 +7,7 @@ import {
   DumbbellIcon,
   ImageIcon,
   InfoIcon,
+  LinkIcon,
   NotebookPenIcon,
   SearchIcon,
   UtensilsCrossedIcon,
@@ -59,7 +60,7 @@ export const COACH: AgentConfig = {
   // The screenshot review, the sources list and the chips read the output rather
   // than the input — the chips because their id is in it, and their input streams
   // in piece by piece, which the guard would read as "not landed yet".
-  outputOnly: ["tool-extract_screenshot", "tool-search_web", "tool-ask_choices"],
+  outputOnly: ["tool-extract_screenshot", "tool-search_web", "tool-fetch_url", "tool-ask_choices"],
   toolLabels: {
     "tool-ask_choices": {
       icon: ClipboardListIcon,
@@ -113,6 +114,13 @@ export const COACH: AgentConfig = {
       running: "Je cherche sur le web…",
       done: "Recherche web",
       failed: "La recherche n'a rien donné.",
+    },
+    "tool-fetch_url": {
+      icon: LinkIcon,
+      pending: "J'ouvre la page…",
+      running: "Je lis la page…",
+      done: "Page lue",
+      failed: "La page n'a pas pu être ouverte.",
     },
     // The Chef's own icon, not a generic arrow: the row says WHO was asked.
     "tool-ask_chef": {
@@ -176,6 +184,22 @@ export const COACH: AgentConfig = {
       // The one card that reads the output: the links are the result.
       case "tool-search_web":
         return <SourcesCard output={output as SearchOutput} isNew={isNew} />;
+      // Une page lue est une source d'une seule ligne : la même carte, avec un
+      // seul résultat, plutôt qu'un composant de plus.
+      case "tool-fetch_url": {
+        const done = output as { url?: string; title?: string; error?: string };
+        if (!done?.url || done.error) return null;
+        const label = done.title || done.url;
+        return (
+          <SourcesCard
+            output={{
+              query: new URL(done.url).hostname.replace(/^www\./, ""),
+              results: [{ title: label, url: done.url, snippet: "" }],
+            }}
+            isNew={isNew}
+          />
+        );
+      }
       case "tool-log_workout":
         return (
           <LoggedCard

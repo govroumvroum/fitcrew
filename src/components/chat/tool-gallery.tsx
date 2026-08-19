@@ -448,6 +448,26 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
       note: "`SourcesCard` renvoie null quand la liste est vide — rien ne s'affiche, c'est voulu.",
     },
   ],
+  "tool-fetch_url": [
+    {
+      label: "Une page ouverte",
+      tool: done("tool-fetch_url", null, {
+        url: "https://examine.com/supplements/creatine/",
+        title: "Créatine : 3 à 5 g par jour, sans phase de charge",
+        text: "La dose d'entretien couvre la saturation musculaire en 3 à 4 semaines.\n\nLa phase de charge accélère la saturation de quelques jours, sans bénéfice à moyen terme.",
+      }),
+    },
+    {
+      label: "Page injoignable",
+      tool: done("tool-fetch_url", null, {
+        url: "https://exemple.invalide/article",
+        title: "",
+        text: "",
+        error: "La page a répondu 403. Elle est peut-être hors ligne, ou elle bloque les robots.",
+      }),
+      note: "Erreur renvoyée et non levée : le tour du coach continue. La carte ne s'affiche pas, la ligne d'outil reste.",
+    },
+  ],
   "tool-ask_chef": [
     {
       label: "Consultation du Chef",
