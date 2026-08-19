@@ -1,6 +1,6 @@
 "use client";
 
-import { useUIMessages, type UIMessage } from "@convex-dev/agent/react";
+import { useSmoothText, useUIMessages, type UIMessage } from "@convex-dev/agent/react";
 import type { ChatStatus } from "ai";
 import { useAction, useMutation } from "convex/react";
 import { ChevronDownIcon, ImagePlusIcon, WrenchIcon } from "lucide-react";
@@ -383,6 +383,17 @@ function ToolDisclosure({ label, children }: { label: AgentToolLabel; children: 
   );
 }
 
+/**
+ * Deltas land in bursts (word chunks, throttled to 250 ms server-side), which
+ * reads as stuttering. `useSmoothText` paces them out at a measured chars/sec
+ * instead, so the text flows.
+ */
+function StreamedText({ text, streaming }: { text: string; streaming: boolean }) {
+  // Only at mount: a message already finished when it renders shows in full.
+  const [visible] = useSmoothText(text, { startStreaming: streaming });
+  return <MessageResponse isAnimating={streaming}>{visible}</MessageResponse>;
+}
+
 function AgentMessage({ message, agent }: { message: UIMessage; agent: AgentConfig }) {
   const streaming = message.status === "streaming";
 
@@ -395,9 +406,7 @@ function AgentMessage({ message, agent }: { message: UIMessage; agent: AgentConf
             return message.role === "user" ? (
               <span key={i}>{part.text}</span>
             ) : (
-              <MessageResponse key={i} isAnimating={streaming}>
-                {part.text}
-              </MessageResponse>
+              <StreamedText key={i} text={part.text} streaming={streaming} />
             );
           }
           if (!part.type.startsWith("tool-")) return null;
