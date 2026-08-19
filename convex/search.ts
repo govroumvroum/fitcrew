@@ -11,7 +11,7 @@ const MAX_SNIPPET = 300;
 
 /** ponytail: 8000 chars of page envoyés au modèle. À monter si ses réponses sortent maigres. */
 const MAX_PAGE_CHARS = 8000;
-/** Garde-fou mémoire : on ne passe jamais 5 Mo de HTML à une regex. */
+/** Garde-fou mémoire : 400 ko de HTML au plus partent dans les regex. */
 const MAX_RAW_CHARS = 400_000;
 
 const TIMEOUT_MS = 8000;
@@ -160,28 +160,87 @@ const BROWSER_HEADERS = {
   "Upgrade-Insecure-Requests": "1",
 };
 
+/** `localhost`, `::1`, et le `.local` du mDNS. */
+const PRIVATE_NAME = /^(?:localhost|\[?::1?\]?)$|\.local$/i;
+
+/**
+ * Boucle, réseau local, et l'adresse de métadonnées cloud (169.254.169.254) qui
+ * rend des credentials à qui la demande.
+ *
+ * Les octets sont comparés en nombres, pas en préfixes de chaîne : `10.` en
+ * préfixe prend aussi `10.example.com`, un domaine public parfaitement légitime
+ * — le self-check l'a attrapé.
+ *
+ * ponytail: la comparaison porte sur le hostname, pas sur l'IP résolue — un nom
+ * de domaine public qui pointe vers 10.x passe encore. Le jour où ça compte,
+ * l'étape d'après est une résolution DNS puis un test sur l'adresse.
+ */
+function isPrivateIPv4(host: string): boolean {
+  const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!octets) return false;
+  const a = Number(octets[1]);
+  const b = Number(octets[2]);
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+}
+
+/** Cinq sauts, largement de quoi couvrir un www → https → CDN honnête. */
+const MAX_HOPS = 5;
+
+/**
+ * Le garde-fou de la frontière de confiance : l'URL vient du modèle, qui lit des
+ * pages qui peuvent lui souffler quoi ouvrir ensuite. `file:`, `data:` et les
+ * adresses internes s'arrêtent ici, avant tout appel réseau.
+ *
+ * Exported for the self-check: les cas limites de plage privée se vérifient ici,
+ * sans toucher au réseau.
+ */
+export function assertFetchable(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`« ${url} » n'est pas une URL valide.`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Je ne sais ouvrir que des liens http(s), pas du « ${parsed.protocol} ».`);
+  }
+  if (PRIVATE_NAME.test(parsed.hostname) || isPrivateIPv4(parsed.hostname)) {
+    throw new Error(`« ${parsed.hostname} » est une adresse interne : je ne l'ouvre pas.`);
+  }
+  return parsed.toString();
+}
+
 /** Ouvre un lien et en renvoie le texte. Même conventions que `searchWeb`. */
 export async function fetchPage(
   url: string,
 ): Promise<{ url: string; title: string; text: string }> {
-  // L'URL vient du modèle : c'est une frontière de confiance. `file:`, `data:`
-  // et compagnie s'arrêtent ici, avant tout appel réseau.
-  let protocol: string;
-  try {
-    protocol = new URL(url).protocol;
-  } catch {
-    throw new Error(`« ${url} » n'est pas une URL valide.`);
-  }
-  if (protocol !== "http:" && protocol !== "https:") {
-    throw new Error(`Je ne sais ouvrir que des liens http(s), pas du « ${protocol} ».`);
-  }
+  // Les redirections sont suivies à la main : `redirect: "follow"` ne validerait
+  // que l'URL de départ, et une page publique peut rebondir vers
+  // http://localhost ou vers l'adresse de métadonnées. Chaque saut repasse donc
+  // le garde-fou. Le timeout est par saut, borné par MAX_HOPS.
+  let target = assertFetchable(url);
+  let res: Response;
+  for (let hop = 0; ; hop++) {
+    res = await fetch(target, {
+      headers: BROWSER_HEADERS,
+      redirect: "manual",
+      // Une page qui ne répond pas ne doit pas figer le tour du coach.
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
 
-  const res = await fetch(url, {
-    headers: BROWSER_HEADERS,
-    redirect: "follow",
-    // Une page qui ne répond pas ne doit pas figer le tour du coach.
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (!location) break;
+    if (hop >= MAX_HOPS) throw new Error("Trop de redirections : je n'arrive pas à cette page.");
+    // Relatif ou absolu : `new URL(location, target)` gère les deux.
+    target = assertFetchable(new URL(location, target).toString());
+  }
 
   if (!res.ok) {
     throw new Error(
