@@ -414,6 +414,15 @@ function AgentMessage({ message, agent }: { message: UIMessage; agent: AgentConf
             case "output-error":
               return <ToolLine key={i} Icon={label.icon} text={label.failed ?? FALLBACK.failed!} />;
             case "output-available":
+              // A tool that RETURNS its error instead of throwing — `search_web`
+              // and `fetch_url` do, so a dead page can't abort the turn — lands
+              // here, not in `output-error`. Without this the row said "Page lue"
+              // in success green over a 429.
+              if ((tool.output as { error?: string } | null)?.error) {
+                return (
+                  <ToolLine key={i} Icon={label.icon} text={label.failed ?? FALLBACK.failed!} />
+                );
+              }
               break;
             // approval-* / output-denied: no tool here asks for approval, so these
             // never occur. Rendering nothing beats inventing copy for them.

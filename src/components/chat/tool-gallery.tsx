@@ -465,7 +465,7 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
         text: "",
         error: "La page a répondu 403. Elle est peut-être hors ligne, ou elle bloque les robots.",
       }),
-      note: "Erreur renvoyée et non levée : le tour du coach continue. La carte ne s'affiche pas, la ligne d'outil reste.",
+      note: "Erreur renvoyée et non levée : le tour du coach continue. La carte ne s'affiche pas, et la ligne d'outil prend son libellé d'échec — un `error` dans l'output vaut `output-error`.",
     },
   ],
   "tool-ask_chef": [
