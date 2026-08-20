@@ -26,3 +26,4 @@
 - For SSRF guards around model- or user-controlled fetches, validate every redirect hop with bounded work, cover all address forms promised by the guard (including private IPv6), compare parsed address components rather than string prefixes, and test range boundaries. (PR #100)
 - Keep a security guard's declared boundary honest: distinguish hostname checks from DNS-resolution guarantees, and do not expand a deliberately scoped hostname check into a different mechanism without evidence that scope requires it. (PR #100)
 - Treat generated API artifacts as deployment-sensitive: verify generated references resolve to tracked source, and revert unrelated regeneration or shared-environment noise from the PR. (PR #100)
+- Keep operation-level lifecycle indicators separate from per-part rendering progress when their UX semantics differ; a stable “still working” signal should not be driven by a transient animation hook that resets between updates. (PR #101)
