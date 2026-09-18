@@ -559,7 +559,7 @@ export function Session({ date }: { date: string }) {
                 value={values.weight}
                 onChange={(weight) => setValues({ ...values, weight: Math.max(0, round(weight)) })}
                 onStep={(sign) =>
-                  setValues({ ...values, weight: Math.max(0, round(values.weight + sign * 2.5)) })
+                  setValues({ ...values, weight: Math.max(0, round(values.weight + sign)) })
                 }
               />
               <LoadField
