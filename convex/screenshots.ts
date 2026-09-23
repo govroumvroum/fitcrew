@@ -6,10 +6,8 @@ import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
+import { MODEL_ID } from "./model";
 import { getCurrentUser, requireCurrentUser } from "./users";
-
-/** One edit swaps the vision model everywhere. */
-export const VISION_MODEL = "openai/gpt-6-luna";
 
 const source = v.union(v.literal("apple_health"), v.literal("zepp"), v.literal("mi_fitness"));
 
@@ -271,7 +269,7 @@ export const extract = action({
     const { object, usage, providerMetadata } = await generateObject({
       // `usage.include` asks OpenRouter for the real cost; `user` is its
       // anti-abuse identifier, not the measurement.
-      model: createOpenRouter({ apiKey }).chat(VISION_MODEL, {
+      model: createOpenRouter({ apiKey }).chat(MODEL_ID, {
         user: user._id,
         usage: { include: true },
       }),
@@ -296,7 +294,7 @@ export const extract = action({
     await ctx.runMutation(internal.aiUsage.record, {
       userId: user._id,
       feature: "screenshot",
-      model: VISION_MODEL,
+      model: MODEL_ID,
       inputTokens: usage.inputTokens ?? 0,
       outputTokens: usage.outputTokens ?? 0,
       reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
