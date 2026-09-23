@@ -25,6 +25,7 @@
 import assert from "node:assert";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { Dialog, DialogFooter } from "./dialog";
@@ -227,7 +228,7 @@ assert.match(tooltipTrigger, /class="[^"]*size-8/, tooltipTrigger);
  * Two overlay families in one app fight over scroll lock and focus trapping —
  * #69 is why this app is Base UI only.
  */
-const srcRoot = new URL("../../", import.meta.url).pathname;
+const srcRoot = fileURLToPath(new URL("../../", import.meta.url));
 const radixImports: string[] = [];
 (function walk(dir: string) {
   for (const name of readdirSync(dir)) {

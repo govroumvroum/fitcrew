@@ -3,7 +3,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 
 /** 4 images per message; 10 MB each — a phone screenshot is 1-3 MB, a photo can be bigger. */
 export const MAX_IMAGES = 4;
-export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 /**
  * The composer's images, uploaded to Convex storage when the message is sent.

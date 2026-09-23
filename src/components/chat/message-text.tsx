@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  * and headings, never LaTeX or diagrams, and they pulled shiki + katex + mermaid
  * into the bundle. Re-add the one you need if that changes.
  */
-export const MessageResponse = memo(
+const MessageResponse = memo(
   ({ className, ...props }: ComponentProps<typeof Streamdown>) => (
     <Streamdown
       className={cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", className)}
