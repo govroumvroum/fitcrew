@@ -1,14 +1,19 @@
 "use client";
 
 import {
+  ActivityIcon,
+  ArchiveIcon,
   ArrowLeftRightIcon,
+  BookOpenIcon,
   CheckIcon,
   ClipboardListIcon,
   DumbbellIcon,
+  HistoryIcon,
   ImageIcon,
   InfoIcon,
   LinkIcon,
   NotebookPenIcon,
+  PencilIcon,
   SearchIcon,
   UtensilsCrossedIcon,
 } from "lucide-react";
@@ -19,15 +24,19 @@ import type { Entry } from "../../../convex/screenshots";
 import { AgentChat, type AgentConfig } from "@/components/chat/agent-chat";
 import { ChoicesCard } from "@/components/chat/choices-card";
 import {
+  EditCard,
   LoggedCard,
   ProfileCard,
   ProgramCard,
   SourcesCard,
+  StatusCard,
   SwapCard,
+  type EditInput,
   type LoggedInput,
   type ProfileInput,
   type ProgramInput,
   type SearchOutput,
+  type StatusInput,
   type SwapInput,
 } from "@/components/chat/tool-cards";
 import { ExtractedReview } from "@/components/import/extracted-review";
@@ -88,6 +97,43 @@ export const COACH: AgentConfig = {
       running: "Je change l'exercice…",
       done: "Exercice remplacé",
       failed: "L'exercice n'a pas pu être remplacé.",
+    },
+    // "n'a pas été", not "n'a pas pu être": the commonest refusal is an
+    // ambiguous name, where nothing failed — the coach just has to ask.
+    "tool-edit_program": {
+      icon: PencilIcon,
+      pending: "Je prépare la modification…",
+      running: "Je modifie ton programme…",
+      done: "Programme modifié",
+      failed: "Le programme n'a pas été modifié.",
+    },
+    "tool-set_program_status": {
+      icon: ArchiveIcon,
+      pending: "Je retrouve le programme…",
+      running: "Je change le statut du programme…",
+      done: "Statut du programme changé",
+      failed: "Le statut du programme n'a pas changé.",
+    },
+    // The reads. Without an entry they fall back to FALLBACK's « C'est fait. »,
+    // which lands right above every edit and status change (read_programs comes
+    // first) and reads as the coach claiming a write it didn't make.
+    "tool-read_programs": {
+      icon: BookOpenIcon,
+      pending: "Je relis tes programmes…",
+      done: "J'ai relu tes programmes",
+      failed: "Je n'ai pas pu relire tes programmes.",
+    },
+    "tool-lookup_program_history": {
+      icon: HistoryIcon,
+      pending: "Je cherche dans tes anciens programmes…",
+      done: "J'ai regardé l'historique du programme",
+      failed: "Je n'ai pas pu lire l'historique du programme.",
+    },
+    "tool-read_cardio_and_bodyweight": {
+      icon: ActivityIcon,
+      pending: "Je regarde ton cardio et ta pesée…",
+      done: "J'ai regardé ton cardio et ta pesée",
+      failed: "Je n'ai pas pu lire ton cardio et ta pesée.",
     },
     "tool-explain_exercise": {
       icon: InfoIcon,
@@ -181,6 +227,28 @@ export const COACH: AgentConfig = {
           />
         );
       }
+      // A refusal never reaches here: it carries an `error`, and the shell
+      // renders the failed line before asking for a card.
+      case "tool-edit_program": {
+        const done = output as { program?: string; dayName?: string; version?: number };
+        return (
+          <EditCard
+            input={input as EditInput}
+            program={done?.program}
+            dayName={done?.dayName}
+            version={done?.version}
+            isNew={isNew}
+          />
+        );
+      }
+      case "tool-set_program_status":
+        return (
+          <StatusCard
+            input={input as StatusInput}
+            program={(output as { program?: string })?.program}
+            isNew={isNew}
+          />
+        );
       // The one card that reads the output: the links are the result.
       case "tool-search_web":
         return <SourcesCard output={output as SearchOutput} isNew={isNew} />;

@@ -40,8 +40,9 @@ type CircuitFields = { sets: number; circuit?: string | null; slot?: string | nu
 /**
  * The circuit invariants of ONE day, as model-facing French messages (empty =
  * valid). Pure and shape-agnostic on purpose: `zGenerateProgram` is not the only
- * write path — `coach.swapExercise` rewrites a day too, and a swap that steals a
- * slot or breaks a 2-exercise circuit is just as unrunnable. Both call this.
+ * write path — `coach.swapExercise` and `coach.editProgram` rewrite a day too,
+ * and an edit that steals a slot or breaks a 2-exercise circuit is just as
+ * unrunnable. All three call this.
  */
 export function circuitErrors(exercises: readonly CircuitFields[]): string[] {
   const errors: string[] = [];
@@ -149,6 +150,99 @@ export const zSwapExercise = z.object({
   to: zExercise.refine((e) => !e.circuit || !!e.slot?.trim(), {
     message: "Un exercice qui appartient à un circuit doit porter un `slot` non vide.",
   }),
+});
+
+/**
+ * How the coach names the program it acts on. Both nullish: strict structured
+ * output sends null for "not given". The mutation refuses when neither is set —
+ * it never picks a program on the model's behalf.
+ */
+const zProgramTarget = {
+  lineageId: z
+    .string()
+    .nullish()
+    .describe(
+      "lineageId renvoyé par read_programs — le moyen le plus sûr de viser le bon programme",
+    ),
+  name: z
+    .string()
+    .nullish()
+    .describe("Nom (ou morceau de nom) du programme, si tu n'as pas son lineageId"),
+};
+
+/**
+ * `edit_program`: operations, not the rewritten day. A whole day retyped by the
+ * model can drop an exercise nobody asked to drop, or rename one — and loads and
+ * records are keyed by the exact exercise name (#103), so a rename wipes its
+ * history. An operation touches only what was asked.
+ *
+ * No `move`: `add` takes a position, and reordering is remove + add. No day ops
+ * either — adding or removing a day shifts the rotation (`nextDayIndex`).
+ */
+// z.union, not z.discriminatedUnion: the latter serialises to `oneOf`, which
+// some providers' function calling refuses; `anyOf` is accepted everywhere, and
+// TypeScript narrows on `op` all the same.
+export const zEditOperation = z.union([
+  z.object({
+    op: z.literal("add"),
+    // Same guard as `zSwapExercise.to`: circuit ⇒ slot is all one exercise can
+    // prove. The rest is checked on the resulting day by `circuitErrors`.
+    exercise: zExercise.refine((e) => !e.circuit || !!e.slot?.trim(), {
+      message: "Un exercice qui appartient à un circuit doit porter un `slot` non vide.",
+    }),
+    position: z
+      .number()
+      .int()
+      .min(0)
+      .nullish()
+      .describe(
+        "Où l'insérer dans la liste du jour, 0 = en premier. null = à la fin. Dans un circuit, place-le au milieu du bloc, jamais juste après.",
+      ),
+  }),
+  z.object({
+    op: z.literal("remove"),
+    name: z.string().describe("Nom exact de l'exercice à retirer, tel que read_programs l'écrit"),
+  }),
+  z.object({
+    op: z.literal("update"),
+    name: z
+      .string()
+      .describe("Nom exact de l'exercice à modifier. Il garde ce nom : update ne renomme jamais"),
+    // No `name` in here on purpose: see `editInDays`, which refuses a rename.
+    changes: z.object({
+      sets: z.number().int().min(1).max(10).nullish(),
+      reps: z.string().nullish(),
+      restSeconds: z.number().int().min(0).max(600).nullish(),
+      notes: z
+        .string()
+        .nullish()
+        .describe('"" pour effacer la consigne, null pour ne pas y toucher'),
+      restBetweenRoundsSeconds: z.number().int().min(0).max(600).nullish(),
+    }),
+  }),
+]);
+
+export const zEditProgram = z.object({
+  ...zProgramTarget,
+  dayIndex: z
+    .number()
+    .int()
+    .min(0)
+    .describe("Index du jour tel que read_programs l'écrit ([jour 0] = premier jour)"),
+  operations: z
+    .array(zEditOperation)
+    .min(1)
+    .max(10)
+    .describe("Appliquées dans l'ordre, sur ce seul jour"),
+});
+
+export const zSetProgramStatus = z.object({
+  ...zProgramTarget,
+  status: z
+    .enum(["active", "archived", "completed"])
+    .describe(
+      "archived pour « supprime-le » ou « je ne le fais plus », completed quand il l'a fini, active pour le reprendre",
+    ),
 });
 
 /** `date`'s description needs today's date — the call site `.extend()`s it in. */
