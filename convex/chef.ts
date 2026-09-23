@@ -45,6 +45,7 @@ import { CONTEXT_OPTIONS, languageModel } from "./model";
 import type { Macros, PlannedMeal } from "./nutrition";
 import { shift, weekStart } from "./progress";
 import { KICKOFF, CHEF_ATTACHMENTS, isSentinel } from "./sentinels";
+import { emptyMessages, messagesAccess } from "./threadAccess";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 // ---------------------------------------------------------------------------
@@ -676,7 +677,12 @@ export const listMessages = query({
   },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
-    await authorize(ctx, args.threadId, user._id);
+    // A deleted thread, or a stale `?thread=` link, reads as empty rather than
+    // crashing the page; someone else's still throws (see `threadAccess.ts`).
+    const thread = await ctx.runQuery(components.chefAgent.threads.getThread, {
+      threadId: args.threadId,
+    });
+    if (messagesAccess(thread, user._id) === "missing") return emptyMessages(args.streamArgs);
     const paginated = await listUIMessages(ctx, components.chefAgent, args);
     const streams = await syncStreams(ctx, components.chefAgent, args);
     // Machine-generated turns are persisted as user messages; without this they
