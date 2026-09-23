@@ -372,6 +372,114 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
       note: "`sets` vaut 4 TOURS : la carte ne doit jamais afficher « 4×12 ».",
     },
   ],
+  "tool-edit_program": [
+    {
+      label: "Ajout dans un programme qui n'est pas le dernier travaillé",
+      tool: done(
+        "tool-edit_program",
+        {
+          lineageId: "demo_boxe",
+          name: null,
+          dayIndex: 1,
+          operations: [
+            {
+              op: "add",
+              exercise: {
+                name: "Corde à sauter",
+                sets: 3,
+                reps: "3 min",
+                restSeconds: 60,
+                notes: null,
+              },
+              position: null,
+            },
+          ],
+        },
+        {
+          result: "edited",
+          program: "Boxe — explosivité et gainage",
+          version: 3,
+          dayName: "Jour 2 — Explosivité (jambes, gainage)",
+        },
+      ),
+      note: "« 3 min » passe par `reps` : les exercices chronométrés, c'est #104.",
+    },
+    {
+      label: "Trois opérations sur un même jour",
+      tool: done(
+        "tool-edit_program",
+        {
+          lineageId: "demo_fullbody",
+          name: null,
+          dayIndex: 0,
+          operations: [
+            { op: "remove", name: "Développé militaire à la barre" },
+            {
+              op: "update",
+              name: "Développé couché",
+              changes: { sets: 4, reps: "6-8", restSeconds: 150, notes: null },
+            },
+            {
+              op: "add",
+              exercise: {
+                name: "Face pull",
+                sets: 3,
+                reps: "15",
+                restSeconds: 60,
+                notes: "Coudes hauts, pour l'épaule droite",
+              },
+              position: 2,
+            },
+          ],
+        },
+        {
+          result: "edited",
+          program: "Full Body 3 jours",
+          version: 5,
+          dayName: "Jour 1 — Push (pectoraux, épaules, triceps)",
+        },
+      ),
+    },
+  ],
+  "tool-set_program_status": [
+    {
+      label: "« Supprime-le » : archivé, rien d'effacé",
+      tool: done(
+        "tool-set_program_status",
+        { lineageId: null, name: "Réveil musculaire", status: "archived" },
+        { result: "updated", program: "Réveil musculaire — 3 jours", status: "archived" },
+      ),
+    },
+    {
+      label: "Réactivé",
+      tool: done(
+        "tool-set_program_status",
+        { lineageId: "demo_boxe", name: null, status: "active" },
+        { result: "updated", program: "Boxe — explosivité et gainage", status: "active" },
+      ),
+    },
+  ],
+  "tool-read_programs": [
+    {
+      label: "Lecture sans carte",
+      tool: done("tool-read_programs", {}),
+      note: "Lecture seule : pas de carte, la ligne dit juste ce que le coach a lu.",
+    },
+  ],
+  "tool-lookup_program_history": [
+    {
+      label: "Lecture sans carte",
+      tool: done("tool-lookup_program_history", { name: "Boxe" }),
+      note: "Lecture seule : pas de carte.",
+    },
+  ],
+  "tool-read_cardio_and_bodyweight": [
+    {
+      label: "Lecture sans carte",
+      tool: done("tool-read_cardio_and_bodyweight", {}),
+      note: "Lecture seule : pas de carte.",
+    },
+  ],
   "tool-explain_exercise": [
     {
       label: "Résultat sans carte",

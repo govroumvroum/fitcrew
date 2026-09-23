@@ -11,7 +11,7 @@ import {
   vStreamArgs,
 } from "@convex-dev/agent";
 import { paginationOptsValidator } from "convex/server";
-import { v, type GenericId } from "convex/values";
+import { v, type GenericId, type Infer } from "convex/values";
 import { z } from "zod";
 import { api, components, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -27,15 +27,17 @@ import {
 import { costUsdFrom } from "./aiUsage";
 import { askChoices } from "./choices";
 import { CONTEXT_OPTIONS, languageModel } from "./model";
-import { latestPerLineage, lineageOf, userPrograms } from "./programs";
-import { programExercise } from "./schema";
+import { latestInLineage, latestPerLineage, lineageOf, userPrograms } from "./programs";
+import { programExercise, programStatus } from "./schema";
 import { fetchPage, searchWeb } from "./search";
 import {
   circuitErrors,
   circuitRuns,
+  zEditProgram,
   zGenerateProgram,
   zLogWorkout,
   zSaveOnboarding,
+  zSetProgramStatus,
   zSwapExercise,
 } from "./toolSchemas";
 import { KICKOFF, COACH_ATTACHMENTS, isSentinel } from "./sentinels";
@@ -117,6 +119,194 @@ export function swapInDays(
   return next;
 }
 
+/**
+ * One `edit_program` operation, null-free (the tool's `execute` strips the
+ * model's nulls). `changes.name` exists only so a rename can be REFUSED by name:
+ * loads and records are keyed by the exact exercise name (#103), so a renamed
+ * exercise starts again from 0 kg with no history.
+ */
+const editOperation = v.union(
+  v.object({ op: v.literal("add"), exercise: programExercise, position: v.optional(v.number()) }),
+  v.object({ op: v.literal("remove"), name: v.string() }),
+  v.object({
+    op: v.literal("update"),
+    name: v.string(),
+    changes: v.object({
+      name: v.optional(v.string()),
+      sets: v.optional(v.number()),
+      reps: v.optional(v.string()),
+      restSeconds: v.optional(v.number()),
+      // "" clears the note; absent leaves it alone.
+      notes: v.optional(v.string()),
+      restBetweenRoundsSeconds: v.optional(v.number()),
+    }),
+  }),
+);
+export type EditOperation = Infer<typeof editOperation>;
+
+const sameName = (a: string, b: string) => a.toLowerCase().trim() === b.toLowerCase().trim();
+
+/**
+ * The write path of `editProgram`, pure so `coach.check.ts` can drive it without
+ * a database — same shape and same guard as `swapInDays`. Operations apply in
+ * order to ONE day; the other days are returned untouched. Throws a French
+ * message addressed to the model, which reads it and retries.
+ *
+ * The circuit rules are checked once, on the day as it ends up: an add in the
+ * middle of a circuit, a remove that leaves one exercise behind, a `sets` that
+ * disagrees with the other rounds — only the resulting day can tell.
+ */
+export function editInDays(days: Days, dayIndex: number, operations: EditOperation[]): Days {
+  const day = days[dayIndex];
+  if (!day)
+    throw new Error(
+      `Jour ${dayIndex} introuvable : ce programme a ${days.length} jour(s), de [jour 0] à [jour ${days.length - 1}].`,
+    );
+  let exercises = [...day.exercises];
+
+  const indexOf = (name: string) => {
+    const at = exercises.flatMap((e, i) => (sameName(e.name, name) ? [i] : []));
+    if (at.length === 0)
+      throw new Error(
+        `Exercice « ${name} » introuvable dans « ${day.name} ». Ce jour contient : ${exercises.map((e) => e.name).join(", ")}.`,
+      );
+    // ponytail: the render the model reads carries no slots, so there is no way
+    // to name one occurrence of an exercise listed twice. Add a `slot` selector
+    // to remove/update if that ever bites.
+    if (at.length > 1)
+      throw new Error(
+        `« ${name} » apparaît ${at.length} fois dans « ${day.name} » : impossible de savoir laquelle viser.`,
+      );
+    return at[0];
+  };
+
+  for (const operation of operations) {
+    switch (operation.op) {
+      case "add": {
+        const { exercise, position } = operation;
+        // The same exercise twice is legitimate only inside a circuit, where each
+        // occurrence has its own slot. Anywhere else it's the model re-adding
+        // something that's already there.
+        if (!exercise.circuit && exercises.some((e) => sameName(e.name, exercise.name)))
+          throw new Error(
+            `« ${exercise.name} » est déjà dans « ${day.name} ». Pour changer ses séries, ses reps ou son repos, utilise une opération update.`,
+          );
+        const at = position ?? exercises.length;
+        if (at > exercises.length)
+          throw new Error(
+            `Position ${at} hors limites : « ${day.name} » a ${exercises.length} exercice(s), la position va de 0 à ${exercises.length}.`,
+          );
+        exercises = [...exercises.slice(0, at), exercise, ...exercises.slice(at)];
+        break;
+      }
+      case "remove": {
+        const i = indexOf(operation.name);
+        exercises = exercises.filter((_, k) => k !== i);
+        break;
+      }
+      case "update": {
+        const { name: rename, notes, ...rest } = operation.changes;
+        if (rename !== undefined && !sameName(rename, operation.name))
+          throw new Error(
+            `Un update ne renomme jamais un exercice : ses charges et ses records sont rangés sous son nom exact, les renommer effacerait son historique. Pour le remplacer, retire « ${operation.name} » et ajoute « ${rename} ».`,
+          );
+        const i = indexOf(operation.name);
+        const { notes: previousNotes, ...current } = exercises[i];
+        const kept = notes === undefined ? previousNotes : notes || undefined;
+        const next: Exercise = {
+          ...current,
+          ...Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined)),
+          ...(kept ? { notes: kept } : {}),
+        };
+        exercises = exercises.map((e, k) => (k === i ? next : e));
+        break;
+      }
+    }
+  }
+
+  if (exercises.length === 0)
+    throw new Error(
+      `« ${day.name} » n'aurait plus aucun exercice. Retirer un jour entier n'est pas possible : il en faut au moins un.`,
+    );
+  const errors = circuitErrors(exercises);
+  if (errors.length)
+    throw new Error(
+      `Cette modification casserait les circuits de « ${day.name} » : ${errors.join(" ")}`,
+    );
+  return days.map((d, j) => (j === dayIndex ? { ...d, exercises } : d));
+}
+
+/**
+ * The program `edit_program` / `set_program_status` act on, out of the user's
+ * own rows — the caller scopes `rows` to the authenticated user first, so a
+ * foreign lineageId can only come back "not_found". Built on `lookupHistory`,
+ * with one rule of its own: a WRITE never guesses. An exact hit that shadows
+ * longer-named siblings (`otherMatches`) is ambiguous here, even though a read
+ * may show it — writing to the wrong « Boxe » is not a recoverable mistake.
+ *
+ * Every non-found answer carries an `error`: nothing was written, and the chat
+ * row has to say so rather than show a green « fait ».
+ */
+export function resolveProgram<T extends HistoryRow>(
+  rows: T[],
+  selector: { name?: string; lineageId?: string },
+) {
+  if (selector.name === undefined && selector.lineageId === undefined)
+    return {
+      result: "missing_selector" as const,
+      error: "Précise le programme visé (son lineageId, ou son nom). Rien n'a été modifié.",
+    };
+  const found = lookupHistory(rows, selector);
+  if (found.result === "not_found")
+    return {
+      result: "not_found" as const,
+      programs: found.programs,
+      error:
+        "Aucun de ses programmes ne correspond. Voici ceux qu'il a : demande-lui lequel il veut dire. Rien n'a été modifié.",
+    };
+  const ambiguous =
+    found.result === "ambiguous"
+      ? found.candidates
+      : found.otherMatches.length > 0
+        ? [
+            {
+              lineageId: found.lineageId,
+              name: found.name,
+              status: found.status,
+              versions: found.versions,
+            },
+            ...found.otherMatches,
+          ]
+        : null;
+  if (ambiguous)
+    return {
+      result: "ambiguous" as const,
+      candidates: ambiguous,
+      error:
+        "Plusieurs programmes correspondent. Demande-lui lequel, puis rappelle l'outil avec son lineageId. Rien n'a été modifié.",
+    };
+  // No version in the selector, so the only other answer is "found".
+  if (found.result !== "found")
+    return { result: "not_found" as const, programs: [], error: "Programme introuvable." };
+  return {
+    result: "found" as const,
+    lineageId: found.lineageId,
+    name: found.name,
+    status: found.status,
+  };
+}
+
+/**
+ * Why a program can't be edited, or null if it can. Only an active program is:
+ * editing one the user archived would change something he no longer sees, and
+ * the fix is one explicit call away.
+ */
+export function editRefusal(name: string, status: "active" | "archived" | "completed" | undefined) {
+  const s = status ?? "active";
+  if (s === "active") return null;
+  return `« ${name} » est ${s === "archived" ? "archivé" : "terminé"} : on ne modifie qu'un programme en cours. Propose-lui de le réactiver avec set_program_status (status active), puis refais la modification. Rien n'a été modifié.`;
+}
+
 // ---------------------------------------------------------------------------
 // Program persistence — always a new row, never an edit
 // ---------------------------------------------------------------------------
@@ -161,6 +351,12 @@ export const swapExercise = internalMutation({
       ? await ctx.db.get("programs", user.currentProgramId)
       : null;
     if (!current) throw new Error("Pas encore de programme à modifier");
+    // Archiving doesn't move `currentProgramId`, so the last program trained can
+    // be one the user put away. Same rule as `editProgram`: no silent edit of a
+    // program he no longer sees. `current` is the lineage's latest row (see
+    // below), which is where the status lives.
+    const refusal = editRefusal(current.name, current.status);
+    if (refusal) throw new Error(refusal);
 
     const days = swapInDays(current.days, args.dayIndex, args.from, args.to);
     // A new version WITHIN the lineage of the last program trained, leaving the
@@ -182,6 +378,148 @@ export const swapExercise = internalMutation({
     });
     await ctx.db.patch("users", user._id, { currentProgramId: programId });
     return { version: current.version + 1, dayName: days[args.dayIndex].name };
+  },
+});
+
+/**
+ * How the coach names a program. v.string(), not v.id, for the reason
+ * `programHistory` gives: the model types these, and garbage must come back as
+ * "not_found", not a validator throw that aborts the turn.
+ */
+const programTarget = { lineageId: v.optional(v.string()), name: v.optional(v.string()) };
+
+/**
+ * `edit_program`: a new version of ANY of the user's programs, not only the last
+ * one trained. Every refusal is RETURNED with an `error`, never thrown: nothing
+ * is written, the coach reads why and asks or retries, and the chat row shows a
+ * failure instead of the turn dying.
+ */
+export const editProgram = internalMutation({
+  args: {
+    ...programTarget,
+    dayIndex: v.number(),
+    operations: v.array(editOperation),
+    /** The user's local date, closed over by the tool — never the model's. */
+    today: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    // Scoped to the user BEFORE the model's selector is applied.
+    const target = resolveProgram(await userPrograms(ctx, user._id), args);
+    if (target.result !== "found") return target;
+
+    // The version comes from the lineage's own index range — never from
+    // `currentProgramId`, never from an id the model sent. It is the lineage's
+    // maximum by construction, and reading the range puts it in the OCC read
+    // set: a concurrent edit or swap conflicts, and the retry sees its version.
+    const latest = await latestInLineage(ctx, user._id, target.lineageId as Id<"programs">);
+    if (!latest)
+      return {
+        result: "not_found" as const,
+        error: "Programme introuvable. Rien n'a été modifié.",
+      };
+    const refusal = editRefusal(latest.name, latest.status);
+    if (refusal) return { result: "not_active" as const, status: latest.status, error: refusal };
+
+    let days: Days;
+    try {
+      days = editInDays(latest.days, args.dayIndex, args.operations);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { result: "invalid" as const, error: `${message} Rien n'a été modifié.` };
+    }
+
+    const version = latest.version + 1;
+    // Same row shape as `swapExercise`: same lineage, same status, name and
+    // rules copied. The previous row is NOT patched to "archived": status is read
+    // off the latest row only, and an old version was replaced, not archived —
+    // `lookup_program_history` would say otherwise.
+    const programId = await ctx.db.insert("programs", {
+      userId: user._id,
+      lineageId: target.lineageId as Id<"programs">,
+      ...(latest.status ? { status: latest.status } : {}),
+      version,
+      name: latest.name,
+      days,
+      progressionRules: latest.progressionRules,
+      deloadEveryWeeks: latest.deloadEveryWeeks,
+    });
+
+    // Only if this IS the lineage of the last program trained: `swapExercise`
+    // numbers its version off `currentProgramId`, so leaving it on the row we
+    // just superseded makes the next swap write a version that already exists.
+    // Any other lineage leaves it alone — editing the boxing program doesn't
+    // mean he just trained boxing.
+    const current = user.currentProgramId
+      ? await ctx.db.get("programs", user.currentProgramId)
+      : null;
+    if (current && lineageOf(current) === target.lineageId)
+      await ctx.db.patch("users", user._id, { currentProgramId: programId });
+
+    // A séance keeps the exact row it started on (`workouts.start`), so one
+    // running today still shows the old prescription. Said in the result, or the
+    // coach promises a change the séance screen won't show.
+    const { today } = args;
+    const unfinished = today
+      ? (
+          await ctx.db
+            .query("workouts")
+            .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", today))
+            .take(10)
+        ).filter((w) => w.endedAt === undefined && w.programId)
+      : [];
+    const followed = await Promise.all(unfinished.map((w) => ctx.db.get("programs", w.programId!)));
+    const running = followed.some((p) => p && lineageOf(p) === target.lineageId);
+
+    return {
+      result: "edited" as const,
+      program: latest.name,
+      lineageId: target.lineageId,
+      version,
+      dayName: days[args.dayIndex].name,
+      exercises: days[args.dayIndex].exercises.map((e) => e.name),
+      note: running
+        ? "Il a une séance de ce programme en cours : elle garde l'ancienne version jusqu'à la fin. La modification prend effet à la prochaine séance — dis-le-lui."
+        : "La modification prend effet à sa prochaine séance de ce programme.",
+    };
+  },
+});
+
+/**
+ * `set_program_status`: archive, complete or reactivate. Same resolution and
+ * same "returned, not thrown" refusals as `editProgram`. Exists because
+ * `programs.setStatus` takes a `v.id`: an id the model invented would fail the
+ * validator and kill the turn. Same write, though — the status goes on the
+ * lineage's latest row. Nothing is ever deleted: séances point at the exact row
+ * they followed, and /progres reads them back.
+ */
+export const setProgramStatus = internalMutation({
+  args: { ...programTarget, status: programStatus },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const { status, ...selector } = args;
+    const target = resolveProgram(await userPrograms(ctx, user._id), selector);
+    if (target.result !== "found") return target;
+
+    const latest = await latestInLineage(ctx, user._id, target.lineageId as Id<"programs">);
+    if (!latest)
+      return {
+        result: "not_found" as const,
+        error: "Programme introuvable. Rien n'a été modifié.",
+      };
+    const previous = latest.status ?? "active";
+    if (previous !== status) await ctx.db.patch("programs", latest._id, { status });
+    return {
+      result: previous === status ? ("unchanged" as const) : ("updated" as const),
+      program: latest.name,
+      lineageId: target.lineageId,
+      status,
+      previous,
+      note:
+        status === "active"
+          ? "Il est de nouveau dans ses programmes en cours, sa rotation reprend où elle en était."
+          : "Il sort de ses programmes en cours et se retrouve sur /programme sous « Archivés et terminés ». Rien n'est supprimé : ses séances passées restent dans l'historique.",
+    };
   },
 });
 
@@ -514,6 +852,12 @@ export const programHistory = internalQuery({
 // Tools
 // ---------------------------------------------------------------------------
 
+/** The model's nulls and empty strings are "not given" — `resolveProgram` then asks. */
+const programSelector = (lineageId?: string | null, name?: string | null) => ({
+  ...(lineageId?.trim() ? { lineageId: lineageId.trim() } : {}),
+  ...(name?.trim() ? { name } : {}),
+});
+
 /**
  * `today` is closed over rather than asked of the model: it's the one value the
  * model can't know and would happily invent.
@@ -571,9 +915,51 @@ export function coachTools(today: string) {
         }),
     }),
 
+    edit_program: createTool({
+      description:
+        "Modifie un programme EXISTANT du user, n'importe lequel (pas seulement le dernier travaillé) : ajoute, retire ou ajuste des exercices (séries, reps, repos, consigne) dans UN jour. Crée une nouvelle version de ce programme, sans en créer un deuxième. Appelle read_programs avant, pour le lineageId et l'index du jour.",
+      inputSchema: zEditProgram,
+      execute: async (ctx: ToolCtx, { lineageId, name, dayIndex, operations }) =>
+        await ctx.runMutation(internal.coach.editProgram, {
+          ...programSelector(lineageId, name),
+          dayIndex,
+          today,
+          operations: operations.map((operation) => {
+            switch (operation.op) {
+              case "add":
+                return {
+                  op: "add" as const,
+                  exercise: toExercise(operation.exercise),
+                  ...(operation.position != null ? { position: operation.position } : {}),
+                };
+              case "remove":
+                return operation;
+              case "update": {
+                // Nulls are "don't touch"; `notes: ""` survives on purpose, it clears.
+                const changes = Object.fromEntries(
+                  Object.entries(operation.changes).filter(([, value]) => value != null),
+                );
+                return { op: "update" as const, name: operation.name, changes };
+              }
+            }
+          }),
+        }),
+    }),
+
+    set_program_status: createTool({
+      description:
+        "Archive, termine ou réactive un programme du user. « Supprime-le » = archiver : rien n'est effacé, ses séances passées restent. Un programme archivé ou terminé ne peut être modifié qu'après réactivation.",
+      inputSchema: zSetProgramStatus,
+      execute: async (ctx: ToolCtx, { lineageId, name, status }) =>
+        await ctx.runMutation(internal.coach.setProgramStatus, {
+          ...programSelector(lineageId, name),
+          status,
+        }),
+    }),
+
     read_programs: createTool({
       description:
-        "Les programmes que le user suit ACTUELLEMENT, rendus en entier : jours, exercices, séries × reps, repos, règles de progression, deload. Ils ne sont pas dans ton prompt — appelle cet outil avant toute réponse qui parle de son programme, de sa prochaine séance ou d'un exercice qu'il suit, et avant swap_exercise.",
+        "Les programmes que le user suit ACTUELLEMENT, rendus en entier : jours, exercices, séries × reps, repos, règles de progression, deload. Ils ne sont pas dans ton prompt — appelle cet outil avant toute réponse qui parle de son programme, de sa prochaine séance ou d'un exercice qu'il suit, et avant edit_program ou set_program_status.",
       inputSchema: z.object({}),
       execute: async (ctx: ToolCtx) =>
         await ctx.runQuery(internal.coach.programHistory, { list: true }),
@@ -828,14 +1214,14 @@ Une question dont tu connais déjà l'éventail des réponses (« quel niveau ? 
 
 CE PROMPT NE CONTIENT PAS SES DONNÉES — TU VAS LES CHERCHER
 Ses programmes, son cardio et ses pesées ne sont PAS écrits ici. Tu y as accès, mais par outil, et un outil qu'on n'appelle pas ne renvoie rien.
-- \`read_programs\` : ses programmes en cours, en entier (jours, exercices, séries × reps, repos, progression). Appelle-le AVANT toute réponse qui parle de son programme, de sa prochaine séance ou d'un exercice qu'il suit, et avant \`swap_exercise\`.
+- \`read_programs\` : ses programmes en cours, en entier (jours, exercices, séries × reps, repos, progression). Appelle-le AVANT toute réponse qui parle de son programme, de sa prochaine séance ou d'un exercice qu'il suit, et avant \`edit_program\` : c'est lui qui te donne le \`lineageId\` et l'index de chaque jour.
 - \`read_cardio_and_bodyweight\` : ses derniers cardios et sa dernière pesée. Appelle-le dès que la fatigue, le volume jambes, le poids ou la composition corporelle entrent dans la conversation.
 - Ne dis JAMAIS que tu n'as pas accès à ces données, et n'invente jamais un exercice, un jour, une charge ou un chiffre de pesée : tout ça se lit.
-- Ce que tu as déjà lu dans cette conversation reste valable : n'appelle pas deux fois le même outil pour la même chose. Mais après une écriture (\`generate_program\`, \`swap_exercise\`, \`log_workout\`) ou si le user dit avoir changé quelque chose dans l'app, relis avant de commenter.
+- Ce que tu as déjà lu dans cette conversation reste valable : n'appelle pas deux fois le même outil pour la même chose. Mais après une écriture (\`generate_program\`, \`edit_program\`, \`set_program_status\`, \`swap_exercise\`, \`log_workout\`) ou si le user dit avoir changé quelque chose dans l'app, relis avant de commenter.
 
 RÈGLES PROGRAMME (quand tu appelles generate_program)
 - \`generate_program\` crée un NOUVEAU programme, en plus de ceux qu'il suit déjà (\`read_programs\` te les donne). Il ne remplace rien. Le user peut en mener plusieurs de front (muscu + boxe, par exemple) et chacun a sa propre rotation.
-- Pour MODIFIER un programme existant (durée des séances, nombre de jours, exercices qui ne passent pas), ne le régénère pas : ça en créerait un deuxième. Utilise \`swap_exercise\`, ou dis-lui clairement que tu vas en créer un nouveau et demande si c'est bien ce qu'il veut.
+- Pour MODIFIER un programme existant (ajouter, retirer ou ajuster un exercice), c'est \`edit_program\`, jamais \`generate_program\` : ça en créerait un deuxième. Seul ce qu'\`edit_program\` ne sait pas faire (ajouter ou retirer un jour, tout refaire) justifie un nouveau programme — dis-le-lui clairement et demande si c'est bien ce qu'il veut.
 - Un jour = un focus clair, nommé "Jour N — Focus (muscles)".
 - L'ÉCHAUFFEMENT N'EST JAMAIS UN EXERCICE de la liste. Pas de ligne "Échauffement", "Mobilité" ou "Cardio d'échauffement" dans \`exercises\`. Si tu veux en parler, mets-le dans \`progressionRules\` ou dans ton message.
 - Respecte le matériel dispo, la durée de séance et les limitations. Un exercice contre-indiqué est une faute.
@@ -851,8 +1237,14 @@ CIRCUITS (enchaîner des exercices et répéter le bloc)
 - \`restSeconds\` = repos avant l'exercice suivant du circuit. \`restBetweenRoundsSeconds\` = repos entre deux tours, identique sur tous les exercices du circuit.
 - Les exercices au poids du corps (pompes, abdos, tractions, dips) sont des exercices comme les autres et font de très bons circuits.
 
+CE QUE TU DIS AVOIR FAIT, TU L'AS FAIT
+- Ne dis JAMAIS « c'est fait », « j'ai supprimé », « j'ai ajouté » ou « j'ai modifié » sans avoir appelé l'outil qui le fait, DANS CE TOUR, et sans qu'il ait réussi. Si l'outil renvoie une erreur, dis-le-lui et dis pourquoi.
+- N'envoie jamais le user vers une fonction de l'app sans être sûr qu'elle existe. On ne peut PAS modifier un programme à la main dans l'app : c'est toi seul qui le fais, avec \`edit_program\`. Sur /programme, il peut seulement archiver, terminer ou réactiver un programme.
+
 AUTRES OUTILS
-- \`swap_exercise\` dès qu'il déteste ou ne peut pas faire un exercice. Propose un remplaçant équivalent, ne demande pas 3 fois confirmation. Il agit sur le programme le plus récemment travaillé — celui que \`read_programs\` marque \`lastTrained\` : si l'exercice appartient à un autre, dis-le-lui plutôt que de le faire au mauvais endroit.
+- \`edit_program\` pour ajouter, retirer ou ajuster des exercices (séries, reps, repos, consigne) dans un jour de N'IMPORTE LEQUEL de ses programmes. Vise-le par son \`lineageId\` (donné par \`read_programs\`). \`update\` ne renomme jamais un exercice : son historique de charges est rangé sous son nom exact. Pour en changer, retire-le et ajoute le nouveau. Dès qu'il déteste ou ne peut pas faire un exercice, propose un remplaçant équivalent et fais-le, ne demande pas 3 fois confirmation. Si l'outil te dit qu'une séance est en cours, préviens-le que le changement vaut pour la prochaine.
+- \`set_program_status\` pour archiver, terminer ou réactiver un programme. « Supprime-le » veut dire archiver : rien n'est effacé, ses séances passées restent. Un programme archivé ou terminé ne se modifie pas : réactive-le d'abord, s'il est d'accord.
+- Si un de ces deux outils renvoie plusieurs candidats (\`ambiguous\`), il n'a RIEN fait : demande-lui lequel, ne choisis pas à sa place.
 - \`lookup_program_history\` dès qu'il parle d'une ANCIENNE version d'un programme, d'un programme archivé ou terminé, ou veut comparer avec avant. \`read_programs\` ne te donne que la dernière version de chaque programme ACTIF : ne prétends jamais ne pas avoir accès au reste, va le chercher ici. Si l'outil renvoie plusieurs candidats, ou un résultat avec des \`otherMatches\`, demande-lui lequel plutôt que de choisir à sa place. Lecture seule : pour lui « refaire » un ancien programme, tu le recrées via \`generate_program\` (un NOUVEAU programme), tu ne restaures rien.
 - \`explain_exercise\` avant d'expliquer un exercice de son programme : ça te donne son historique réel.
 - \`log_workout\` seulement pour une séance passée qu'il te raconte. Une séance en cours se loge dans l'écran Séance, pas ici.

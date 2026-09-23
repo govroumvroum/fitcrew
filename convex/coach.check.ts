@@ -7,13 +7,16 @@ import assert from "node:assert/strict";
 import {
   activeLineages,
   activeProgramsNote,
+  editInDays,
+  editRefusal,
   lookupHistory,
   renderProgram,
+  resolveProgram,
   swapInDays,
   systemPrompt,
   toDays,
 } from "./coach";
-import { circuitErrors, zGenerateProgram, zSwapExercise } from "./toolSchemas";
+import { circuitErrors, zEditProgram, zGenerateProgram, zSwapExercise } from "./toolSchemas";
 import type { Doc } from "./_generated/dataModel";
 
 type Status = "active" | "archived" | "completed";
@@ -475,6 +478,236 @@ assert.deepEqual(circuitErrors(swapDay[0].exercises), []);
 assert.equal(circuitErrors([{ sets: 4, circuit: "A", slot: "A1" }]).length, 1);
 
 // ---------------------------------------------------------------------------
+// editInDays — the third write path (#107): operations on one day
+// ---------------------------------------------------------------------------
+
+// Day 0 classic, day 1 the circuit day of the swap tests above.
+const editDays = [
+  ...toDays([
+    { name: "Jour 1 — Push", exercises: [ex("Développé couché"), ex("Dips", { sets: 3 })] },
+  ]),
+  swapDay[0],
+];
+const corde = swapTo("Corde à sauter", { sets: 3, reps: "3 min", restSeconds: 60 });
+const namesOf = (days: typeof editDays, i: number) => days[i].exercises.map((e) => e.name);
+
+// Add at the end (no position), the other day untouched, the input not mutated.
+let edited = editInDays(editDays, 0, [{ op: "add", exercise: corde }]);
+assert.deepEqual(namesOf(edited, 0), ["Développé couché", "Dips", "Corde à sauter"]);
+assert.deepEqual(edited[0].exercises[2], {
+  name: "Corde à sauter",
+  sets: 3,
+  reps: "3 min",
+  restSeconds: 60,
+});
+assert.equal(edited[1], editDays[1]);
+assert.equal(editDays[0].exercises.length, 2, "l'original ne doit pas être muté");
+
+// Add at a position.
+edited = editInDays(editDays, 0, [{ op: "add", exercise: corde, position: 0 }]);
+assert.deepEqual(namesOf(edited, 0), ["Corde à sauter", "Développé couché", "Dips"]);
+assert.throws(
+  () => editInDays(editDays, 0, [{ op: "add", exercise: corde, position: 5 }]),
+  /Position 5 hors limites/,
+);
+
+// Remove, matched like swapInDays (case and whitespace don't matter).
+edited = editInDays(editDays, 0, [{ op: "remove", name: " dips " }]);
+assert.deepEqual(namesOf(edited, 0), ["Développé couché"]);
+
+// Update: only the given fields move, the name never does.
+edited = editInDays(editDays, 0, [
+  {
+    op: "update",
+    name: "Dips",
+    changes: { sets: 5, reps: "6-8", restSeconds: 150, notes: "lesté" },
+  },
+]);
+assert.deepEqual(edited[0].exercises[1], {
+  name: "Dips",
+  sets: 5,
+  reps: "6-8",
+  restSeconds: 150,
+  notes: "lesté",
+});
+// "" clears a note; absent leaves it alone.
+assert.equal(
+  editInDays(edited, 0, [{ op: "update", name: "Dips", changes: { notes: "" } }])[0].exercises[1]
+    .notes,
+  undefined,
+);
+assert.equal(
+  editInDays(edited, 0, [{ op: "update", name: "Dips", changes: { sets: 4 } }])[0].exercises[1]
+    .notes,
+  "lesté",
+);
+// A rename is refused — loads and records are keyed by the exact name (#103)…
+assert.throws(
+  () =>
+    editInDays(editDays, 0, [
+      { op: "update", name: "Dips", changes: { name: "Dips lestés", sets: 4 } },
+    ]),
+  /ne renomme jamais/,
+);
+// …but restating the same name is not a rename.
+assert.equal(
+  editInDays(editDays, 0, [{ op: "update", name: "Dips", changes: { name: "dips", sets: 2 } }])[0]
+    .exercises[1].name,
+  "Dips",
+);
+// And the tool schema has no field to send one through: zod strips it.
+const parsedRename = zEditProgram.parse({
+  lineageId: "x",
+  dayIndex: 0,
+  operations: [{ op: "update", name: "Dips", changes: { name: "Dips lestés", sets: 4 } }],
+});
+assert.equal("name" in (parsedRename.operations[0] as { changes: object }).changes, false);
+
+// Operations apply in order: remove then add at the freed position is a move.
+edited = editInDays(editDays, 0, [
+  { op: "remove", name: "Dips" },
+  { op: "add", exercise: swapTo("Dips", { sets: 3 }), position: 0 },
+]);
+assert.deepEqual(namesOf(edited, 0), ["Dips", "Développé couché"]);
+
+// Unknown exercise: says which, and lists what the day has.
+assert.throws(
+  () => editInDays(editDays, 0, [{ op: "remove", name: "Squat" }]),
+  /« Squat » introuvable.*Développé couché, Dips/,
+);
+assert.throws(
+  () => editInDays(editDays, 0, [{ op: "update", name: "Squat", changes: { sets: 3 } }]),
+  /introuvable/,
+);
+// Unknown day: an error naming the range, never another day edited.
+assert.throws(
+  () => editInDays(editDays, 2, [{ op: "add", exercise: corde }]),
+  /Jour 2 introuvable.*2 jour\(s\)/,
+);
+// Duplicate add outside a circuit: the model re-adding what's there.
+assert.throws(
+  () => editInDays(editDays, 0, [{ op: "add", exercise: swapTo("dips") }]),
+  /déjà dans/,
+);
+// A day emptied entirely is refused: removing days is out of scope.
+assert.throws(
+  () =>
+    editInDays(editDays, 0, [
+      { op: "remove", name: "Dips" },
+      { op: "remove", name: "Développé couché" },
+    ]),
+  /plus aucun exercice/,
+);
+
+// Circuits, checked on the day AFTER the operations. Day 1 is Squat + circuit A
+// (Pompes A1, Abdos A2), 4 rounds.
+// Removing one of two members leaves a circuit of one.
+assert.throws(() => editInDays(editDays, 1, [{ op: "remove", name: "Abdos" }]), /qu'un exercice/);
+// Adding a classic exercise in the middle of the block interrupts it.
+assert.throws(
+  () => editInDays(editDays, 1, [{ op: "add", exercise: swapTo("Presse"), position: 2 }]),
+  /interrompu/,
+);
+// Adding into the circuit with a different round count.
+const intoA = (over: Partial<ModelExercise>) =>
+  swapTo("Gainage", { circuit: "A", slot: "A3", sets: 4, restSeconds: 30, ...over });
+assert.throws(
+  () => editInDays(editDays, 1, [{ op: "add", exercise: intoA({ sets: 3 }) }]),
+  /nombre de TOURS/,
+);
+// Updating one member's sets alone breaks the rounds too.
+assert.throws(
+  () => editInDays(editDays, 1, [{ op: "update", name: "Pompes", changes: { sets: 5 } }]),
+  /nombre de TOURS/,
+);
+// A slot already taken.
+assert.throws(
+  () => editInDays(editDays, 1, [{ op: "add", exercise: intoA({ slot: "A1" }) }]),
+  /portent le slot/,
+);
+// A well-formed add at the end of the circuit goes through…
+edited = editInDays(editDays, 1, [{ op: "add", exercise: intoA({}) }]);
+assert.deepEqual(namesOf(edited, 1), ["Squat", "Pompes", "Abdos", "Gainage"]);
+// …as does the same exercise twice in one circuit, which is two slots.
+edited = editInDays(editDays, 1, [
+  { op: "add", exercise: swapTo("Pompes", { circuit: "A", slot: "A3", sets: 4 }) },
+]);
+assert.deepEqual(namesOf(edited, 1), ["Squat", "Pompes", "Abdos", "Pompes"]);
+// …and changing every round count together keeps the circuit valid.
+edited = editInDays(editDays, 1, [
+  { op: "update", name: "Pompes", changes: { sets: 5 } },
+  { op: "update", name: "Abdos", changes: { sets: 5 } },
+]);
+assert.deepEqual(
+  edited[1].exercises.map((e) => e.sets),
+  [4, 5, 5],
+);
+// …but a name listed twice can't be targeted: which one?
+assert.throws(
+  () =>
+    editInDays(
+      editInDays(editDays, 1, [
+        { op: "add", exercise: swapTo("Pompes", { circuit: "A", slot: "A3", sets: 4 }) },
+      ]),
+      1,
+      [{ op: "remove", name: "Pompes" }],
+    ),
+  /apparaît 2 fois/,
+);
+
+// ---------------------------------------------------------------------------
+// resolveProgram — which program the two write tools act on
+// ---------------------------------------------------------------------------
+
+// Found by lineageId, and by exact name — the latest row's status comes back.
+let target = resolveProgram(rows, { lineageId: "fb1" });
+assert.equal(target.result, "found");
+if (target.result === "found") {
+  assert.equal(target.lineageId, "fb1");
+  assert.equal(target.status, "active");
+}
+target = resolveProgram(rows, { name: "boxe explosivité" });
+assert.equal(target.result, "found");
+if (target.result === "found") assert.equal(target.status, "archived");
+// Legacy row without lineageId/status: its own lineage, active.
+target = resolveProgram(rows, { name: "Programme historique" });
+assert.equal(target.result, "found");
+if (target.result === "found") {
+  assert.equal(target.lineageId, "old1");
+  assert.equal(target.status, "active");
+}
+// Unknown name: nothing to write, the user's programs listed so the coach asks.
+target = resolveProgram(rows, { name: "Yoga" });
+assert.equal(target.result, "not_found");
+assert.match("error" in target ? target.error : "", /Rien n'a été modifié/);
+// Someone else's lineageId: `rows` is the caller's own, so it matches nothing.
+target = resolveProgram(rows, { lineageId: "someone_elses_id" });
+assert.equal(target.result, "not_found");
+// Two lineages with the same name: ambiguous, nothing picked.
+target = resolveProgram(twins, { name: "Full Body 3 jours" });
+assert.equal(target.result, "ambiguous");
+if (target.result === "ambiguous") assert.equal(target.candidates.length, 2);
+// An exact hit with a longer-named sibling is ALSO ambiguous for a write, where
+// `lookupHistory` would have answered "found".
+target = resolveProgram(sibling, { name: "Boxe" });
+assert.equal(target.result, "ambiguous");
+if (target.result === "ambiguous")
+  assert.deepEqual(
+    target.candidates.map((c) => c.name),
+    ["Boxe", "Boxe explosivité"],
+  );
+// …and a lineageId settles it.
+assert.equal(resolveProgram(sibling, { lineageId: "bxa" }).result, "found");
+// No selector at all: the tool never picks for him, even with one program.
+assert.equal(resolveProgram(fullBody, {}).result, "missing_selector");
+
+// Editing an archived or completed program is refused, pointing at the fix.
+assert.equal(editRefusal("Full Body", "active"), null);
+assert.equal(editRefusal("Vieux", undefined), null, "une ligne sans statut est active");
+assert.match(editRefusal("Boxe", "archived") ?? "", /archivé.*set_program_status/);
+assert.match(editRefusal("Marathon", "completed") ?? "", /terminé.*set_program_status/);
+
+// ---------------------------------------------------------------------------
 // The prompt rule the issue makes an acceptance criterion
 // ---------------------------------------------------------------------------
 
@@ -483,5 +716,20 @@ assert.match(prompt, /Tu ne transformes JAMAIS en silence une séance classique 
 assert.match(prompt, /Tu annonces la structure que tu proposes/);
 assert.match(prompt, /UNIQUEMENT quand le profil, l'objectif ou la demande le réclament/);
 assert.match(prompt, /`sets` EST le nombre de tours/);
+// #107: nothing claimed without the tool that did it, no app feature invented,
+// and a modification is an edit, not a second program.
+assert.match(prompt, /Ne dis JAMAIS « c'est fait »/);
+assert.match(
+  prompt,
+  /sans avoir appelé l'outil qui le fait, DANS CE TOUR, et sans qu'il ait réussi/,
+);
+assert.match(prompt, /On ne peut PAS modifier un programme à la main dans l'app/);
+assert.match(prompt, /c'est `edit_program`, jamais `generate_program`/);
+assert.match(prompt, /« Supprime-le » veut dire archiver/);
+assert.match(prompt, /`set_program_status`/);
+// The old advice that sent him to create a second program is gone.
+assert.doesNotMatch(prompt, /Utilise `swap_exercise`, ou dis-lui/);
 
-console.log("convex/coach.ts lookupHistory + activeLineages + activeProgramsNote + circuits ok");
+console.log(
+  "convex/coach.ts lookupHistory + activeLineages + activeProgramsNote + circuits + editInDays + resolveProgram ok",
+);
