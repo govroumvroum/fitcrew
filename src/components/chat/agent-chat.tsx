@@ -1,68 +1,30 @@
 "use client";
 
-import { useSmoothText, useUIMessages, type UIMessage } from "@convex-dev/agent/react";
-import type { ChatStatus } from "ai";
-import { useAction, useMutation } from "convex/react";
-import { ChevronDownIcon, ImagePlusIcon, WrenchIcon } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { AssistantRuntimeProvider, useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
-import type { Id } from "../../../convex/_generated/dataModel";
-import {
-  Attachment,
-  AttachmentInfo,
-  AttachmentPreview,
-  AttachmentRemove,
-  Attachments,
-} from "@/components/ai-elements/attachments";
-import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from "@/components/ai-elements/conversation";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import {
-  PromptInput,
-  PromptInputButton,
-  PromptInputFooter,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
-  usePromptInputAttachments,
-  type PromptInputMessage,
-} from "@/components/ai-elements/prompt-input";
-import { useAgentThread, type AgentApi } from "@/components/chat/agent-thread";
-import { ToolLine, type ToolIcon } from "@/components/chat/tool-cards";
+import { Thread, type ThreadComponents } from "@/components/assistant-ui/thread";
+import type { AgentApi } from "@/components/chat/agent-thread";
+import { agentStatus } from "@/components/chat/convert-message";
+import { StreamedText } from "@/components/chat/message-text";
+import type { ToolIcon } from "@/components/chat/tool-cards";
+import { agentTools, type ToolPart } from "@/components/chat/tool-part";
+import { useAgentRuntime } from "@/components/chat/use-agent-runtime";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
-import { useLocalDate } from "@/lib/dates";
 
 /**
- * The chat shell both agents run on: threading, the greeting, the local echo, the
- * attachment upload and the streaming status derivation. /coach and /chef differ
- * only in which Convex functions they call, what the header says, and which cards
- * their tools render — everything else was identical, and duplicating it was the
- * fastest way to fix a bug in one place and not the other.
+ * The chat shell both agents run on, over assistant-ui: the header, the thread,
+ * and what only this app needs around it (paging, drop-anywhere, the upload
+ * errors). /coach and /chef differ only in which Convex functions they call,
+ * what the header says, and which cards their tools render — everything else
+ * was identical, and duplicating it was the fastest way to fix a bug in one
+ * place and not the other.
+ *
+ * The runtime is `useAgentRuntime`, the message mapping `convert-message.ts`,
+ * the tool state machine `tool-part.tsx`.
  */
-
-/**
- * One tool part off the message stream. `input` and `output` are `unknown`
- * because that is the truth: an agent's `renderTool` casts them to its own tool's
- * shape, and the guard in `AgentMessage` is what makes that cast safe enough.
- */
-export type ToolPart = { type: string; state: string; input?: unknown; output?: unknown };
-
-/**
- * A tool that RETURNS its error instead of throwing — `search_web`, `fetch_url`
- * and `lookup_food` do, so a dead page can't abort the turn — never reaches
- * `output-error`. Without this the row read "Page lue" in success green over a
- * 429. Exported because the `/demo` gallery mirrors this branch by hand, and a
- * duplicated predicate is how the two drifted apart in the first place.
- */
-export const toolErrored = (tool: ToolPart) =>
-  Boolean((tool.output as { error?: string } | null)?.error);
 
 /**
  * What a tool says about itself while it works.
@@ -123,101 +85,14 @@ export type AgentConfig = {
 };
 
 export function AgentChat({ agent }: { agent: AgentConfig }) {
-  const { threadId, rollover } = useAgentThread(agent.api);
-  const today = useLocalDate();
-
-  const newThread = useMutation(agent.api.newThread);
-  const send = useAction(agent.api.send);
-  const greet = useAction(agent.api.greet);
-  // Shared by both agents on purpose: one upload endpoint, one storage bucket —
-  // the id travels out of band and the tools decide what the photo is for.
-  const generateUploadUrl = useMutation(api.screenshots.generateUploadUrl);
-
-  const { results, status, loadMore } = useUIMessages(
-    agent.api.listMessages,
-    threadId ? { threadId } : "skip",
-    { initialNumItems: 30, stream: true },
-  );
-
-  // The user's own message only exists once the action has saved it, so it's
-  // echoed locally until it comes back over the subscription.
-  const [pending, setPending] = useState<string | null>(null);
-  // Holds the thread already greeted, not a boolean: switching conversations must
-  // let an empty one be greeted too.
-  const greeted = useRef<string | null>(null);
-
-  // A brand-new user has no thread yet: the first session starts here.
-  useEffect(() => {
-    if (rollover && rollover.threadId === null) {
-      void newThread().catch(() => toast.error(agent.unreachable));
-    }
-  }, [rollover, newThread, agent.unreachable]);
-
-  // Empty thread → the agent speaks first (its priming turn is filtered out of
-  // `listMessages`, so an already-greeted thread still shows the reply here).
-  useEffect(() => {
-    if (!threadId || !today || greeted.current === threadId) return;
-    if (status !== "Exhausted" || results.length > 0) return;
-    greeted.current = threadId;
-    void greet({ threadId, today }).catch(() => toast.error(agent.unreachable));
-  }, [threadId, today, status, results.length, greet, agent.unreachable]);
-
-  // Derived, not cleared in an effect: the echo disappears the moment the real
-  // message shows up in the thread.
-  // Anywhere in the thread, not merely at its end: a card can write a user-role
-  // message of its own (`choices-card.tsx`), which takes the last place and would
-  // make this message look like it never landed — the composer's echo would come
-  // back for good, spinner included.
-  // ponytail: sending the exact same text twice in a row hides the second echo.
-  // The spinner still shows, and the real message lands a moment later.
-  const landed = results.some((m) => m.role === "user" && m.text === pending);
-  const echo = pending !== null && !landed ? pending : null;
-
-  /** Uploads to Convex storage; the id travels out of band, never in the prompt. */
-  async function upload(file: { url: string; mediaType?: string }) {
-    const blob = await fetch(file.url).then((res) => res.blob());
-    const url = await generateUploadUrl();
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": file.mediaType ?? blob.type },
-      body: blob,
-    });
-    const { storageId } = (await res.json()) as { storageId: Id<"_storage"> };
-    return storageId;
-  }
-
-  async function submit(message: PromptInputMessage) {
-    const text = message.text.trim();
-    if (!threadId || !today || (!text && message.files.length === 0)) return;
-
-    const prompt = text || agent.attach.prompt;
-    setPending(prompt);
-    try {
-      const storageIds = await Promise.all(message.files.map(upload));
-      // Not awaited: the reply arrives over the listMessages subscription.
-      void send({ threadId, prompt, today, storageIds }).catch((error: Error) => {
-        setPending(null);
-        toast.error(error.message);
-      });
-    } catch {
-      setPending(null);
-      toast.error("L'import a échoué.");
-      throw new Error("upload failed"); // keeps the composer's content for a retry
-    }
-  }
-
-  const last = results.at(-1);
-  const chatStatus: ChatStatus =
-    // Nothing in the thread means the greeting is on its way: `listMessages`
-    // hides the priming turn, so there is no user message to wait behind.
-    echo !== null || last === undefined || last.role === "user"
-      ? "submitted"
-      : last?.status === "streaming" || last?.status === "pending"
-        ? "streaming"
-        : "ready";
+  const { runtime, threadId, status, loadMore } = useAgentRuntime(agent);
+  const { ToolUIs, components } = chatParts(agent);
 
   return (
-    <>
+    <AssistantRuntimeProvider runtime={runtime}>
+      <ToolUIs />
+      <DropAnywhere />
+      <AttachmentErrors />
       <header className="flex items-center justify-between border-b px-3 py-2">
         <span className="flex items-center gap-2 font-heading text-base font-semibold tracking-[-0.01em]">
           {/* Once in the header, not per message: a repeated avatar down a phone
@@ -229,256 +104,136 @@ export function AgentChat({ agent }: { agent: AgentConfig }) {
         <SidebarTrigger className="size-11" aria-label="Conversations" />
       </header>
 
-      <Conversation>
-        {/* ph-mask: what the user tells the agent — their body, their food, their
-            training — and what it answers, stays out of session replay. */}
-        <ConversationContent className="ph-mask gap-4">
-          {!threadId ? (
-            <>
-              <Skeleton className="h-16 w-4/5" />
-              <Skeleton className="h-10 w-3/5" />
-            </>
-          ) : (
-            <>
-              {status === "CanLoadMore" && (
-                <Button variant="ghost" size="sm" onClick={() => loadMore(30)}>
-                  Voir les messages plus anciens
-                </Button>
-              )}
-              {results.map((message) => (
-                <AgentMessage key={message.key} message={message} agent={agent} />
-              ))}
-              {echo && (
-                <Message from="user">
-                  <MessageContent>{echo}</MessageContent>
-                </Message>
-              )}
-              {chatStatus === "submitted" && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Spinner /> {agent.thinking}
-                </div>
-              )}
-            </>
-          )}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
-
-      {/* No safe-area pad here anymore: the shell stops at the tab bar, which
-          carries the inset itself. */}
-      <div className="p-2">
-        {/*
-          No PromptInputBody: it renders `display: contents`, and InputGroup only
-          switches to a column via `has-[>[data-align=block-end]]` — a
-          direct-child selector. `contents` changes box generation, not selector
-          matching, so the wrapper stayed the real child, the selector never
-          matched, and everything collapsed onto one 32px row.
-        */}
-        <PromptInput
-          accept="image/*"
-          multiple
-          maxFiles={4}
-          // 10 MB: a phone screenshot is 1-3 MB, a photo can be bigger.
-          maxFileSize={10 * 1024 * 1024}
-          // Drop anywhere on the page, not just on the composer — the composer
-          // is a small target and the thing you're dragging covers it.
-          globalDrop
-          onError={(error) =>
-            toast.error(
-              error.code === "max_files"
-                ? "4 images maximum."
-                : error.code === "max_file_size"
-                  ? "Image trop lourde (10 Mo max)."
-                  : "Images uniquement.",
-            )
+      <div className="min-h-0 flex-1">
+        <Thread
+          components={components}
+          // ph-mask: what the user tells the agent — their body, their food, their
+          // training — and what it answers, stays out of session replay.
+          messagesClassName="ph-mask"
+          composerPlaceholder={agent.placeholder}
+          attachLabel={agent.attach.label}
+          thinking={agent.thinking}
+          aboveMessages={
+            !threadId ? (
+              <>
+                <Skeleton className="h-16 w-4/5" />
+                <Skeleton className="h-10 w-3/5" />
+              </>
+            ) : status === "CanLoadMore" ? (
+              <LoadOlder onLoad={() => loadMore(30)} />
+            ) : null
           }
-          onSubmit={submit}
-        >
-          {/* Paste needs no handler here: PromptInputTextarea already has its own
-              onPaste that attaches clipboard files. */}
-          <PendingAttachments />
-          <PromptInputTextarea
-            placeholder={agent.placeholder}
-            className="text-base sm:text-sm"
-            disabled={!threadId}
-          />
-          <PromptInputFooter>
-            <PromptInputTools>
-              <AttachButton label={agent.attach.label} />
-            </PromptInputTools>
-            <PromptInputSubmit status={chatStatus} disabled={!threadId} />
-          </PromptInputFooter>
-        </PromptInput>
+        />
       </div>
-    </>
-  );
-}
-
-/** Their attachment context, our one-tap button — a dropdown for a single action is noise. */
-function AttachButton({ label }: { label: string }) {
-  const attachments = usePromptInputAttachments();
-  return (
-    <PromptInputButton aria-label={label} onClick={attachments.openFileDialog}>
-      <ImagePlusIcon />
-    </PromptInputButton>
-  );
-}
-
-function PendingAttachments() {
-  const attachments = usePromptInputAttachments();
-  if (attachments.files.length === 0) return null;
-
-  return (
-    <Attachments variant="inline" className="px-3 pt-3">
-      {attachments.files.map((file) => (
-        <Attachment key={file.id} data={file} onRemove={() => attachments.remove(file.id)}>
-          <AttachmentPreview />
-          <AttachmentInfo />
-          <AttachmentRemove />
-        </Attachment>
-      ))}
-    </Attachments>
+    </AssistantRuntimeProvider>
   );
 }
 
 /**
- * Copy for a tool with no entry in `toolLabels`. A tool added to the backend and
- * forgotten here still shows something rather than nothing.
+ * The tool registrations and the thread's slots, built once per agent. Both have
+ * to be referentially stable: a new `components` object or a new tool UI
+ * remounts every message in the thread.
  */
-export const FALLBACK: AgentToolLabel = {
-  icon: WrenchIcon,
-  pending: "Un instant…",
-  done: "C'est fait.",
-  failed: "Une action n'a pas marché.",
-};
+const parts = new WeakMap<
+  AgentConfig,
+  { ToolUIs: React.ComponentType; components: ThreadComponents }
+>();
+function chatParts(agent: AgentConfig) {
+  let hit = parts.get(agent);
+  if (!hit) {
+    const { ToolUIs, Fallback } = agentTools(agent);
+    hit = { ToolUIs, components: { Text: AgentText, ToolFallback: Fallback } };
+    parts.set(agent, hit);
+  }
+  return hit;
+}
+
+function AgentText({ text }: { text: string }) {
+  // The agent's own status rather than assistant-ui's: a turn left `pending`
+  // isn't streaming, and must not replay its text as if it were.
+  const streaming = useAuiState((s) => agentStatus(s.message.metadata) === "streaming");
+  return <StreamedText text={text} streaming={streaming} />;
+}
 
 /**
- * A finished tool, collapsed to its one-line summary and opened on click.
+ * « Voir les messages plus anciens », without the jump.
  *
- * A completed card is a receipt: useful to check, not useful to re-read every
- * time you scroll past it. Seven of them expanded down a phone thread buried the
- * agent's actual words, which are the part you came for. So the line is the
- * default and the card is on demand.
+ * The older page lands ABOVE what you were reading, so a scroll position kept in
+ * pixels from the top shows you something else. It's kept from the bottom
+ * instead: measured before the load, restored the moment the older messages are
+ * in the DOM.
  *
- * Native `<details>` — no state hook, and it survives re-render and thread paging
- * for free, which a `useState` here would not. Same trick as the day disclosures
- * inside `ProgramCard`.
- *
- * Cards that need the user to DO something are never collapsed: see
- * `needsValidation`. Hiding a confirm button behind a click is how an unconfirmed
- * analysis gets silently abandoned.
+ * Watched in the DOM rather than in a React effect: the page reaches the screen
+ * through assistant-ui's store, a render later than this component learns about
+ * it, so an effect here would restore against the old height.
  */
-function ToolDisclosure({ label, children }: { label: AgentToolLabel; children: React.ReactNode }) {
+function LoadOlder({ onLoad }: { onLoad: () => void }) {
+  const button = useRef<HTMLButtonElement>(null);
+
+  function load() {
+    const viewport = button.current?.closest<HTMLElement>("[data-slot=aui_thread-viewport]");
+    const content = viewport?.firstElementChild;
+    if (viewport && content) {
+      const count = () => viewport.querySelectorAll("[data-role]").length;
+      const before = count();
+      const distance = viewport.scrollHeight - viewport.scrollTop;
+      const observer = new ResizeObserver(() => {
+        if (count() <= before) return;
+        observer.disconnect();
+        // `instant`: the viewport scrolls smoothly by default, and an animated
+        // correction is a visible jump.
+        viewport.scrollTo({ top: viewport.scrollHeight - distance, behavior: "instant" });
+      });
+      observer.observe(content);
+      // A page that brings nothing new must not leave the observer behind.
+      setTimeout(() => observer.disconnect(), 10_000);
+    }
+    onLoad();
+  }
+
   return (
-    <details className="group w-full">
-      {/* The summary carries the same green as a card-less completed line, so
-          "it worked" looks the same whether or not there is a card behind it. */}
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] text-success-text marker:hidden hover:brightness-110">
-        <label.icon className="size-3.5 shrink-0" aria-hidden />
-        <span className="min-w-0 flex-1">{label.done}</span>
-        <ChevronDownIcon className="chevron size-3.5 shrink-0" aria-hidden />
-      </summary>
-      <div className="mt-1.5">{children}</div>
-    </details>
+    <Button ref={button} variant="ghost" size="sm" onClick={load}>
+      Voir les messages plus anciens
+    </Button>
   );
 }
 
 /**
- * Deltas land in bursts (word chunks, throttled to 250 ms server-side), which
- * reads as stuttering. `useSmoothText` paces them out at a measured chars/sec
- * instead, so the text flows.
+ * Drop an image anywhere on the page, not just on the composer — the composer is
+ * a small target and the thing you're dragging covers it. The composer's own
+ * dropzone handles a drop on itself (and marks the event handled).
  */
-function StreamedText({ text, streaming }: { text: string; streaming: boolean }) {
-  // Only at mount: a message already finished when it renders shows in full.
-  const [visible] = useSmoothText(text, { startStreaming: streaming });
-  return <MessageResponse isAnimating={streaming}>{visible}</MessageResponse>;
+function DropAnywhere() {
+  const aui = useAui();
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
+    const onDragOver = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const onDrop = (e: DragEvent) => {
+      if (e.defaultPrevented || !hasFiles(e)) return;
+      e.preventDefault();
+      for (const file of Array.from(e.dataTransfer?.files ?? [])) {
+        // A refusal is reported by `AttachmentErrors`; nothing to add here.
+        aui.composer.addAttachment(file).catch(() => {});
+      }
+    };
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, [aui]);
+  return null;
 }
 
-function AgentMessage({ message, agent }: { message: UIMessage; agent: AgentConfig }) {
-  const streaming = message.status === "streaming";
-
-  return (
-    <Message from={message.role}>
-      {/* Assistant content goes full width: the review cards live in it. */}
-      <MessageContent className={message.role === "user" ? undefined : "w-full"}>
-        {message.parts.map((part, i) => {
-          if (part.type === "text") {
-            return message.role === "user" ? (
-              <span key={i}>{part.text}</span>
-            ) : (
-              <StreamedText key={i} text={part.text} streaming={streaming} />
-            );
-          }
-          if (!part.type.startsWith("tool-")) return null;
-          const tool = part as ToolPart;
-          const label = agent.toolLabels[tool.type] ?? FALLBACK;
-
-          // A tool has five states worth showing and we used to render only the
-          // last one, so a 90-second `generate_meal_plan` looked like the app had
-          // hung, and a tool that THREW left no trace in the thread at all.
-          //
-          // Every state leads with the SAME icon — the tool's own — so the row
-          // keeps its identity while it progresses. It used to change icon per
-          // state, which read as three unrelated rows.
-          switch (tool.state) {
-            case "input-streaming":
-              // The model is still writing the arguments: it hasn't committed to
-              // the action, so the copy stays vague.
-              return <ToolLine key={i} Icon={label.icon} text={label.pending} shimmer />;
-            case "input-available":
-              // Arguments complete, the tool itself is executing: safe to name it.
-              return (
-                <ToolLine key={i} Icon={label.icon} text={label.running ?? label.pending} shimmer />
-              );
-            // `tone="failed"` is what puts the line in red AND adds the warning
-            // triangle beside the tool's icon — without it a failure rendered
-            // grey and indistinguishable from an in-flight row.
-            case "output-error":
-              return (
-                <ToolLine
-                  key={i}
-                  Icon={label.icon}
-                  text={label.failed ?? FALLBACK.failed!}
-                  tone="failed"
-                />
-              );
-            case "output-available":
-              // See `toolErrored`: an error in the output, not a thrown one.
-              if (toolErrored(tool))
-                return (
-                  <ToolLine
-                    key={i}
-                    Icon={label.icon}
-                    text={label.failed ?? FALLBACK.failed!}
-                    tone="failed"
-                  />
-                );
-              break;
-            // approval-* / output-denied: no tool here asks for approval, so these
-            // never occur. Rendering nothing beats inventing copy for them.
-            default:
-              return null;
-          }
-
-          // See `outputOnly`: an input that hasn't landed yet would be
-          // dereferenced through a cast that lies about it.
-          if (!tool.input && !agent.outputOnly.includes(tool.type)) return null;
-
-          const card = agent.renderTool(tool, streaming);
-          // No card for this tool (its result is the prose above). The line still
-          // says it ran — that's cheaper than the user wondering.
-          if (!card) return <ToolLine key={i} Icon={label.icon} text={label.done} tone="done" />;
-          // A card the user must act on stays open; everything else collapses.
-          if (agent.needsValidation.includes(tool.type)) {
-            return <Fragment key={i}>{card}</Fragment>;
-          }
-          return (
-            <ToolDisclosure key={i} label={label}>
-              {card}
-            </ToolDisclosure>
-          );
-        })}
-      </MessageContent>
-    </Message>
-  );
+/** Why an image was refused, from the picker, a paste or a drop alike. */
+function AttachmentErrors() {
+  useAuiEvent("composer.attachmentAddError", ({ reason, message }) => {
+    // The adapter's own refusals are already French sentences (see
+    // `ImageAttachments`); the core's are English, and only ever a wrong type.
+    toast.error(reason === "adapter-error" ? message : "Images uniquement.");
+  });
+  return null;
 }

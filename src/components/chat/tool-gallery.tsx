@@ -1,19 +1,12 @@
 "use client";
 
-import { ChevronDownIcon } from "lucide-react";
 import { Component, type ReactNode } from "react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { Entry } from "../../../convex/screenshots";
-import {
-  type AgentConfig,
-  type AgentToolLabel,
-  FALLBACK,
-  toolErrored,
-  type ToolPart,
-} from "@/components/chat/agent-chat";
+import type { AgentConfig } from "@/components/chat/agent-chat";
 import { CHEF } from "@/components/chat/chef-chat";
 import { COACH } from "@/components/chat/coach-chat";
-import { ToolLine } from "@/components/chat/tool-cards";
+import { ToolPartView, type ToolPart } from "@/components/chat/tool-part";
 
 /**
  * The design harness behind /demo: every chat tool card, both agents, all four
@@ -24,8 +17,8 @@ import { ToolLine } from "@/components/chat/tool-cards";
  * so a tool added to an agent shows up here on its own (with "pas de fixture"
  * until someone writes one). Nothing is re-listed by hand.
  *
- * All four states go through the same `ToolLine` and `renderTool` the chat uses,
- * so there is nothing here to keep in sync by hand.
+ * All four states go through `ToolPartView`, the very component the chat renders
+ * each tool part with — so there is nothing here to keep in sync by hand.
  */
 
 /** One completed-state fixture. `note` is printed under it, as-is. */
@@ -892,12 +885,6 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
   ],
 };
 
-/* -------------------------------------------------------------------------- */
-/* Mirrors of `agent-chat.tsx`. Keep in sync — see the file header.           */
-/* -------------------------------------------------------------------------- */
-
-/* -------------------------------------------------------------------------- */
-
 /**
  * The two Convex-backed cards throw when handed a fake id — `v.id()` rejects a
  * string that isn't a real document id, and `useQuery` rethrows that in render.
@@ -923,46 +910,23 @@ class CardBoundary extends Component<{ children: ReactNode }, { error: string | 
   }
 }
 
-/**
- * Mirrors `AgentMessage`'s completed branch: the same input guard, the same
- * "no card means render the one-line marker", and the same collapse rule. The
- * gallery is only useful if it shows what the thread shows — including the
- * disclosure, which is how most cards are actually first seen.
- */
-function Completed({
-  config,
-  tool,
-  label,
-}: {
-  config: AgentConfig;
-  tool: ToolPart;
-  label: AgentToolLabel;
-}) {
-  if (!tool.input && !config.outputOnly.includes(tool.type)) {
-    return (
-      <p className="text-[11px] text-muted-foreground">
-        Input absent : la coquille masquerait cette carte.
-      </p>
-    );
-  }
-  // Same guard as the thread: an error carried in the output is a failure, even
-  // though the part state says `output-available`.
-  if (toolErrored(tool))
-    return <ToolLine Icon={label.icon} text={label.failed ?? FALLBACK.failed!} tone="failed" />;
-  const card = config.renderTool(tool, false);
-  if (!card) return <ToolLine Icon={label.icon} text={label.done} tone="done" />;
-  if (config.needsValidation.includes(tool.type)) return <CardBoundary>{card}</CardBoundary>;
+/** What the thread would hide, said out loud: a card whose input hasn't landed. */
+const INPUT_MISSING = (
+  <p className="text-[11px] text-muted-foreground">
+    Input absent : la coquille masquerait cette carte.
+  </p>
+);
+
+/** One tool part, drawn exactly as the thread draws it. */
+function Part({ config, tool }: { config: AgentConfig; tool: ToolPart }) {
   return (
-    <details className="group w-full">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] text-success-text marker:hidden hover:brightness-110">
-        <label.icon className="size-3.5 shrink-0" aria-hidden />
-        <span className="min-w-0 flex-1">{label.done}</span>
-        <ChevronDownIcon className="chevron size-3.5 shrink-0" aria-hidden />
-      </summary>
-      <div className="mt-1.5">
-        <CardBoundary>{card}</CardBoundary>
-      </div>
-    </details>
+    <ToolPartView
+      tool={tool}
+      config={config}
+      isNew={false}
+      Boundary={CardBoundary}
+      inputMissing={INPUT_MISSING}
+    />
   );
 }
 
@@ -984,8 +948,6 @@ function ToolBlock({
   type: string;
   fixtures: Fixture[];
 }) {
-  const label = config.toolLabels[type];
-
   return (
     <section className="space-y-3 rounded-xl border bg-background p-3">
       <h3 className="font-heading text-sm font-semibold tracking-[-0.01em]">
@@ -993,13 +955,13 @@ function ToolBlock({
       </h3>
 
       <State name="pending — input-streaming">
-        <ToolLine Icon={label.icon} text={label.pending} shimmer />
+        <Part config={config} tool={{ type, state: "input-streaming" }} />
       </State>
       <State name="running — input-available">
-        <ToolLine Icon={label.icon} text={label.running ?? label.pending} shimmer />
+        <Part config={config} tool={{ type, state: "input-available", input: {} }} />
       </State>
       <State name="failed — output-error">
-        <ToolLine Icon={label.icon} text={label.failed ?? FALLBACK.failed!} tone="failed" />
+        <Part config={config} tool={{ type, state: "output-error" }} />
       </State>
 
       {fixtures.length === 0 ? (
@@ -1011,7 +973,7 @@ function ToolBlock({
       ) : (
         fixtures.map((fixture) => (
           <State key={fixture.label} name={`completed — ${fixture.label}`}>
-            <Completed config={config} tool={fixture.tool} label={label} />
+            <Part config={config} tool={fixture.tool} />
             {fixture.note ? (
               <p className="text-[11px] text-muted-foreground">{fixture.note}</p>
             ) : null}

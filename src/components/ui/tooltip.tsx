@@ -27,9 +27,8 @@ function Tooltip({
 }
 
 /**
- * `asChild` kept on purpose: `sidebar.tsx`, `ai-elements/message.tsx` and
- * `ai-elements/prompt-input.tsx` all write `<TooltipTrigger asChild>`, and the
- * last two are vendored. It maps straight onto Base UI's `render`, which is the
+ * `asChild` kept on purpose: `sidebar.tsx` writes `<TooltipTrigger asChild>`
+ * (the vendored `assistant-ui/*` files use `render`, which passes through). It maps straight onto Base UI's `render`, which is the
  * same "become this element" contract — note the `children: undefined`, without
  * it the child would be rendered twice (once as the element, once as its own
  * child).
@@ -77,8 +76,9 @@ function TooltipTrigger({
  *
  * - a keyboard-focus open is instant, as before;
  * - a `delay={0}` HOVER open now fades in over 100ms where Radix animated
- *   nothing (`ai-elements/message.tsx` sets `TooltipProvider delay={0}`, so the
- *   chat tooltips are the live case). Accepted: a 100ms fade on a tooltip that
+ *   nothing (`TooltipProvider` defaults to `delay={0}` here, and the chat's
+ *   `assistant-ui/tooltip-icon-button.tsx` relies on it, so those are the live
+ *   case). Accepted: a 100ms fade on a tooltip that
  *   was already appearing instantly is a nicer default than a hard cut, and
  *   chasing exact parity would mean re-deriving "was there a delay" in CSS,
  *   which the attribute simply doesn't encode;
