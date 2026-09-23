@@ -2,7 +2,13 @@
 
 import { groupCircuits, roundsOf } from "@/lib/circuits";
 
-export type SetRow = { index: number; weight: number; reps: number; completed: boolean };
+export type SetRow = {
+  index: number;
+  weight: number;
+  reps: number;
+  completed: boolean;
+  seconds?: number;
+};
 
 /** What the séance screen needs of a day's exercise to walk it. */
 type Occurrence = { name: string; sets: number; circuit?: string; slot?: string };
@@ -21,6 +27,13 @@ export function defaultReps(spec: string): number {
 }
 
 /**
+ * How a logged set reads anywhere it's shown. A timed set is stored 0 kg × 0, and
+ * "0×0" next to a minute of corde à sauter says the opposite of what happened.
+ */
+export const formatSet = (set: { weight: number; reps: number; seconds?: number }) =>
+  set.seconds !== undefined ? `${set.seconds} s` : `${set.weight}×${set.reps}`;
+
+/**
  * The set rows `workouts.start` writes for a day: one per prescribed set,
  * pre-loaded with what that exercise was last done at so a séance opens on real
  * numbers instead of 0 kg. Unmatched exercise (never trained) → 0 and the
@@ -30,8 +43,15 @@ export function defaultReps(spec: string): number {
  * these per program now, and two copies of the crossing would drift.
  */
 export function seedSets(
-  exercises: { name: string; sets: number; reps: string; circuit?: string; slot?: string }[],
-  prefill: { name: string; weight: number; reps: number }[],
+  exercises: {
+    name: string;
+    sets: number;
+    reps: string;
+    circuit?: string;
+    slot?: string;
+    durationSec?: number;
+  }[],
+  prefill: { name: string; weight: number; reps: number; seconds?: number }[],
 ): {
   exerciseName: string;
   index: number;
@@ -40,14 +60,20 @@ export function seedSets(
   circuit?: string;
   slot?: string;
   round?: number;
+  seconds?: number;
 }[] {
   return exercises.flatMap((exercise) => {
     const last = prefill.find((entry) => entry.name === exercise.name);
     return Array.from({ length: exercise.sets }, (_, index) => ({
       exerciseName: exercise.name,
       index,
-      weight: last?.weight ?? 0,
-      reps: last?.reps ?? defaultReps(exercise.reps),
+      // A timed exercise lifts and counts nothing: 0 × 0, and the work is in
+      // `seconds` — last time's if it was timed then too, else the prescription.
+      // `last.seconds` is absent when the exercise used to be done in reps, and
+      // "12" reps is no duration to run a clock on.
+      ...(exercise.durationSec !== undefined
+        ? { weight: 0, reps: 0, seconds: last?.seconds ?? exercise.durationSec }
+        : { weight: last?.weight ?? 0, reps: last?.reps ?? defaultReps(exercise.reps) }),
       // Provenance only on a circuit set — `sets` IS the round count, so set
       // `index` and round are the same number, 1-based here. A classic row keeps
       // exactly the shape it has always had.
@@ -115,12 +141,24 @@ export function sessionSteps<E extends Occurrence, R extends Row>(
  * The weight × reps the next set of an exercise should default to: what was
  * just lifted this session, else what the rows were seeded with (last
  * session's values), else the prescription.
+ *
+ * A timed exercise (`durationSec` set) walks the same ladder for its seconds,
+ * which is what the work timer then runs. A row that has none — seeded by the
+ * previous bundle, which wrote reps — falls through to the prescription rather
+ * than handing the clock a rep count.
  */
-export function workingValues(rows: SetRow[], repsSpec: string): { weight: number; reps: number } {
+export function workingValues(
+  rows: SetRow[],
+  repsSpec: string,
+  durationSec?: number,
+): { weight: number; reps: number; seconds?: number } {
   const done = rows.filter((r) => r.completed);
   const source = done.length
     ? done.reduce((a, b) => (b.index > a.index ? b : a))
     : rows.reduce<SetRow | null>((a, b) => (a === null || b.index < a.index ? b : a), null);
+  if (durationSec !== undefined) {
+    return { weight: 0, reps: 0, seconds: source?.seconds ?? durationSec };
+  }
   return source
     ? { weight: source.weight, reps: source.reps }
     : { weight: 0, reps: defaultReps(repsSpec) };

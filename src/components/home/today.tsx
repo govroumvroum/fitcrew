@@ -314,11 +314,14 @@ export function DayPreview({
   prefill,
 }: {
   exercises: readonly PreviewExercise[];
-  prefill: readonly { name: string; weight: number }[];
+  prefill: readonly { name: string; weight: number; seconds?: number }[];
 }) {
+  // Last time's number: a load, or a duration when that set was timed — "0 kg"
+  // beside a corde à sauter would read as a set done empty-handed.
   const weight = (name: string) => {
     const last = prefill.find((entry) => entry.name === name);
-    return last ? `${formatNumber(last.weight, 1)} kg` : "—";
+    if (!last) return "—";
+    return last.seconds !== undefined ? `${last.seconds} s` : `${formatNumber(last.weight, 1)} kg`;
   };
 
   return (

@@ -33,10 +33,25 @@ import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { ExerciseDemo, useExerciseDemos } from "./demo";
-import { rowsOf, seedSets, sessionSteps, workingValues } from "./prescription";
+import { formatSet, rowsOf, seedSets, sessionSteps, workingValues } from "./prescription";
 import { REST_OPTIONS, RestTimerBar, useRestOutro, useRestTimer } from "./rest-timer";
 
-type Values = { weight: number; reps: number };
+type Values = { weight: number; reps: number; seconds?: number };
+
+/**
+ * The timed set on the clock, and everything its end has to do — decided at the
+ * tap that started it. Captured rather than read off the screen at zero, because
+ * the user can page elsewhere while the corde tourne, and the rest and the page
+ * turn belong to the set that was started, not the one in view.
+ */
+type Working = {
+  setId: Id<"sets">;
+  seconds: number;
+  rest: number;
+  tours: boolean;
+  /** Occurrence to page to once it's validated; -1 = stay. */
+  advanceTo: number;
+};
 
 const round = (n: number) => Math.round(n * 10) / 10;
 
@@ -84,7 +99,14 @@ export function Session({ date }: { date: string }) {
         ...current,
         sets: current.sets.map((set) =>
           set._id === args.setId
-            ? { ...set, completed: args.completed, weight: args.weight, reps: args.reps }
+            ? {
+                ...set,
+                completed: args.completed,
+                weight: args.weight,
+                reps: args.reps,
+                // Mirrors the mutation: absent means "leave it", not "clear it".
+                ...(args.seconds !== undefined && { seconds: args.seconds }),
+              }
             : set,
         ),
       },
@@ -94,7 +116,13 @@ export function Session({ date }: { date: string }) {
   // Every check-off and correction goes through here: the optimistic tick makes
   // a failed write look like a saved one, then it reverts with nothing said. On
   // gym wifi that's the app losing the only data it exists to keep.
-  const write = (args: { setId: Id<"sets">; completed: boolean; weight: number; reps: number }) => {
+  const write = (args: {
+    setId: Id<"sets">;
+    completed: boolean;
+    weight: number;
+    reps: number;
+    seconds?: number;
+  }) => {
     void logSet(args).catch(() =>
       toast.error(
         args.completed
@@ -123,6 +151,23 @@ export function Session({ date }: { date: string }) {
   // off the exercise on screen would rename a between-tours rest one frame after
   // it started.
   const [restingTours, setRestingTours] = useState(false);
+  // A timed set's work runs on the same countdown as the rest — same deadline,
+  // same drain, same cues — and validates itself at zero, then hands over to the
+  // rest. Two instances rather than one switching modes: the rest's outro and
+  // the work's end are different events, and they never overlap.
+  const [working, setWorking] = useState<Working | null>(null);
+  const completeWork = (target: Working, seconds: number) => {
+    write({ setId: target.setId, completed: true, weight: 0, reps: 0, seconds });
+    setWorking(null);
+    setRestingTours(target.tours);
+    timer.start(target.rest);
+    if (target.advanceTo !== -1) setPick(target.advanceTo);
+  };
+  const work = useRestTimer(() => {
+    if (working) completeWork(working, working.seconds);
+  });
+  // Work is on the clock: counting down or paused, and not yet validated.
+  const workBusy = working !== null && work.endAt !== 0 && work.remaining > 0;
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -175,8 +220,8 @@ export function Session({ date }: { date: string }) {
 
   // Keyed on the NAME, unlike the rows: the working load is a property of the
   // exercise's history, not of a slot or of a tour.
-  const valuesFor = (name: string, repsSpec: string) =>
-    edits[name] ?? workingValues(rowsOf({ name }, sets), repsSpec);
+  const valuesFor = (name: string, repsSpec: string, durationSec?: number) =>
+    edits[name] ?? workingValues(rowsOf({ name }, sets), repsSpec, durationSec);
 
   const done = sets.filter((set) => set.completed);
 
@@ -354,7 +399,11 @@ export function Session({ date }: { date: string }) {
       ? [candidate]
       : [],
   )[0];
-  const values = valuesFor(exercise.name, exercise.reps);
+  // Timed = the prescription carries a duration. Then there's no load and no
+  // reps to enter: the work timer runs `values.seconds` and logs it.
+  const timed = exercise.durationSec !== undefined;
+  const values = valuesFor(exercise.name, exercise.reps, exercise.durationSec);
+  const seconds = values.seconds ?? exercise.durationSec ?? 0;
   const setValues = (next: Values) => setEdits((prev) => ({ ...prev, [exercise.name]: next }));
   // A tour ends on the block's LAST exercise: that's where the between-rounds
   // rest goes, everywhere else it's the plain rest before the next exercise.
@@ -377,7 +426,15 @@ export function Session({ date }: { date: string }) {
   // signal is the history: an exercise you've already loaded isn't a pull-up, so
   // 0 kg there is a slip on the way to the plate count. Never logged, or always
   // logged at 0, stays loggable — blocking tractions would be the worse bug.
-  const zeroLoad = values.weight === 0 && (lastTime?.weight ?? 0) > 0;
+  // A timed exercise has no load to forget.
+  const zeroLoad = !timed && values.weight === 0 && (lastTime?.weight ?? 0) > 0;
+
+  // Whether validating the set on screen should page away: a circuit rotates on
+  // EVERY validated set — that's the tour — and a classic exercise only once this
+  // set bouclé it. Read off the rows we already hold: the optimistic write lands
+  // after the tap returns.
+  const advance = () =>
+    block || rows.filter((row) => !row.completed).length === 1 ? nextOpen() : -1;
 
   const validate = (row: Doc<"sets">) => {
     // The chips log too, so the gate lives here and not only on the dock button.
@@ -385,10 +442,46 @@ export function Session({ date }: { date: string }) {
       toast.error("Mets la charge avant de valider.");
       return;
     }
-    write({ setId: row._id, completed: true, weight: values.weight, reps: values.reps });
+    // A chip tapped mid-work logs by hand, and the clock that was running for it
+    // has nothing left to validate.
+    if (working) {
+      work.stop();
+      setWorking(null);
+    }
+    write({
+      setId: row._id,
+      completed: true,
+      weight: values.weight,
+      reps: values.reps,
+      ...(timed && { seconds }),
+    });
     navigator.vibrate?.(15);
     setRestingTours(betweenRounds > 0);
     timer.start(restSeconds);
+  };
+
+  // The tap that starts a timed set. It skips whatever rest is left — you're
+  // going, so the rest is over — and silently: a skip never beeps.
+  const startWork = (row: Doc<"sets">) => {
+    timer.stop();
+    work.start(seconds);
+    setWorking({
+      setId: row._id,
+      seconds,
+      rest: restSeconds,
+      tours: betweenRounds > 0,
+      advanceTo: advance(),
+    });
+  };
+
+  // The bar's X stops the work without logging it: an abandoned set is an open
+  // set, same as never starting it.
+  const workTimer = {
+    ...work,
+    stop: () => {
+      work.stop();
+      setWorking(null);
+    },
   };
 
   return (
@@ -430,6 +523,7 @@ export function Session({ date }: { date: string }) {
                   try {
                     await cancel({ workoutId: workout._id });
                     timer.stop();
+                    workTimer.stop();
                     router.push("/");
                   } catch {
                     toast.error("Séance pas annulée, réessaie.");
@@ -551,30 +645,60 @@ export function Session({ date }: { date: string }) {
                     ? `Tour ${tour} sur ${rows.length}`
                     : `Prochaine série · ${nextAt + 1} sur ${rows.length}`}
               </p>
-              <LoadField
-                label="kg"
-                ariaLabel="Charge en kilos"
-                mode="decimal"
-                size="clamp(3.5rem, 17vw, 5.25rem)"
-                value={values.weight}
-                onChange={(weight) => setValues({ ...values, weight: Math.max(0, round(weight)) })}
-                onStep={(sign) =>
-                  setValues({ ...values, weight: Math.max(0, round(values.weight + sign)) })
-                }
-              />
-              <LoadField
-                label="reps"
-                ariaLabel="Répétitions"
-                mode="numeric"
-                size="clamp(2.25rem, 10vw, 3.25rem)"
-                value={values.reps}
-                onChange={(reps) => setValues({ ...values, reps: Math.max(1, Math.round(reps)) })}
-                onStep={(sign) => setValues({ ...values, reps: Math.max(1, values.reps + sign) })}
-              />
+              {timed ? (
+                // The one number a timed set has, in the load's slot and at the
+                // load's size. It's what the next « Lancer » runs, and how a
+                // done set gets corrected: un-check its chip, fix this, re-check.
+                // Steps of 5 s — nobody prescribes a 47 s plank.
+                <LoadField
+                  label="secondes"
+                  ariaLabel="Durée en secondes"
+                  mode="numeric"
+                  size="clamp(3.5rem, 17vw, 5.25rem)"
+                  value={seconds}
+                  onChange={(next) =>
+                    setValues({ ...values, seconds: Math.max(5, Math.round(next)) })
+                  }
+                  onStep={(sign) => setValues({ ...values, seconds: Math.max(5, seconds + sign * 5) })}
+                />
+              ) : (
+                <>
+                  <LoadField
+                    label="kg"
+                    ariaLabel="Charge en kilos"
+                    mode="decimal"
+                    size="clamp(3.5rem, 17vw, 5.25rem)"
+                    value={values.weight}
+                    onChange={(weight) =>
+                      setValues({ ...values, weight: Math.max(0, round(weight)) })
+                    }
+                    onStep={(sign) =>
+                      setValues({ ...values, weight: Math.max(0, round(values.weight + sign)) })
+                    }
+                  />
+                  <LoadField
+                    label="reps"
+                    ariaLabel="Répétitions"
+                    mode="numeric"
+                    size="clamp(2.25rem, 10vw, 3.25rem)"
+                    value={values.reps}
+                    onChange={(reps) =>
+                      setValues({ ...values, reps: Math.max(1, Math.round(reps)) })
+                    }
+                    onStep={(sign) =>
+                      setValues({ ...values, reps: Math.max(1, values.reps + sign) })
+                    }
+                  />
+                </>
+              )}
               <p className="text-sm text-muted-foreground">
-                {lastTime
-                  ? `La dernière fois : ${fmt(lastTime.weight)} kg × ${lastTime.reps}`
-                  : "Première fois sur cet exercice. On note la référence."}
+                {timed
+                  ? lastTime?.seconds !== undefined
+                    ? `La dernière fois : ${lastTime.seconds} s`
+                    : "Première fois au chrono sur cet exercice."
+                  : lastTime
+                    ? `La dernière fois : ${fmt(lastTime.weight)} kg × ${lastTime.reps}`
+                    : "Première fois sur cet exercice. On note la référence."}
               </p>
             </div>
 
@@ -590,6 +714,7 @@ export function Session({ date }: { date: string }) {
                       // Tapping a chip corrects a set: un-checking is a fix, so
                       // no rest and no buzz.
                       if (row.completed) {
+                        // `seconds` isn't sent, so a timed set keeps its duration.
                         write({
                           setId: row._id,
                           completed: false,
@@ -689,13 +814,23 @@ export function Session({ date }: { date: string }) {
             button never slides out from under a thumb when rest ends mid-set.
             Reserved from the first check-off rather than always, so a séance
             doesn't open with an empty 4rem band above the button. */}
-        {timer.total > 0 ? (
+        {timer.total > 0 || work.total > 0 ? (
           <div className="min-h-16">
             {/* The jarring part of the bar arriving is the reflow that shoves the
                 commit button down 4rem, so it comes in with it rather than after.
                 The outro's fade runs on a 1.5 s animation-delay and the hook
-                unmounts once it's played. */}
-            {outro.show ? (
+                unmounts once it's played.
+
+                Work takes the slot while it runs. At zero the set validates and
+                the rest starts in the same frame, so the slot goes straight from
+                one bar to the other. */}
+            {workBusy ? (
+              <RestTimerBar
+                kind="work"
+                timer={workTimer}
+                className="animate-in fade-in slide-in-from-bottom-1 duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none"
+              />
+            ) : outro.show ? (
               <RestTimerBar
                 timer={timer}
                 label={restingTours ? "Repos entre les tours" : undefined}
@@ -713,30 +848,43 @@ export function Session({ date }: { date: string }) {
             base variant. */}
         <Button
           className="h-14 w-full text-base active:scale-[0.97]"
-          disabled={(nextAt === -1 && nextOpen() === -1) || zeroLoad}
+          disabled={!workBusy && ((nextAt === -1 && nextOpen() === -1) || zeroLoad)}
           onClick={() => {
+            // Mid-work, the button ends the set early and logs what was actually
+            // done — a plank that gave out at 42 s is a 42 s plank, not a 60.
+            if (workBusy && working) {
+              const elapsed = Math.max(1, work.total - work.remaining);
+              work.stop();
+              completeWork(working, elapsed);
+              return;
+            }
             if (nextAt === -1) {
               const upcoming = nextOpen();
               if (upcoming !== -1) setPick(upcoming);
               return;
             }
-            validate(rows[nextAt]);
-            // A circuit rotates on EVERY validated set — that's the tour. A
-            // classic exercise only pages once this set bouclé it. Read off the
-            // rows we already hold: the optimistic write lands after this returns.
-            if (block || rows.filter((row) => !row.completed).length === 1) {
-              const upcoming = nextOpen();
-              if (upcoming !== -1) setPick(upcoming);
+            // A timed set doesn't validate on the tap, it starts: the page turn
+            // waits for the clock, and is decided now, in `startWork`.
+            if (timed) {
+              startWork(rows[nextAt]);
+              return;
             }
+            const upcoming = advance();
+            validate(rows[nextAt]);
+            if (upcoming !== -1) setPick(upcoming);
           }}
         >
-          {nextAt === -1
-            ? nextOpen() === -1
-              ? "Tout est validé, termine la séance"
-              : "Passer à l'exercice suivant"
-            : zeroLoad
-              ? "Mets la charge pour valider"
-              : `Valider la série ${nextAt + 1} · ${fmt(values.weight)} kg × ${values.reps}`}
+          {workBusy
+            ? `Valider maintenant · ${work.total - work.remaining} s`
+            : nextAt === -1
+              ? nextOpen() === -1
+                ? "Tout est validé, termine la séance"
+                : "Passer à l'exercice suivant"
+              : zeroLoad
+                ? "Mets la charge pour valider"
+                : timed
+                  ? `Lancer la série ${nextAt + 1} · ${seconds} s`
+                  : `Valider la série ${nextAt + 1} · ${fmt(values.weight)} kg × ${values.reps}`}
         </Button>
         <Button
           variant="ghost"
@@ -757,6 +905,7 @@ export function Session({ date }: { date: string }) {
             try {
               await finish({ workoutId: workout._id, notes: notes.trim() || undefined });
               timer.stop();
+              workTimer.stop();
             } catch {
               toast.error("Séance pas terminée, réessaie.");
             } finally {
@@ -797,7 +946,7 @@ function RecapLine({
           .map(
             (row) =>
               // `round` is absent on rows seeded before provenance existed.
-              `${tours ? `T${row.round ?? row.index + 1} ` : ""}${row.weight}×${row.reps}`,
+              `${tours ? `T${row.round ?? row.index + 1} ` : ""}${formatSet(row)}`,
           )
           .join(" · ")}
       </span>
@@ -978,7 +1127,7 @@ function History({ date }: { date: string }) {
                         <li key={exercise.name} className="flex gap-3 py-0.5">
                           <span className="min-w-0 truncate">{exercise.name}</span>
                           <span className="ml-auto shrink-0 tabular-nums">
-                            {exercise.sets.map((set) => `${set.weight}×${set.reps}`).join(" · ")}
+                            {exercise.sets.map(formatSet).join(" · ")}
                           </span>
                         </li>
                       ))
@@ -1108,7 +1257,7 @@ function SetChip({
         {row.index + 1}
       </span>
       <span className="text-[10px] opacity-80 tabular-nums">
-        {row.completed ? `${row.weight}×${row.reps}` : "—"}
+        {row.completed ? formatSet(row) : "—"}
       </span>
     </Button>
   );

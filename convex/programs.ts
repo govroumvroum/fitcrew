@@ -114,8 +114,8 @@ export async function prefillFor(
   ctx: QueryCtx,
   userId: Id<"users">,
   exercises: { name: string }[],
-): Promise<{ name: string; weight: number; reps: number }[]> {
-  const out: { name: string; weight: number; reps: number }[] = [];
+): Promise<{ name: string; weight: number; reps: number; seconds?: number }[]> {
+  const out: { name: string; weight: number; reps: number; seconds?: number }[] = [];
   // Deduped: an exercise listed twice in a day is one lookup, not two.
   for (const name of new Set(exercises.map((exercise) => exercise.name))) {
     const previous = await ctx.db
@@ -124,7 +124,15 @@ export async function prefillFor(
       .order("desc")
       .filter((q) => q.eq(q.field("completed"), true))
       .first();
-    if (previous) out.push({ name, weight: previous.weight, reps: previous.reps });
+    // `seconds` rides along only when the last set was timed, so a reps
+    // exercise's entry keeps exactly the shape it always had.
+    if (previous)
+      out.push({
+        name,
+        weight: previous.weight,
+        reps: previous.reps,
+        ...(previous.seconds !== undefined && { seconds: previous.seconds }),
+      });
   }
   return out;
 }

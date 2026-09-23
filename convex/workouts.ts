@@ -161,12 +161,16 @@ export const history = query({
       for (const stat of statsByExercise(sets).values()) volume += stat.volume;
 
       let done = 0;
-      const byExercise = new Map<string, { weight: number; reps: number }[]>();
+      const byExercise = new Map<string, { weight: number; reps: number; seconds?: number }[]>();
       for (const set of sets) {
         if (!set.completed) continue;
         done += 1;
         const rows = byExercise.get(set.exerciseName) ?? [];
-        rows.push({ weight: set.weight, reps: set.reps });
+        rows.push({
+          weight: set.weight,
+          reps: set.reps,
+          ...(set.seconds !== undefined && { seconds: set.seconds }),
+        });
         byExercise.set(set.exerciseName, rows);
       }
 
@@ -222,6 +226,9 @@ export const start = mutation({
         circuit: v.optional(v.string()),
         slot: v.optional(v.string()),
         round: v.optional(v.number()),
+        // A timed set's prescribed work. Optional for the same reason as the
+        // circuit fields: the previous bundle never sends it.
+        seconds: v.optional(v.number()),
       }),
     ),
   },
@@ -296,13 +303,20 @@ export const start = mutation({
   },
 });
 
-/** One set check-off (or correction): the smallest write in the app. */
+/**
+ * One set check-off (or correction): the smallest write in the app.
+ *
+ * `seconds` is optional and only ever written when sent: the previous bundle
+ * doesn't know it exists, and a check-off from that tab must not wipe the
+ * duration of a timed set the current bundle wrote.
+ */
 export const logSet = mutation({
   args: {
     setId: v.id("sets"),
     completed: v.boolean(),
     weight: v.number(),
     reps: v.number(),
+    seconds: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const set = await ownSet(ctx, args.setId);
@@ -310,6 +324,7 @@ export const logSet = mutation({
       completed: args.completed,
       weight: args.weight,
       reps: args.reps,
+      ...(args.seconds !== undefined && { seconds: args.seconds }),
     });
     return null;
   },

@@ -14,6 +14,7 @@ export type SetLite = {
   weight: number;
   reps: number;
   completed: boolean;
+  seconds?: number;
 };
 export type PrType = "max_weight" | "max_reps" | "max_volume" | "est_1rm";
 
@@ -45,11 +46,16 @@ export type ExerciseStat = {
 /**
  * One session's sets folded per exercise. Sets that weren't checked off never
  * count — an unchecked set is a set that didn't happen.
+ *
+ * Nor does a timed set: 60 s of corde à sauter has no weight, no reps and no
+ * record to claim here. Its `reps` is already 0, so the reps guard alone would
+ * drop it; the `seconds` test says why, and survives a timed row that ever
+ * carries reps.
  */
 export function statsByExercise(sets: SetLite[]): Map<string, ExerciseStat> {
   const out = new Map<string, ExerciseStat>();
   for (const set of sets) {
-    if (!set.completed || set.reps <= 0) continue;
+    if (!set.completed || set.reps <= 0 || set.seconds !== undefined) continue;
     const stat = out.get(set.exerciseName) ?? {
       maxWeight: 0,
       maxReps: 0,

@@ -53,6 +53,12 @@ assert.equal(statsByExercise([]).size, 0);
 // An exercise with nothing completed doesn't appear at all.
 assert.equal(statsByExercise([set("Squat", 100, 5, false)].concat()).size, 0);
 
+// A timed set — 60 s of corde à sauter, stored 0 kg × 0 — claims nothing: no
+// stat, so no record of any type. Even one that somehow carries reps.
+const rope = { exerciseName: "Corde à sauter", weight: 0, reps: 0, completed: true, seconds: 60 };
+assert.equal(statsByExercise([rope, { ...rope, reps: 60 }]).size, 0);
+assert.deepEqual(prCandidates([rope, { ...rope, reps: 60 }]), []);
+
 // --- PR candidates -----------------------------------------------------------
 const candidates = prCandidates(session);
 const valueOf = (name: string, type: PrType) =>
