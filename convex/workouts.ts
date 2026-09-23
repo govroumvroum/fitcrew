@@ -338,7 +338,6 @@ export const addSet = mutation({
     index: v.number(),
     weight: v.number(),
     reps: v.number(),
-    seconds: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
@@ -351,7 +350,6 @@ export const addSet = mutation({
       index: args.index,
       weight: args.weight,
       reps: args.reps,
-      ...(args.seconds !== undefined && { seconds: args.seconds }),
       completed: false,
     });
   },
