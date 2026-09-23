@@ -9,7 +9,7 @@ import { costUsdFrom } from "./aiUsage";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 /** One edit swaps the vision model everywhere. */
-export const VISION_MODEL = "openai/gpt-5.6-luna";
+export const VISION_MODEL = "openai/gpt-6-luna";
 
 const source = v.union(v.literal("apple_health"), v.literal("zepp"), v.literal("mi_fitness"));
 
