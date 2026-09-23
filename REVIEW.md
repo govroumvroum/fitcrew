@@ -27,3 +27,6 @@
 - Keep a security guard's declared boundary honest: distinguish hostname checks from DNS-resolution guarantees, and do not expand a deliberately scoped hostname check into a different mechanism without evidence that scope requires it. (PR #100)
 - Treat generated API artifacts as deployment-sensitive: verify generated references resolve to tracked source, and revert unrelated regeneration or shared-environment noise from the PR. (PR #100)
 - Keep operation-level lifecycle indicators separate from per-part rendering progress when their UX semantics differ; a stable “still working” signal should not be driven by a transient animation hook that resets between updates. (PR #101)
+- For restartable effects that track progress in refs, enumerate restart-while-running against the previous effect's stale-closure cleanup; a ref reset in the start handler loses to that cleanup, so flag the fresh start and consume it in the next effect body after cleanup. (PR #106)
+- When a module claims to be the single swap point for a literal, grep for duplicate literals or parallel exports and route every consumer through it. (PR #108)
+- Do not carry unused optional mutation arguments for a future caller; add them in the same PR that teaches the caller to send them. (PR #106)
