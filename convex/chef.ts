@@ -45,7 +45,7 @@ import { CONTEXT_OPTIONS, languageModel } from "./model";
 import type { Macros, PlannedMeal } from "./nutrition";
 import { shift, weekStart } from "./progress";
 import { KICKOFF, CHEF_ATTACHMENTS, isSentinel } from "./sentinels";
-import { emptyMessages, messagesAccess } from "./threadAccess";
+import { emptyMessages, greetIfExists, messagesAccess } from "./threadAccess";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 // ---------------------------------------------------------------------------
@@ -750,11 +750,18 @@ export const send = action({
 
 export const greet = action({
   args: { threadId: v.string(), today: v.string() },
-  handler: async (ctx, args) => {
-    await stream(ctx, args.threadId, args.today, {
-      messages: [{ role: "user", content: KICKOFF }],
+  handler: async (ctx, args): Promise<null> => {
+    // A thread deleted a moment ago still reads as empty, so the client greets
+    // it: skip instead of throwing (see `greetIfExists`). `send` still throws.
+    const { user } = await ctx.runQuery(internal.chef.streamContext, {});
+    const thread = await ctx.runQuery(components.chefAgent.threads.getThread, {
+      threadId: args.threadId,
     });
-    return null;
+    return await greetIfExists(thread, user._id, () =>
+      stream(ctx, args.threadId, args.today, {
+        messages: [{ role: "user", content: KICKOFF }],
+      }),
+    );
   },
 });
 

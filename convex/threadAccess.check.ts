@@ -4,7 +4,7 @@
  * Run: `bun convex/threadAccess.check.ts`
  */
 import assert from "node:assert/strict";
-import { emptyMessages, messagesAccess } from "./threadAccess";
+import { emptyMessages, greetIfExists, messagesAccess } from "./threadAccess";
 
 // Missing → nothing to show, not a throw: the client still subscribes to a
 // thread for a moment after deleting it, and a throw is the app's error page.
@@ -34,5 +34,20 @@ assert.deepEqual(emptyMessages({ kind: "deltas", cursors: [{ streamId: "s", curs
   kind: "deltas",
   deltas: [],
 });
+
+// `greet` on a gone thread: skipped, not thrown — the client greets whatever
+// reads as empty, and a deleted thread does for a moment after the delete.
+let streamed = 0;
+const run = async () => {
+  streamed++;
+};
+assert.equal(await greetIfExists(null, "u1", run), null);
+assert.equal(streamed, 0);
+// Mine → greeted.
+assert.equal(await greetIfExists({ userId: "u1" }, "u1", run), null);
+assert.equal(streamed, 1);
+// Someone else's → still throws, and nothing is streamed into it.
+await assert.rejects(greetIfExists({ userId: "u2" }, "u1", run), /Conversation introuvable/);
+assert.equal(streamed, 1);
 
 console.log("threadAccess ok");

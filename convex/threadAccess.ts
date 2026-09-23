@@ -42,3 +42,23 @@ export function emptyMessages(
       : { kind: "deltas", deltas: [] };
   return { page: [], isDone: true, continueCursor: "", streams };
 }
+
+/**
+ * `greet` for a thread that may already be gone. The client greets an empty
+ * thread, and a deleted one reads as empty (above) — so right after deleting the
+ * open conversation, or on a stale `?thread=`, it greets a thread that no longer
+ * exists. It can't tell "empty" from "gone", so the answer is here: skip, return
+ * `null`, no toast on a delete that worked.
+ *
+ * Someone else's thread still throws, before anything runs. `run` streams the
+ * greeting and keeps its own `authorize`.
+ */
+export async function greetIfExists(
+  thread: Pick<ThreadDoc, "userId"> | null,
+  userId: string,
+  run: () => Promise<void>,
+): Promise<null> {
+  if (messagesAccess(thread, userId) === "missing") return null;
+  await run();
+  return null;
+}
