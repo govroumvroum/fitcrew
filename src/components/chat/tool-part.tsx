@@ -33,14 +33,14 @@ export type ToolPart = { type: string; state: string; input?: unknown; output?: 
  * `output-error`. Without this the row read "Page lue" in success green over a
  * 429.
  */
-export const toolErrored = (tool: ToolPart) =>
+const toolErrored = (tool: ToolPart) =>
   Boolean((tool.output as { error?: string } | null)?.error);
 
 /**
  * Copy for a tool with no entry in `toolLabels`. A tool added to the backend and
  * forgotten here still shows something rather than nothing.
  */
-export const FALLBACK: AgentToolLabel = {
+const FALLBACK: AgentToolLabel = {
   icon: WrenchIcon,
   pending: "Un instant…",
   done: "C'est fait.",

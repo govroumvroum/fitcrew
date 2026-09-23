@@ -47,7 +47,8 @@ export class ImageAttachments implements AttachmentAdapter {
    *  the images, so the user can retry. */
   async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
     const storageId = await this.upload(attachment.file);
-    this.held.delete(attachment.id);
+    // Still held: if another image of the same message fails, the composer
+    // keeps all the tiles, and the limit has to keep counting them.
     this.uploaded.set(attachment.id, storageId);
     return { ...attachment, status: { type: "complete" }, content: [] };
   }
@@ -56,10 +57,12 @@ export class ImageAttachments implements AttachmentAdapter {
     this.held.delete(attachment.id);
   }
 
-  /** Read once by `onNew`, then forgotten. */
+  /** Read once by `onNew`, then forgotten — the message went out, so its
+   *  images stop counting against the limit. */
   storageId(attachmentId: string) {
     const id = this.uploaded.get(attachmentId);
     this.uploaded.delete(attachmentId);
+    this.held.delete(attachmentId);
     return id;
   }
 }
