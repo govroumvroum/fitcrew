@@ -26,22 +26,55 @@ Convex agent skills for common tasks can be installed by running
 
 When creating or rewriting a GitHub issue, read `.agents/skills/issue/SKILL.md` first. It defines the research process and the quality bar for decision-ready issues, and should be used with the templates in `.github/ISSUE_TEMPLATE/`.
 
-# `src/components/ai-elements/` is vendored — a resync overwrites it
+# `src/components/assistant-ui/` is vendored — a resync overwrites it
 
-Those files come from the AI Elements registry, so anything we change in them is
-lost the next time they're pulled. Two edits are currently carried there and will
-need redoing after a resync:
+The Coach and Chef chat runs on [assistant-ui](https://www.assistant-ui.com). The
+files in `src/components/assistant-ui/` were copied from its registry, **Base UI
+flavor** (`components.json` has `"style": "base-nova"` and the `@assistant-ui`
+registry), so `assistant-ui add --overwrite` / `update` replaces them wholesale.
+Each one opens with a French header saying what it changed; a resync loses all of
+it, so re-apply it by hand:
 
-- the `PromptInputCommand*` wrappers and their `@/components/ui/command` import
-  were removed — `command.tsx` is deleted, so a resync brings back an import that
-  resolves to nothing;
-- `asChild` on triggers, `onSelect` on menu items and `openDelay`/`closeDelay` on
-  hover cards are Radix-era props. Our `src/components/ui/*` wrappers absorb them
-  and map them onto Base UI, so vendored code keeps compiling — don't "fix" it by
-  editing `ai-elements/`, extend the wrapper instead.
+- `thread.tsx` — translated to French; one `ThreadConfigContext` (placeholder,
+  attach label, « réfléchit… » copy, `Text` and `ToolFallback` slots,
+  `aboveMessages`, `messagesClassName`) so Coach and Chef share the file; trimmed
+  to what the chat has (no welcome, suggestions, action bars, edit, branches,
+  dictation, voice, reasoning, file/image parts, stop button — the registry's
+  `ActionBarMorePrimitive` is a **Radix** menu); tools never grouped;
+  `indicator="empty"`; `autoScroll` forced on the `turnAnchor="top"` viewport;
+  `role="log"`; the previous bubble/`text-sm`/95 % layout.
+- `attachment.tsx` — translated; `ComposerAddAttachment` takes its label as a
+  prop and shows the image icon; `uploadState` no longer reads
+  `message.submission`, which `@assistant-ui/react` 0.15.21 doesn't expose yet
+  (type error).
+- `use-attachment-src.ts` — the registry's `hooks/use-attachment-src` moved next
+  to its only consumer, rewritten without `zustand`'s `useShallow`.
+- `tooltip-icon-button.tsx` — header only.
 
-The failure is loud either way (module not found, or a type error), but only
-obvious if you know it was deliberate.
+Not vendored: the registry's `markdown-text`, `tool-fallback`, `tool-group`,
+`reasoning`, `file`, `image` and `follow-up-suggestions`. Text goes through our
+Streamdown `StreamedText` (`chat/message-text.tsx`, #101) and every tool through
+`chat/tool-part.tsx`. A `thread` resync brings their imports back.
+
+**The CLI will also try to overwrite `src/components/ui/*`** (`button`,
+`skeleton`, `tooltip`, `dialog`…). Those carry our Base UI shims — never accept.
+After any `add`, run `git diff --stat src/components/ui` and restore what it
+touched.
+
+`@assistant-ui/react` depends on `radix-ui` whatever the flavor, so Radix sits in
+`node_modules`. No file in `src/` may import it (`base-ui-parts.check.tsx`
+asserts it), and no Radix overlay may reach the app — two overlay families fight
+over scroll lock and focus (#69).
+
+`makeAssistantToolUI` is deprecated in 0.15 in favour of `defineToolkit`; it's
+kept on purpose, in `chat/tool-part.tsx` only, to switch at the same time as
+airsoftone.
+
+# Radix-era props on `src/components/ui/*`
+
+`asChild` on triggers and `onSelect` on menu items are Radix-era props, still
+written by `sidebar.tsx` and `chat/thread-sidebar.tsx`. Our wrappers absorb them
+and map them onto Base UI — don't "fix" a caller, extend the wrapper instead.
 
 # Migrations
 
