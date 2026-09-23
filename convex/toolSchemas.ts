@@ -8,7 +8,11 @@ import { z } from "zod";
 export const zExercise = z.object({
   name: z.string().describe("Nom français de l'exercice, sans le nombre de séries"),
   sets: z.number().int().min(1).max(10),
-  reps: z.string().describe('"8", "8-12", "AMRAP", "12 par jambe"…'),
+  reps: z
+    .string()
+    .describe(
+      '"8", "8-12", "AMRAP", "12 par jambe"… Pour un exercice au temps, la même durée écrite pour le user : "60 s".',
+    ),
   restSeconds: z.number().int().min(0).max(600),
   notes: z.string().nullable().describe("Tempo ou consigne courte, null si rien à dire"),
   circuit: z
@@ -31,6 +35,17 @@ export const zExercise = z.object({
     .nullish()
     .describe(
       "Repos entre deux tours du circuit, en secondes. Même valeur sur tous les exercices du circuit. null hors circuit.",
+    ),
+  // nullish like the circuit fields: a program the model wrote before this field
+  // existed still parses, and so does a card replayed from an old thread.
+  durationSec: z
+    .number()
+    .int()
+    .min(5)
+    .max(3600)
+    .nullish()
+    .describe(
+      "Durée d'UNE série en secondes, pour un exercice au temps (corde à sauter, gainage, rameur, vélo…) : la séance lance un chrono au lieu de compter des reps. null pour un exercice en répétitions.",
     ),
 });
 

@@ -1,6 +1,14 @@
 /** Self-check for prescription.ts. Run: `bun src/components/workout/prescription.check.ts` */
 import assert from "node:assert/strict";
-import { defaultReps, rowsOf, seedSets, sessionSteps, workingValues, type SetRow } from "./prescription";
+import {
+  defaultReps,
+  formatSet,
+  rowsOf,
+  seedSets,
+  sessionSteps,
+  workingValues,
+  type SetRow,
+} from "./prescription";
 
 assert.equal(defaultReps("8"), 8);
 assert.equal(defaultReps("8-12"), 8);
@@ -48,6 +56,85 @@ assert.deepEqual(
 
 // A prefill entry for an exercise that isn't in the day is ignored, not appended.
 assert.deepEqual(seedSets([], [{ name: "Squat", weight: 80, reps: 6 }]), []);
+
+// ── Timed exercises ─────────────────────────────────────────────────────────
+
+// « Corde à sauter 3×60 s »: 0 kg × 0 reps, the work in `seconds`, and nothing
+// parsed out of the "60 s" display text.
+const rope = { name: "Corde à sauter", sets: 2, reps: "60 s", durationSec: 60 };
+assert.deepEqual(seedSets([rope], []), [
+  { exerciseName: "Corde à sauter", index: 0, weight: 0, reps: 0, seconds: 60 },
+  { exerciseName: "Corde à sauter", index: 1, weight: 0, reps: 0, seconds: 60 },
+]);
+// Last time's seconds win over the prescription, like last time's load does…
+assert.equal(
+  seedSets([rope], [{ name: "Corde à sauter", weight: 0, reps: 0, seconds: 75 }])[0].seconds,
+  75,
+);
+// …but a last time done in reps is no duration: 12 reps would become a 12 s set.
+assert.deepEqual(seedSets([rope], [{ name: "Corde à sauter", weight: 0, reps: 12 }])[0], {
+  exerciseName: "Corde à sauter",
+  index: 0,
+  weight: 0,
+  reps: 0,
+  seconds: 60,
+});
+
+// The working seconds follow the same ladder as the load: done this session,
+// else seeded, else the prescription.
+const timedRow = (index: number, seconds: number | undefined, completed: boolean): SetRow => ({
+  index,
+  weight: 0,
+  reps: 0,
+  completed,
+  ...(seconds !== undefined && { seconds }),
+});
+assert.deepEqual(workingValues([], "60 s", 60), { weight: 0, reps: 0, seconds: 60 });
+assert.deepEqual(workingValues([timedRow(0, 45, false), timedRow(1, 45, false)], "60 s", 60), {
+  weight: 0,
+  reps: 0,
+  seconds: 45,
+});
+assert.deepEqual(workingValues([timedRow(0, 50, true), timedRow(1, 45, false)], "60 s", 60), {
+  weight: 0,
+  reps: 0,
+  seconds: 50,
+});
+// A row seeded by the previous bundle carries reps and no seconds: the clock
+// runs the prescription, not "60 reps".
+assert.equal(workingValues([row(0, 0, 60, false)], "60 s", 60).seconds, 60);
+// And a reps exercise never grows a `seconds` key — that's the shape it always had.
+assert.equal("seconds" in workingValues([row(0, 60, 10, false)], "8"), false);
+
+// A timed set reads as its duration, everywhere a set is shown.
+assert.equal(formatSet({ weight: 0, reps: 0, seconds: 60 }), "60 s");
+assert.equal(formatSet({ weight: 80, reps: 8 }), "80×8");
+assert.equal(formatSet({ weight: 0, reps: 12 }), "0×12");
+
+// In a circuit, a timed exercise is one more occurrence: one row per tour, with
+// provenance AND seconds, and the walk rotates through it like any other.
+const timedCircuit = [
+  { name: "Pompes", sets: 2, reps: "10", circuit: "A", slot: "a1" },
+  { name: "Corde à sauter", sets: 2, reps: "45 s", circuit: "A", slot: "a2", durationSec: 45 },
+];
+const timedCircuitRows = seedSets(timedCircuit, []);
+assert.deepEqual(timedCircuitRows[2], {
+  exerciseName: "Corde à sauter",
+  index: 0,
+  weight: 0,
+  reps: 0,
+  seconds: 45,
+  circuit: "A",
+  round: 1,
+  slot: "a2",
+});
+assert.deepEqual(
+  sessionSteps(
+    timedCircuit,
+    timedCircuitRows.map((set) => ({ ...set, completed: false })),
+  ).map((step) => `${step.at}#${step.row.round}`),
+  ["0#1", "1#1", "0#2", "1#2"],
+);
 
 // ── Circuits ────────────────────────────────────────────────────────────────
 

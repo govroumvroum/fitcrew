@@ -309,6 +309,8 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
                   circuit: "B",
                   slot: "B2",
                   restBetweenRoundsSeconds: 60,
+                  // Timed: the séance runs a 45 s clock. `reps` is its label.
+                  durationSec: 45,
                 },
                 {
                   name: "Étirements",

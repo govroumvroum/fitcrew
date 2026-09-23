@@ -54,6 +54,7 @@ type ModelExercise = {
   circuit?: string | null;
   slot?: string | null;
   restBetweenRoundsSeconds?: number | null;
+  durationSec?: number | null;
 };
 type ModelDay = { name: string; exercises: ModelExercise[] };
 type Days = Doc<"programs">["days"];
@@ -65,6 +66,7 @@ export function toExercise({
   circuit,
   slot,
   restBetweenRoundsSeconds,
+  durationSec,
   ...rest
 }: ModelExercise): Exercise {
   return {
@@ -73,6 +75,7 @@ export function toExercise({
     ...(circuit ? { circuit } : {}),
     ...(slot ? { slot } : {}),
     ...(restBetweenRoundsSeconds != null ? { restBetweenRoundsSeconds } : {}),
+    ...(durationSec != null ? { durationSec } : {}),
   };
 }
 
@@ -324,7 +327,13 @@ export const exerciseContext = internalQuery({
       prescription,
       goals: user.onboarding?.goals ?? [],
       limitations: user.onboarding?.limitations ?? null,
-      recentSets: recentSets.map((s) => ({ weight: s.weight, reps: s.reps, done: s.completed })),
+      // A timed set is stored 0 kg × 0: without its seconds the model reads
+      // "nothing done" into a minute of corde à sauter.
+      recentSets: recentSets.map((s) =>
+        s.seconds === undefined
+          ? { weight: s.weight, reps: s.reps, done: s.completed }
+          : { weight: s.weight, reps: s.reps, seconds: s.seconds, done: s.completed },
+      ),
       prs: prs.map((p) => ({ type: p.type, value: p.value, date: p.date })),
     };
   },
@@ -831,6 +840,7 @@ RÈGLES PROGRAMME (quand tu appelles generate_program)
 - L'ÉCHAUFFEMENT N'EST JAMAIS UN EXERCICE de la liste. Pas de ligne "Échauffement", "Mobilité" ou "Cardio d'échauffement" dans \`exercises\`. Si tu veux en parler, mets-le dans \`progressionRules\` ou dans ton message.
 - Respecte le matériel dispo, la durée de séance et les limitations. Un exercice contre-indiqué est une faute.
 - Si le user fait un sport, le programme doit le servir (boxe = explosivité, gainage, épaules solides, pas de jambes détruites la veille d'un sparring).
+- Exercice au TEMPS (corde à sauter, gainage, rameur, vélo, chaise…) : \`durationSec\` = la durée d'une série en secondes, et \`reps\` = cette même durée écrite pour lui (« 60 s »). « Corde à sauter 3×60 s », c'est \`sets: 3\`, \`durationSec: 60\`, \`reps: "60 s"\` — jamais \`reps: "60"\`, qui lui ferait compter 60 répétitions. La séance lui lance un chrono. \`durationSec: null\` pour tout exercice en répétitions.
 - Après \`generate_program\`, résume le programme jour par jour dans ton message : le user ne voit que ce que tu écris.
 
 CIRCUITS (enchaîner des exercices et répéter le bloc)

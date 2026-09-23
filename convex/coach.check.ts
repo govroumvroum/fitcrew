@@ -264,6 +264,41 @@ Progression : +2,5 kg
 Deload : non défini`,
 );
 
+// (a') A timed exercise: « corde à sauter 3×60 s » is `durationSec: 60`, and the
+// null the strict schema returns for every other exercise stores nothing at all.
+const timedDays = toDays([
+  {
+    name: "Jour 1 — Cardio",
+    exercises: [
+      ex("Corde à sauter", { sets: 3, reps: "60 s", restSeconds: 60, durationSec: 60 }),
+      ex("Pompes", { durationSec: null }),
+    ],
+  },
+]);
+assert.deepEqual(timedDays[0].exercises, [
+  { name: "Corde à sauter", sets: 3, reps: "60 s", restSeconds: 60, durationSec: 60 },
+  { name: "Pompes", sets: 4, reps: "10", restSeconds: 90 },
+]);
+// The schema takes it, and still takes an exercise that never heard of it.
+assert.equal(
+  zGenerateProgram.safeParse({
+    name: "P",
+    progressionRules: "x",
+    deloadEveryWeeks: null,
+    days: [
+      {
+        name: "J",
+        exercises: [
+          ex("Corde à sauter", { reps: "60 s", durationSec: 60 }),
+          ex("Squat"),
+          { name: "Dips", sets: 3, reps: "8", restSeconds: 60, notes: null },
+        ],
+      },
+    ],
+  }).success,
+  true,
+);
+
 // (b) A circuit survives generate -> toDays -> render: label, order, tours, and
 // the two rest kinds, which a reader must not confuse.
 const circuitDay = {

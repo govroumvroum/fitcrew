@@ -37,6 +37,12 @@ export const programExercise = v.object({
   // No `rounds` field on purpose: `sets` is the round count (one set per round),
   // identical across the circuit. A second source of truth would drift, and
   // totalSets/duration arithmetic keeps working untouched.
+  //
+  // Set = the exercise is done against the clock (corde à sauter, gainage,
+  // rameur): one set is `durationSec` of work, the séance runs it on a timer, and
+  // `reps` degrades to display text ("60 s") that no code parses. Absent = reps,
+  // which is every exercise written before this field existed.
+  durationSec: v.optional(v.number()),
 });
 
 export const challengeMetric = v.union(
@@ -216,6 +222,10 @@ export default defineSchema({
     circuit: v.optional(v.string()),
     slot: v.optional(v.string()), // the occurrence inside the day, see programExercise
     round: v.optional(v.number()), // 1-based tour number
+    // A timed set's work, in seconds. Present = timed, and then `weight` and
+    // `reps` are both 0: nothing was lifted or counted, so every weight × reps
+    // reader (volume, 1RM, records) sees a set that adds nothing, not a fake one.
+    seconds: v.optional(v.number()),
   })
     .index("by_workout", ["workoutId"])
     .index("by_user_and_exercise", ["userId", "exerciseName"]),
