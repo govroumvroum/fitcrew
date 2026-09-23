@@ -25,8 +25,7 @@ function DropdownMenuPortal({
 
 /**
  * `asChild` kept on purpose: `chat/thread-sidebar.tsx` wraps a
- * `SidebarMenuAction` in it, and vendored `ai-elements/prompt-input.tsx` wraps a
- * button. It maps onto Base UI's `render`; `children: undefined` is what stops
+ * `SidebarMenuAction` in it. It maps onto Base UI's `render`; `children: undefined` is what stops
  * the child being rendered twice.
  */
 function DropdownMenuTrigger({
@@ -103,8 +102,8 @@ function DropdownMenuGroup({
 /**
  * Radix's `onSelect` is Base UI's `onClick`, and the escape hatch changed with
  * it: on Radix, `event.preventDefault()` inside `onSelect` kept the menu open;
- * on Base UI it's `event.preventBaseUIHandler()`. Vendored
- * `ai-elements/prompt-input.tsx` writes the Radix form, so translate it here —
+ * on Base UI it's `event.preventBaseUIHandler()`. `chat/thread-sidebar.tsx`
+ * writes the Radix form, so translate it here —
  * the handler gets the native event, and if it prevented the default we hold the
  * menu open the Base UI way.
  */

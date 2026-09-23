@@ -16,14 +16,16 @@
  * is covered below through `DialogFooter showCloseButton`, which is the same
  * `<Dialog.Close render={<Button />}>` shape outside a portal.
  *
- * Same limitation for the four floating components (select, dropdown-menu,
- * tooltip, hover-card): everything below the portal — positioner, popup, list —
+ * Same limitation for the three floating components (select, dropdown-menu,
+ * tooltip): everything below the portal — positioner, popup, list —
  * is invisible to `renderToStaticMarkup`. What matters most there is the CSS
  * custom properties the popups constrain themselves with, so those are checked by
  * reading the class strings out of the source instead.
  */
 import assert from "node:assert";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { Dialog, DialogFooter } from "./dialog";
@@ -118,12 +120,7 @@ assert.equal(footer.match(/>Close</g)?.length, 1, footer);
 const source = (file: string) =>
   readFileSync(new URL(file, import.meta.url), "utf8");
 
-for (const file of [
-  "select.tsx",
-  "dropdown-menu.tsx",
-  "tooltip.tsx",
-  "hover-card.tsx",
-]) {
+for (const file of ["select.tsx", "dropdown-menu.tsx", "tooltip.tsx"]) {
   const text = source(file);
   // `(--radix-` is the Tailwind arbitrary-property form; prose about the old
   // names is fine, a class still reading one is not.
@@ -142,13 +139,8 @@ assert.match(source("dropdown-menu.tsx"), /max-h-\(--available-height\)/);
 assert.match(source("select.tsx"), /min-w-\(--anchor-width\)/);
 assert.match(source("select.tsx"), /h-\(--anchor-height\)/);
 assert.match(source("dropdown-menu.tsx"), /w-\(--anchor-width\)/);
-// transform-origin ← --radix-*-content-transform-origin, on all four
-for (const file of [
-  "select.tsx",
-  "dropdown-menu.tsx",
-  "tooltip.tsx",
-  "hover-card.tsx",
-]) {
+// transform-origin ← --radix-*-content-transform-origin, on all three
+for (const file of ["select.tsx", "dropdown-menu.tsx", "tooltip.tsx"]) {
   assert.match(source(file), /origin-\(--transform-origin\)/, file);
 }
 // Radix's tooltip never said `data-state="open"`, so `data-[state=delayed-open]:`
@@ -160,7 +152,7 @@ assert.equal(
 );
 assert.match(source("tooltip.tsx"), /data-instant:animate-none/);
 // The positioner is the portalled element, so it is what has to stack.
-for (const file of ["select.tsx", "dropdown-menu.tsx", "tooltip.tsx", "hover-card.tsx"]) {
+for (const file of ["select.tsx", "dropdown-menu.tsx", "tooltip.tsx"]) {
   assert.match(source(file), /Positioner\s+className="z-50"/, file);
 }
 
@@ -209,7 +201,7 @@ assert.equal(withItems.match(/<svg/g)?.length, 1, withItems);
 /**
  * --- `asChild` on the two triggers that still need it.
  *
- * `sidebar.tsx` and vendored `ai-elements/*` write `<TooltipTrigger asChild>` and
+ * `sidebar.tsx` and `thread-sidebar.tsx` write `<TooltipTrigger asChild>` and
  * `<DropdownMenuTrigger asChild>`. It maps onto Base UI's `render`, and the thing
  * that breaks is the child appearing twice — once as the element, once as its own
  * child.
@@ -227,5 +219,28 @@ assert.equal(tooltipTrigger.match(/<button/g)?.length, 1, tooltipTrigger);
 assert.equal(tooltipTrigger.match(/Aide/g)?.length, 1, tooltipTrigger);
 assert.match(tooltipTrigger, /data-slot="tooltip-trigger"/, tooltipTrigger);
 assert.match(tooltipTrigger, /class="[^"]*size-8/, tooltipTrigger);
+
+/**
+ * --- No Radix anywhere in `src/`.
+ *
+ * `@assistant-ui/react` depends on `radix-ui`, so it sits in node_modules and an
+ * auto-import or a registry resync can bring it back without anyone deciding to.
+ * Two overlay families in one app fight over scroll lock and focus trapping —
+ * #69 is why this app is Base UI only.
+ */
+const srcRoot = fileURLToPath(new URL("../../", import.meta.url));
+const radixImports: string[] = [];
+(function walk(dir: string) {
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) walk(path);
+    else if (/\.(tsx?|css)$/.test(name) && !name.endsWith(".check.tsx")) {
+      if (/from ["'](radix-ui|@radix-ui\/[^"']+)["']/.test(readFileSync(path, "utf8"))) {
+        radixImports.push(path.slice(srcRoot.length));
+      }
+    }
+  }
+})(srcRoot);
+assert.deepEqual(radixImports, [], `radix-ui imported from src/: ${radixImports.join(", ")}`);
 
 console.log("ok — Base UI parts emit the attributes our classes key on");

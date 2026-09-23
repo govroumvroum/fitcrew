@@ -17,6 +17,6 @@
     ".next/**",
     "next-env.d.ts",
     "src/components/ui/**",
-    "src/components/ai-elements/**"
+    "src/components/assistant-ui/**"
   ]
 }

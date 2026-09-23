@@ -41,6 +41,7 @@ import {
   zSwapExercise,
 } from "./toolSchemas";
 import { KICKOFF, COACH_ATTACHMENTS, isSentinel } from "./sentinels";
+import { emptyMessages, greetIfExists, messagesAccess } from "./threadAccess";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 // ---------------------------------------------------------------------------
@@ -1410,7 +1411,12 @@ export const listMessages = query({
   },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
-    await authorize(ctx, args.threadId, user._id);
+    // A deleted thread, or a stale `?thread=` link, reads as empty rather than
+    // crashing the page; someone else's still throws (see `threadAccess.ts`).
+    const thread = await ctx.runQuery(components.agent.threads.getThread, {
+      threadId: args.threadId,
+    });
+    if (messagesAccess(thread, user._id) === "missing") return emptyMessages(args.streamArgs);
     const paginated = await listUIMessages(ctx, components.agent, args);
     const streams = await syncStreams(ctx, components.agent, args);
     // Machine-generated turns are persisted as user messages; without this they
@@ -1473,11 +1479,18 @@ export const send = action({
 
 export const greet = action({
   args: { threadId: v.string(), today: v.string() },
-  handler: async (ctx, args) => {
-    await stream(ctx, args.threadId, args.today, {
-      messages: [{ role: "user", content: KICKOFF }],
+  handler: async (ctx, args): Promise<null> => {
+    // A thread deleted a moment ago still reads as empty, so the client greets
+    // it: skip instead of throwing (see `greetIfExists`). `send` still throws.
+    const { user } = await ctx.runQuery(internal.coach.streamContext, {});
+    const thread = await ctx.runQuery(components.agent.threads.getThread, {
+      threadId: args.threadId,
     });
-    return null;
+    return await greetIfExists(thread, user._id, () =>
+      stream(ctx, args.threadId, args.today, {
+        messages: [{ role: "user", content: KICKOFF }],
+      }),
+    );
   },
 });
 
