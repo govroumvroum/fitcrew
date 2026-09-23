@@ -1,6 +1,15 @@
 /** Self-check for rest-timer.tsx's drain seek and cues. Run: `bun src/components/workout/rest-timer.check.ts` */
 import assert from "node:assert/strict";
-import { drainSeek, pendingCues, soundedBy } from "./rest-timer";
+import {
+  closeSegment,
+  drainSeek,
+  NEW_LEDGER,
+  openSegment,
+  pendingCues,
+  restartLedger,
+  soundedBy,
+  type CueLedger,
+} from "./rest-timer";
 
 // A 60 s rest started at T, so `endAt` is T+60s and never moves again while it
 // runs. `now` is only injectable here — the app calls drainSeek without it, which
@@ -93,5 +102,30 @@ assert.deepEqual(
 assert.equal(soundedBy(end, T, 1), 1);
 assert.equal(soundedBy(end, end), 0);
 assert.equal(soundedBy(end, T), Infinity);
+
+// --- restart mid-rest ---------------------------------------------------------
+// Validating a set during the previous rest's last seconds calls `start()` while
+// it still runs. React's order is: `start()` (the handler), re-render, the OLD
+// segment's cleanup, the new segment's body. Replayed on the ledger, the new
+// rest must still owe all four cues, whatever the old one had sounded.
+const restart = (leftOnOld: number) => {
+  const oldEnd = T + 60_000;
+  const now = oldEnd - leftOnOld;
+  let ledger: CueLedger = openSegment(NEW_LEDGER); // old rest's body
+  ledger = restartLedger(ledger); // start(60) in the tap
+  ledger = closeSegment(ledger, oldEnd, now); // old cleanup, runs after it
+  ledger = openSegment(ledger); // new body
+  return pendingCues(now + 60_000, now, ledger.sounded).map(({ cue }) => cue);
+};
+assert.deepEqual(restart(2_500), [3, 2, 1, 0]); // was [2, 1, 0]
+assert.deepEqual(restart(1_500), [3, 2, 1, 0]); // was [0]
+assert.deepEqual(restart(10_000), [3, 2, 1, 0]);
+
+// …while a pause/resume inside ONE rest keeps what it sounded: no restart
+// pending, so the cleanup's fold is exactly what the next body reads.
+let paused: CueLedger = openSegment(restartLedger(NEW_LEDGER));
+paused = closeSegment(paused, end, end - 2_500);
+paused = openSegment(paused);
+assert.equal(paused.sounded, 3);
 
 console.log("rest-timer: ok");

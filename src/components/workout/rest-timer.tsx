@@ -61,6 +61,34 @@ export function soundedBy(endAt: number, now: number, sounded = Infinity) {
 }
 
 /**
+ * What the timer remembers about its cues between run segments. `fresh` is a
+ * restart that hasn't been opened yet.
+ *
+ * A flag and not a reset of `sounded` in `start()`, because of the order React
+ * runs things in: `start()` during a running rest re-renders, THEN runs the old
+ * segment's cleanup — which folds the old deadline's passed cues into `sounded`
+ * and would silence the new rest's 3/2/1 whenever you validate a set in the last
+ * three seconds of the previous one. The reset has to happen after that
+ * cleanup, and the next effect body is the first place that is.
+ */
+export type CueLedger = { sounded: number; fresh: boolean };
+
+export const NEW_LEDGER: CueLedger = { sounded: Infinity, fresh: false };
+
+/** `start()`: the next segment opened is a new rest. */
+export const restartLedger = (ledger: CueLedger): CueLedger => ({ ...ledger, fresh: true });
+
+/** The effect body, before scheduling: a pending restart wipes what's sounded. */
+export const openSegment = (ledger: CueLedger): CueLedger =>
+  ledger.fresh ? NEW_LEDGER : ledger;
+
+/** The effect cleanup: fold in whatever this segment has sounded by `now`. */
+export const closeSegment = (ledger: CueLedger, endAt: number, now: number): CueLedger => ({
+  ...ledger,
+  sounded: soundedBy(endAt, now, ledger.sounded),
+});
+
+/**
  * One context for the whole app, created lazily. iOS only lets a context make a
  * sound if it was created or resumed inside a user gesture, and a rest starts on
  * a tap — so `start()` and `toggle()` call this synchronously, from the handler,
@@ -141,9 +169,10 @@ export function useRestTimer(onEnd?: () => void): Timer {
   const [running, setRunning] = useState(false);
   const [endAt, setEndAt] = useState(0);
   const [pausedAt, setPausedAt] = useState(0);
-  // The lowest cue this rest has sounded; see `pendingCues`. A ref, because it's
-  // bookkeeping for the effect below and nothing renders it.
-  const sounded = useRef(Infinity);
+  // The lowest cue this rest has sounded, and whether a restart is pending; see
+  // `CueLedger`. A ref, because it's bookkeeping for the effect below and
+  // nothing renders it.
+  const ledger = useRef(NEW_LEDGER);
   // An effect event, so the caller's fresh closure every render doesn't become a
   // dep — a dep that changed at 1 Hz would restart the loop and reschedule the
   // cues on every digit.
@@ -163,7 +192,8 @@ export function useRestTimer(onEnd?: () => void): Timer {
   useEffect(() => {
     if (!running) return;
     let frame = 0;
-    const cancelCues = scheduleCues(endAt, sounded.current);
+    ledger.current = openSegment(ledger.current);
+    const cancelCues = scheduleCues(endAt, ledger.current.sounded);
     const step = () => {
       const left = Math.max(0, endAt - Date.now());
       setRemaining(Math.ceil(left / 1000));
@@ -183,13 +213,13 @@ export function useRestTimer(onEnd?: () => void): Timer {
       // a click. Past the deadline nothing's left to cancel but that one tone,
       // and it stops by itself.
       if (Date.now() < endAt) cancelCues();
-      sounded.current = soundedBy(endAt, Date.now(), sounded.current);
+      ledger.current = closeSegment(ledger.current, endAt, Date.now());
     };
   }, [running, endAt]);
 
   function start(seconds: number) {
     unlockAudio();
-    sounded.current = Infinity;
+    ledger.current = restartLedger(ledger.current);
     setEndAt(Date.now() + seconds * 1000);
     setPausedAt(0);
     setTotal(seconds);
