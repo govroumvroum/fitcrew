@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { PauseIcon, PlayIcon, XIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -32,26 +32,138 @@ type Timer = {
   stop: () => void;
 };
 
+// ── Sound ───────────────────────────────────────────────────────────────────
+
+/** The cues, in seconds left: a short tick at 3, 2 and 1, the long one at 0. */
+export const CUES = [3, 2, 1, 0] as const;
+
+/**
+ * The cues one run segment still owes, each with how far off it is, in ms.
+ *
+ * `sounded` is the lowest cue this rest has already played (Infinity: none yet).
+ * It's what keeps a cue from sounding twice across segments: `toggle()`
+ * re-anchors the deadline on the *whole* seconds left, so a pause at 2.5 s
+ * resumes on a fresh 3 s — and without it the "3" would tick again. Cues whose
+ * moment is already behind us are dropped, not played late: a tick that lands
+ * a second off the digits is worse than none.
+ *
+ * Pure and clock-injected for `rest-timer.check.ts`.
+ */
+export function pendingCues(endAt: number, now: number, sounded = Infinity) {
+  return CUES.filter((cue) => cue < sounded)
+    .map((cue) => ({ cue, in: endAt - cue * 1000 - now }))
+    .filter((pending) => pending.in >= 0);
+}
+
+/** `sounded`, advanced past every cue whose moment has come by `now`. */
+export function soundedBy(endAt: number, now: number, sounded = Infinity) {
+  return Math.min(sounded, ...CUES.filter((cue) => endAt - cue * 1000 <= now));
+}
+
+/**
+ * One context for the whole app, created lazily. iOS only lets a context make a
+ * sound if it was created or resumed inside a user gesture, and a rest starts on
+ * a tap — so `start()` and `toggle()` call this synchronously, from the handler,
+ * before anything is scheduled. Created later, from the effect, the first beep
+ * of every séance would be silent on the iOS PWA, which is the phone this is for.
+ */
+let audio: AudioContext | null = null;
+
+function unlockAudio() {
+  if (typeof AudioContext === "undefined") return;
+  audio ??= new AudioContext();
+  if (audio.state !== "running") audio.resume().catch(() => {});
+}
+
+/**
+ * One cue, synthesized: a triangle with a click-free envelope. The ticks are
+ * short and mid-pitched; zero is higher, louder and longer, so "go" reads
+ * without looking. No file to ship, preload or cache offline.
+ */
+function tone(ctx: AudioContext, cue: number, at: number): AudioNode[] {
+  const last = cue === 0;
+  const length = last ? 0.45 : 0.08;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "triangle";
+  osc.frequency.value = last ? 1320 : 880;
+  gain.gain.setValueAtTime(0, at);
+  gain.gain.linearRampToValueAtTime(last ? 0.6 : 0.35, at + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + length + 0.02);
+  return [osc, gain];
+}
+
+/**
+ * Schedules a segment's cues on the audio clock, all at once, and returns what
+ * cancels them. The audio clock, not setTimeout: a backgrounded tab throttles
+ * timers to a second or worse, and a tick a second late is a tick on the wrong
+ * digit. Scheduling waits on `resume()` so the offsets are measured from a clock
+ * that's actually moving — a suspended context's `currentTime` is frozen.
+ */
+function scheduleCues(endAt: number, sounded: number): () => void {
+  const ctx = audio;
+  // Never unlocked (no tap has started a rest yet) or no Web Audio at all.
+  if (!ctx) return () => {};
+  let live = true;
+  const nodes: AudioNode[] = [];
+  ctx
+    .resume()
+    .then(() => {
+      if (!live) return;
+      for (const pending of pendingCues(endAt, Date.now(), sounded)) {
+        nodes.push(...tone(ctx, pending.cue, ctx.currentTime + pending.in / 1000));
+      }
+    })
+    .catch(() => {});
+  // Disconnecting silences a cue whether it's still ahead or mid-sound, which is
+  // what a skip needs: passer le repos must not beep.
+  return () => {
+    live = false;
+    for (const node of nodes) node.disconnect();
+  };
+}
+
 /**
  * Countdown driven by requestAnimationFrame against a wall-clock deadline, so
  * it can't drift and doesn't need a setInterval that the browser throttles.
  * ponytail: rAF stops while the tab is hidden, so the display freezes — but
  * the deadline is a timestamp, so it's correct again the moment you look.
+ *
+ * `onEnd` fires once, when a run reaches zero — never on a skip. The séance's
+ * work timer validates its set there.
  */
-export function useRestTimer(): Timer {
+export function useRestTimer(onEnd?: () => void): Timer {
   const [remaining, setRemaining] = useState(0);
   const [total, setTotal] = useState(0);
   const [running, setRunning] = useState(false);
   const [endAt, setEndAt] = useState(0);
   const [pausedAt, setPausedAt] = useState(0);
+  // The lowest cue this rest has sounded; see `pendingCues`. A ref, because it's
+  // bookkeeping for the effect below and nothing renders it.
+  const sounded = useRef(Infinity);
+  // An effect event, so the caller's fresh closure every render doesn't become a
+  // dep — a dep that changed at 1 Hz would restart the loop and reschedule the
+  // cues on every digit.
+  const ended = useEffectEvent(() => onEnd?.());
 
   // The effect owns the rAF loop: starting is `setRunning(true)`, and cancelling
   // on pause or unmount is just the cleanup. No frame ref, no manual cancels
   // scattered through the callbacks, and no function that references itself.
   // No useCallback either — React Compiler memoizes these for us.
+  //
+  // The cues hang off the same effect, not the display loop: its deps move only
+  // at a start, pause or resume, so a re-render can't schedule a beep twice. And
+  // its cleanup is what cancels them — on a pause, a skip, an unmount, and when
+  // <Activity> hides the route: a hidden /seance has its effects torn down, so it
+  // can't beep for a rest you walked away from, and re-showing it schedules only
+  // what's still ahead.
   useEffect(() => {
     if (!running) return;
     let frame = 0;
+    const cancelCues = scheduleCues(endAt, sounded.current);
     const step = () => {
       const left = Math.max(0, endAt - Date.now());
       setRemaining(Math.ceil(left / 1000));
@@ -60,13 +172,24 @@ export function useRestTimer(): Timer {
       } else {
         setRunning(false);
         navigator.vibrate?.([120, 80, 120]);
+        ended();
       }
     };
     frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      // Except when the run is over: reaching zero is itself what runs this
+      // cleanup, a few ms into the long beep — cancelling then cut "go" down to
+      // a click. Past the deadline nothing's left to cancel but that one tone,
+      // and it stops by itself.
+      if (Date.now() < endAt) cancelCues();
+      sounded.current = soundedBy(endAt, Date.now(), sounded.current);
+    };
   }, [running, endAt]);
 
   function start(seconds: number) {
+    unlockAudio();
+    sounded.current = Infinity;
     setEndAt(Date.now() + seconds * 1000);
     setPausedAt(0);
     setTotal(seconds);
@@ -79,6 +202,9 @@ export function useRestTimer(): Timer {
       setPausedAt(Date.now());
       setRunning(false);
     } else if (remaining > 0) {
+      // A tap too, so it gets to unlock: iOS may have suspended the context
+      // while the rest sat paused.
+      unlockAudio();
       // Re-anchor the deadline: the clock kept moving while we were paused.
       setEndAt(Date.now() + remaining * 1000);
       setPausedAt(0);
@@ -255,21 +381,47 @@ function ToggleIcon({ running }: { running: boolean }) {
   );
 }
 
+/** What the bar's controls are called, per kind of countdown. */
+const WORDING = {
+  rest: {
+    label: "Repos",
+    over: "Repos terminé, go",
+    pause: "Mettre le repos en pause",
+    resume: "Reprendre le repos",
+    skip: "Passer le repos",
+  },
+  work: {
+    label: "Travail",
+    // Barely seen: the set validates on the same frame and the rest bar takes
+    // over. It's here so a reader never hears "Repos terminé" at the end of work.
+    over: "Série terminée",
+    pause: "Mettre le travail en pause",
+    resume: "Reprendre le travail",
+    skip: "Arrêter la série",
+  },
+};
+
 /**
  * `label` names the rest that's running — a circuit's rest between two tours is a
  * different thing from the rest between two of its exercises, and they're
  * routinely different durations. Defaults to plain "Repos", which is every
  * classic séance.
+ *
+ * `kind="work"` is the same bar running a timed set (corde à sauter, gainage):
+ * same deadline, same drain, same cues, only the words change.
  */
 export function RestTimerBar({
   timer,
   className,
-  label = "Repos",
+  label,
+  kind = "rest",
 }: {
   timer: Timer;
   className?: string;
   label?: string;
+  kind?: "rest" | "work";
 }) {
+  const words = WORDING[kind];
   const { remaining, total, running, endAt, pausedAt, toggle, stop } = timer;
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
@@ -284,9 +436,10 @@ export function RestTimerBar({
           {minutes}:{String(seconds).padStart(2, "0")}
         </span>
         {/* The only announcement of rest ending: the digits are aria-live="off"
-            (a per-second count is noise) and the buzz is silent to a reader. */}
+            (a per-second count is noise), the buzz is silent to a reader, and
+            the beeps are a tone with no words — they say "now", not "what". */}
         <span className="text-sm text-muted-foreground" aria-live="polite">
-          {remaining === 0 ? "Repos terminé, go" : label}
+          {remaining === 0 ? words.over : (label ?? words.label)}
         </span>
         <div className="ml-auto flex gap-2">
           <Button
@@ -297,7 +450,7 @@ export function RestTimerBar({
             // than a dimmed one.
             disabled={remaining === 0}
             onClick={toggle}
-            aria-label={running ? "Mettre le repos en pause" : "Reprendre le repos"}
+            aria-label={running ? words.pause : words.resume}
           >
             <ToggleIcon running={running} />
           </Button>
@@ -305,7 +458,7 @@ export function RestTimerBar({
             variant="outline"
             className="size-12 active:scale-[0.96]"
             onClick={stop}
-            aria-label="Passer le repos"
+            aria-label={words.skip}
           >
             <XIcon />
           </Button>
