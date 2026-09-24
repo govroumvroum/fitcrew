@@ -30,3 +30,7 @@
 - For restartable effects that track progress in refs, enumerate restart-while-running against the previous effect's stale-closure cleanup; a ref reset in the start handler loses to that cleanup, so flag the fresh start and consume it in the next effect body after cleanup. (PR #106)
 - When a module claims to be the single swap point for a literal, grep for duplicate literals or parallel exports and route every consumer through it. (PR #108)
 - Do not carry unused optional mutation arguments for a future caller; add them in the same PR that teaches the caller to send them. (PR #106)
+- When deriving filesystem paths from import.meta.url in checks or scripts, decode percent-encoding via fileURLToPath rather than reading URL.pathname directly, so checks run in worktrees whose paths contain spaces or `#`. (PR #111)
+- Remove dead exports with no remaining reader rather than preserving them for hypothetical consumers; sweep new modules for orphaned exports when a migration removes their only caller. (PR #111)
+- Handle gone or stale resource references where empty versus gone is distinguishable (the server access layer) rather than with client query guards that cannot tell them apart; preserve fallback UX and cover stale-link paths with the same fix. (PR #111)
+- Distinguish missing from not-owner in data-access guards: a gone resource may answer an empty terminated page or null, but another user's resource must still throw rather than collapsing authorization failure into missing. (PR #111)
