@@ -9,7 +9,7 @@ import * as Sentry from "@sentry/nextjs";
 // Gated on the DSN the same way as the client (src/instrumentation-client.ts):
 // no DSN, no init, so local dev stays quiet instead of failing every request.
 export function register() {
-  const dsn = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
   if (dsn) Sentry.init({ dsn });
 }
 
