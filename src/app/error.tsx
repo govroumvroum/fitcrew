@@ -1,5 +1,6 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
 import posthog from "posthog-js";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -17,9 +18,12 @@ import { Button } from "@/components/ui/button";
  */
 export default function Error({ error }: { error: Error & { digest?: string } }) {
   useEffect(() => {
-    // PostHog's `capture_exceptions` only sees UNCAUGHT errors, and React just
-    // caught this one. Without this line the boundary would hide every crash.
+    // React caught this one before either reporter could. PostHog's
+    // `capture_exceptions` only sees UNCAUGHT errors, and Sentry's global
+    // handlers are bypassed by the boundary too, so without these lines the
+    // boundary would hide every crash.
     posthog.captureException(error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (

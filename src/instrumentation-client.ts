@@ -1,8 +1,17 @@
+import * as Sentry from "@sentry/nextjs";
 import posthog from "posthog-js";
 
 // Runs before React hydrates, which is the point: an exception thrown during
 // hydration is exactly the one we'd otherwise never see.
 //
+// Same gate as the server (src/instrumentation.ts): a missing DSN means no
+// init, rather than a console full of failed requests on a local build. React
+// catches render errors in a boundary before they reach here, hence the
+// explicit capture in src/app/error.tsx and src/app/global-error.tsx.
+if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+  Sentry.init({ dsn: process.env.NEXT_PUBLIC_SENTRY_DSN });
+}
+
 // The key is absent in local dev unless you put it in .env.local — no key means
 // no init, rather than a console full of failed requests.
 if (process.env.NEXT_PUBLIC_POSTHOG_KEY) {
