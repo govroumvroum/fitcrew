@@ -34,3 +34,4 @@
 - Remove dead exports with no remaining reader rather than preserving them for hypothetical consumers; sweep new modules for orphaned exports when a migration removes their only caller. (PR #111)
 - Handle gone or stale resource references where empty versus gone is distinguishable (the server access layer) rather than with client query guards that cannot tell them apart; preserve fallback UX and cover stale-link paths with the same fix. (PR #111)
 - Distinguish missing from not-owner in data-access guards: a gone resource may answer an empty terminated page or null, but another user's resource must still throw rather than collapsing authorization failure into missing. (PR #111)
+- Before accepting a new environment/config variable, check whether the same value already has a canonical name; a second name plus a `??` fallback is a name to keep in sync with no independent reader — collapse to one name and drop the duplicate `.env.example` entry. (PR #113)
