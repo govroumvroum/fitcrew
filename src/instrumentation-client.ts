@@ -9,7 +9,11 @@ import posthog from "posthog-js";
 // catches render errors in a boundary before they reach here, hence the
 // explicit capture in src/app/error.tsx and src/app/global-error.tsx.
 if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
-  Sentry.init({ dsn: process.env.NEXT_PUBLIC_SENTRY_DSN });
+  Sentry.init({
+    dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+    // Inlined by next.config.ts at build time; an untagged build sends none.
+    release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
+  });
 }
 
 // The key is absent in local dev unless you put it in .env.local — no key means
