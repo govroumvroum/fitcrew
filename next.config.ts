@@ -102,7 +102,9 @@ export default withPostHogConfig(nextConfig, {
   sourcemaps: {
     enabled: !!process.env.POSTHOG_API_KEY,
     releaseName: "fitcrew",
-    releaseVersion: process.env.VERCEL_GIT_COMMIT_SHA,
+    // The same deploy version Sentry tags events with, so a PostHog source map
+    // and the exception it belongs to never disagree off Vercel.
+    releaseVersion: release,
     deleteAfterUpload: true,
   },
 });
