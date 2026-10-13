@@ -1,7 +1,7 @@
 import { withPostHogConfig } from "@posthog/nextjs-config";
 import { withSentryConfig } from "@sentry/nextjs/config";
 import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
 
 /**
@@ -31,6 +31,24 @@ function resolveRelease() {
 
 const release = resolveRelease();
 
+/**
+ * Whether anything will upload source maps this build — the gate for emitting
+ * them at all. With no uploader there is no `deleteAfterUpload` either, so the
+ * `.map` files would sit in `/_next/static` forever, unminified source and all.
+ *
+ * `.env.sentry-build-plugin` is the one credential that is not in `process.env`
+ * yet: the Sentry plugin reads that file itself, later, at build time. So look
+ * for a token inside it rather than treating the file's mere existence as one.
+ */
+function hasSourceMapUploader() {
+  if (process.env.SENTRY_AUTH_TOKEN || process.env.POSTHOG_API_KEY) return true;
+  try {
+    return /^\s*SENTRY_AUTH_TOKEN\s*=\s*\S/m.test(readFileSync(".env.sentry-build-plugin", "utf8"));
+  } catch {
+    return false;
+  }
+}
+
 const nextConfig: NextConfig = {
   // Inlined into BOTH the server and the browser bundle (unlike a bare
   // NEXT_PUBLIC_ var, which only comes from the environment), so the two
@@ -39,13 +57,10 @@ const nextConfig: NextConfig = {
   // release.
   env: { NEXT_PUBLIC_SENTRY_RELEASE: release },
   // Emit the `.map` files the source-map uploaders read. Gated on a credential
-  // — from the environment or the `.env.sentry-build-plugin` the Sentry plugin
-  // reads later, at build time — so a build with nothing to upload stays quiet
-  // AND never serves unminified source: with no uploader there is no
-  // `deleteAfterUpload` either, so the maps would sit in `/_next/static` forever.
-  productionBrowserSourceMaps:
-    !!(process.env.SENTRY_AUTH_TOKEN || process.env.POSTHOG_API_KEY) ||
-    existsSync(".env.sentry-build-plugin"),
+  // so a build with nothing to upload stays quiet AND never serves unminified
+  // source: with no uploader there is no `deleteAfterUpload` either, so the maps
+  // would sit in `/_next/static` forever.
+  productionBrowserSourceMaps: hasSourceMapUploader(),
   reactCompiler: true,
   // Every <Link> now prefetches one App Shell per route, shared across the two
   // navs (TabBar and NavRail both render all seven links), instead of a full

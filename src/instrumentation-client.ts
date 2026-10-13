@@ -1,4 +1,7 @@
 import * as Sentry from "@sentry/nextjs";
+// Named, not `Sentry.captureRouterTransitionStart`: oxlint's `import(namespace)`
+// rule can't follow the SDK's `export * from "./client"`, so the namespace form
+// is a false-positive lint error.
 import { captureRouterTransitionStart } from "@sentry/nextjs";
 import posthog from "posthog-js";
 
