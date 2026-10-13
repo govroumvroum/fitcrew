@@ -10,7 +10,9 @@ import * as Sentry from "@sentry/nextjs";
 // no DSN, no init, so local dev stays quiet instead of failing every request.
 export function register() {
   const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
-  if (dsn) Sentry.init({ dsn });
+  // Same build-time value the client reads (next.config.ts `env`), so a server
+  // error and the browser session it belongs to land on one release.
+  if (dsn) Sentry.init({ dsn, release: process.env.NEXT_PUBLIC_SENTRY_RELEASE });
 }
 
 // Next calls this for a throw in a Server Component, route handler, server

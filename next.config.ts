@@ -1,7 +1,41 @@
 import { withPostHogConfig } from "@posthog/nextjs-config";
+import { execSync } from "node:child_process";
 import type { NextConfig } from "next";
 
+/**
+ * The version every Sentry event and session is tagged with, fixed once at
+ * build time so the tag names the bundle that produced it rather than whenever
+ * the row happens to be read. Without it Rustrak's releases tab stays empty:
+ * `Sentry.init` reaches the SDK with no release, so nothing carries one.
+ *
+ * `SENTRY_RELEASE` wins because it is the one the SDK reads on its own and the
+ * escape hatch a non-Vercel CI sets explicitly. On Vercel the commit SHA is
+ * already in the environment, and locally neither exists, so fall back to git —
+ * `try/catch` because a build without git (or outside a repo) must still work,
+ * just untagged.
+ */
+function resolveRelease() {
+  if (process.env.SENTRY_RELEASE) return process.env.SENTRY_RELEASE;
+  if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA;
+  try {
+    return execSync("git rev-parse --short HEAD", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+const release = resolveRelease();
+
 const nextConfig: NextConfig = {
+  // Inlined into BOTH the server and the browser bundle (unlike a bare
+  // NEXT_PUBLIC_ var, which only comes from the environment), so the two
+  // `Sentry.init` calls — src/instrumentation.ts and
+  // src/instrumentation-client.ts — tag every event and session with the same
+  // release.
+  env: { NEXT_PUBLIC_SENTRY_RELEASE: release },
   reactCompiler: true,
   // Every <Link> now prefetches one App Shell per route, shared across the two
   // navs (TabBar and NavRail both render all seven links), instead of a full
@@ -68,7 +102,9 @@ export default withPostHogConfig(nextConfig, {
   sourcemaps: {
     enabled: !!process.env.POSTHOG_API_KEY,
     releaseName: "fitcrew",
-    releaseVersion: process.env.VERCEL_GIT_COMMIT_SHA,
+    // The same deploy version Sentry tags events with, so a PostHog source map
+    // and the exception it belongs to never disagree off Vercel.
+    releaseVersion: release,
     deleteAfterUpload: true,
   },
 });
