@@ -43,7 +43,9 @@ const release = resolveRelease();
 function hasSourceMapUploader() {
   if (process.env.SENTRY_AUTH_TOKEN || process.env.POSTHOG_API_KEY) return true;
   try {
-    return /^\s*SENTRY_AUTH_TOKEN\s*=\s*\S/m.test(readFileSync(".env.sentry-build-plugin", "utf8"));
+    return /^[ \t]*SENTRY_AUTH_TOKEN[ \t]*=[ \t]*\S/m.test(
+      readFileSync(".env.sentry-build-plugin", "utf8"),
+    );
   } catch {
     return false;
   }
