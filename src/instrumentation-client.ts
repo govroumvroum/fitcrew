@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { captureRouterTransitionStart } from "@sentry/nextjs";
 import posthog from "posthog-js";
 
 // Runs before React hydrates, which is the point: an exception thrown during
@@ -15,6 +16,12 @@ if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
     release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
   });
 }
+
+// `withSentryConfig` (next.config.ts) looks for this export and prints an
+// "ACTION REQUIRED" warning at build time without it. Navigation spans need
+// tracing, which is off, so the hook is inert today — it is the hook the SDK
+// wants, nothing more.
+export const onRouterTransitionStart = captureRouterTransitionStart;
 
 // The key is absent in local dev unless you put it in .env.local — no key means
 // no init, rather than a console full of failed requests.
