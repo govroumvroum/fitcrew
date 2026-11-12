@@ -523,10 +523,12 @@ export function Session({
   // validation makes. A running rest keeps running: it's recovery from the set
   // that WAS done, and the next set still wants it. No new rest either — a
   // passed set cost nothing to recover from. A timed set mid-work is dropped
-  // unlogged, like the bar's X.
+  // unlogged, like the bar's X — but only if it IS the set being passed: the
+  // work clock is séance-wide and keeps running while you page elsewhere, and
+  // passing some other set must not throw that one away.
   const skip = (row: Doc<"sets">) => {
     const upcoming = advance();
-    if (working) workTimer.stop();
+    if (working?.setId === row._id) workTimer.stop();
     write({ setId: row._id, completed: false, weight: row.weight, reps: row.reps, skipped: true });
     if (upcoming !== -1) setPick(upcoming);
   };
