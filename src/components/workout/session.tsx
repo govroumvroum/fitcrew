@@ -87,15 +87,13 @@ const REST_ITEMS = [
   })),
 ];
 
-const NO_CHOICE = { programme: null, jour: null };
-
 export function Session({
   date,
-  chosen = NO_CHOICE,
+  chosen,
 }: {
   date: string;
   /** A day picked on /programme, straight from the URL (see `offeredDayIndex`). */
-  chosen?: { programme: string | null; jour: string | null };
+  chosen: { programme: string | null; jour: string | null };
 }) {
   const data = useQuery(api.workouts.today, { date });
   // Every program, each with its own next day and its own prefill: the picker
@@ -283,7 +281,9 @@ export function Session({
             <h1 className="font-heading text-2xl font-bold sm:text-3xl">{day.name}</h1>
             <p className="text-sm text-muted-foreground">
               {done.length === 0
-                ? "Rien de coché. On ne juge pas, mais on ne compte pas non plus."
+                ? passed > 0
+                  ? `Tout passé, rien de coché (${passed} série${passed > 1 ? "s" : ""}). Repose-toi, on remet ça.`
+                  : "Rien de coché. On ne juge pas, mais on ne compte pas non plus."
                 : passed > 0
                   ? `À demain. ${passed} série${passed > 1 ? "s" : ""} passée${passed > 1 ? "s" : ""}, c'est noté aussi.`
                   : "À demain."}

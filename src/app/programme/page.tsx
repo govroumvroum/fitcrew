@@ -557,7 +557,11 @@ function ProgramSection({
               </div>
               <DayExercises day={nextDay} demoUrlFor={demoUrlFor} />
               <Button asChild variant="secondary" className="h-11 w-full">
-                <Link href="/seance">Commencer cette séance</Link>
+                {/* `?programme=` without `jour`: the proposed day, but this
+                    program's card first on /seance — the one you were reading. */}
+                <Link href={`/seance?programme=${encodeURIComponent(program.lineageId)}`}>
+                  Commencer cette séance
+                </Link>
               </Button>
             </section>
           ) : null}
