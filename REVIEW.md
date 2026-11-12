@@ -1,7 +1,7 @@
 # Review guidance
 
 - For error handling, check both nested-route and root-layout coverage, and distinguish render-time throws from rejected promises in fire-and-forget effects. (PR #59)
-- Do not turn an explicitly scoped lifecycle fix into a demand for unrelated continuous/background behavior; assess whether the targeted trigger covers the reported failure window. (PR #56)
+- Do not turn an explicitly scoped lifecycle fix into a demand for unrelated continuous/background behavior; assess whether the targeted trigger covers the reported failure window, and leave pre-existing behavior in sibling paths the diff never touches out of scope — name the boundary instead of demanding the whole area be made consistent. (PRs #56, #116)
 - Comments should add project-specific reasoning rather than restate upstream documentation; a configuration entry may intentionally be inert until the referenced files exist. (PR #60)
 - Audit CLI options for real callers and documented contracts; invalid user input should not silently become a default, and dead options/labels should be removed rather than preserved. (PR #64)
 - Put one deadline around a bounded multi-phase async operation, including connection and completion, and clean up timers and resources on every exit path. (PR #64)
@@ -38,3 +38,6 @@
 - Establish the real deploy topology before declaring a fallback dead: a build deployed off the primary platform (self-hosted) may be the only one that needs a git/commit fallback for the release tag, so removing it saves little and drops the tag for builds that do ship. (PR #114)
 - Before proposing to collapse a named import into a namespace import, check the project's linter: an `import(namespace)` rule may not follow `export *` re-exports even when `tsc` resolves them, making the named import load-bearing rather than dead weight — respect an inline comment documenting that as settled and do not re-raise. (PR #115)
 - The existence of a config or credential file is not proof of the value inside it: gate behavior on the credential itself, and when matching a key-value with a regex, anchor each group to its own line because `\s` matches newlines. (PR #115)
+- When a per-item control (skip, stop, dismiss) mutates state that is scoped wider than the item — one session-wide timer, one active selection — verify it only touches the item's own entry; a stop fired from another row silently drops that other row's in-flight work. (PR #116)
+- For end-of-flow summary screens, enumerate every terminal combination instead of keying the copy off the successful list: the all-negative case (nothing validated, everything passed) otherwise reports zero of what actually happened. (PR #116)
+- When the current page holds an in-page selection (a switcher, filter, or focused card) and a CTA navigates onward, verify the link carries that selection; dropping it silently resets the destination to default order and makes the user choose again. (PR #116)
