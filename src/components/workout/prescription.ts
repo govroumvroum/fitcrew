@@ -8,7 +8,16 @@ export type SetRow = {
   reps: number;
   completed: boolean;
   seconds?: number;
+  skipped?: boolean;
 };
+
+/**
+ * Still to do: neither validated nor passed. Every "where's the séance at"
+ * question asks this, never `!completed` — a passed set must not hold the
+ * cursor, and it must not count as done either.
+ */
+export const isOpen = (row: { completed: boolean; skipped?: boolean }) =>
+  !row.completed && !row.skipped;
 
 /** What the séance screen needs of a day's exercise to walk it. */
 type Occurrence = { name: string; sets: number; circuit?: string; slot?: string };
@@ -113,8 +122,9 @@ export function rowsOf<R extends Row>(
  * next round. `at` is the occurrence's index in `exercises`, which is what the
  * séance screen pages on.
  *
- * This is the whole ordering: the resume point is the first step whose row isn't
- * completed, and "next" is the first open step of another occurrence.
+ * This is the whole ordering: the resume point is the first open step (see
+ * `isOpen` — a passed set is not open), and "next" is the first open step of
+ * another occurrence.
  */
 export function sessionSteps<E extends Occurrence, R extends Row>(
   exercises: readonly E[],
@@ -162,4 +172,30 @@ export function workingValues(
   return source
     ? { weight: source.weight, reps: source.reps }
     : { weight: 0, reps: defaultReps(repsSpec) };
+}
+
+/**
+ * The séance route with one day of one program picked, instead of the day the
+ * rotation proposes. 1-based in the URL, like « Jour 1 » on screen.
+ *
+ * The choice lives in the URL and nowhere else: routes stay mounted (hidden)
+ * between navigations, so a choice held in component state would still be there
+ * for the next séance. A plain `/seance` is always the proposed day.
+ */
+export const seanceHref = (lineageId: string, dayIndex: number) =>
+  `/seance?programme=${encodeURIComponent(lineageId)}&jour=${dayIndex + 1}`;
+
+/**
+ * Which day of `program` the séance screen offers: the one in the URL when it
+ * names THIS program and a day it has, the proposed one otherwise — a stale or
+ * hand-edited link falls back instead of failing.
+ */
+export function offeredDayIndex(
+  url: { programme: string | null; jour: string | null },
+  program: { lineageId: string; dayCount: number; nextDayIndex: number },
+): number {
+  if (url.programme !== program.lineageId || url.jour === null) return program.nextDayIndex;
+  if (!/^\d+$/.test(url.jour)) return program.nextDayIndex;
+  const index = Number(url.jour) - 1;
+  return index >= 0 && index < program.dayCount ? index : program.nextDayIndex;
 }

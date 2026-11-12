@@ -4,6 +4,7 @@ import {
   bestPrs,
   currentStreak,
   epley1rm,
+  isDayIndex,
   lastInLineage,
   nextDayIndex,
   prCandidates,
@@ -201,6 +202,25 @@ assert.equal(nextDayIndex(2, mixed, boxe, "2026-07-29"), 0, "la boxe avance sur 
 assert.equal(nextDayIndex(3, [on("muscu1", "2026-07-27", 1)], muscu, "2026-07-28"), 2);
 // A séance attached to no program (a retroactive log) moves nothing.
 assert.equal(nextDayIndex(3, [{ date: "2026-07-27", dayIndex: 2 }], muscu, "2026-07-28"), 0);
+
+// A day the user CHOSE (back to séance 1 after a break) hands over exactly like
+// a proposed one: the rotation reads the last séance's dayIndex, nothing else.
+// Day 3 was proposed, he went back to day 1 — next is day 2, not day 3 or 4.
+const backToOne = [on("muscu2", "2026-07-28", 0), on("muscu2", "2026-07-20", 1)];
+assert.equal(nextDayIndex(4, backToOne, muscu, "2026-07-29"), 1, "repart du jour choisi");
+// Same day, the chosen day stays the answer while the séance runs.
+assert.equal(nextDayIndex(4, backToOne, muscu, "2026-07-28"), 0);
+// Skipping ahead works the same way, and still wraps.
+assert.equal(nextDayIndex(4, [on("muscu2", "2026-07-28", 3)], muscu, "2026-07-29"), 0);
+
+// `workouts.start` checks a chosen day against the program before trusting it.
+assert.equal(isDayIndex(3, 0), true);
+assert.equal(isDayIndex(3, 2), true);
+assert.equal(isDayIndex(3, 3), false, "un jour après le dernier");
+assert.equal(isDayIndex(3, -1), false);
+assert.equal(isDayIndex(3, 1.5), false);
+assert.equal(isDayIndex(3, Number.NaN), false);
+assert.equal(isDayIndex(0, 0), false, "un programme sans jour n'en a aucun à choisir");
 
 // --- trainedToday ------------------------------------------------------------
 // `programs.list` computes it as `lastInLineage(recent, lineage)?.date === date`.

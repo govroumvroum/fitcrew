@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { QueryCtx, mutation, query } from "./_generated/server";
-import { lastInLineage, nextDayIndex } from "./progress";
+import { isDayIndex, lastInLineage, nextDayIndex } from "./progress";
 import { programStatus } from "./schema";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
@@ -223,6 +223,25 @@ export const list = query({
       });
     }
     return out;
+  },
+});
+
+/**
+ * The prefill for one day the user picked instead of the proposed one. `list`
+ * only prefills each program's NEXT day; a chosen day would otherwise open on
+ * 0 kg. Its own query so `list` doesn't pay for every day of every program on
+ * every screen. An unknown or foreign program, or a day out of range, is `[]`:
+ * the séance still starts, from the prescription.
+ */
+export const dayPrefill = query({
+  args: { programId: v.id("programs"), dayIndex: v.number() },
+  handler: async (ctx, args) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return [];
+    const program = await ctx.db.get("programs", args.programId);
+    if (program?.userId !== user._id) return [];
+    if (!isDayIndex(program.days.length, args.dayIndex)) return [];
+    return await prefillFor(ctx, user._id, program.days[args.dayIndex].exercises);
   },
 });
 

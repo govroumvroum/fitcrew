@@ -33,7 +33,15 @@ import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { ExerciseDemo, useExerciseDemos } from "./demo";
-import { formatSet, rowsOf, seedSets, sessionSteps, workingValues } from "./prescription";
+import {
+  formatSet,
+  isOpen,
+  offeredDayIndex,
+  rowsOf,
+  seedSets,
+  sessionSteps,
+  workingValues,
+} from "./prescription";
 import { REST_OPTIONS, RestTimerBar, useRestOutro, useRestTimer } from "./rest-timer";
 
 type Values = { weight: number; reps: number; seconds?: number };
@@ -79,7 +87,16 @@ const REST_ITEMS = [
   })),
 ];
 
-export function Session({ date }: { date: string }) {
+const NO_CHOICE = { programme: null, jour: null };
+
+export function Session({
+  date,
+  chosen = NO_CHOICE,
+}: {
+  date: string;
+  /** A day picked on /programme, straight from the URL (see `offeredDayIndex`). */
+  chosen?: { programme: string | null; jour: string | null };
+}) {
   const data = useQuery(api.workouts.today, { date });
   // Every program, each with its own next day and its own prefill: the picker
   // below is one card per active one.
@@ -106,6 +123,11 @@ export function Session({ date }: { date: string }) {
                 reps: args.reps,
                 // Mirrors the mutation: absent means "leave it", not "clear it".
                 ...(args.seconds !== undefined && { seconds: args.seconds }),
+                // …and so does the pass: set, taken back, or cleared by a
+                // validation.
+                ...(args.skipped
+                  ? { skipped: true }
+                  : (args.completed || args.skipped === false) && { skipped: undefined }),
               }
             : set,
         ),
@@ -122,10 +144,11 @@ export function Session({ date }: { date: string }) {
     weight: number;
     reps: number;
     seconds?: number;
+    skipped?: boolean;
   }) => {
     void logSet(args).catch(() =>
       toast.error(
-        args.completed
+        args.completed || args.skipped
           ? "Série pas enregistrée, réessaie."
           : "Correction pas enregistrée, réessaie.",
       ),
@@ -201,14 +224,22 @@ export function Session({ date }: { date: string }) {
         {/* The cards carry the program names, so a visible page title would only
             repeat them. */}
         <h1 className="sr-only">Séance</h1>
-        {active.map((program) => (
-          <ProgramPick
-            key={program.lineageId}
-            date={date}
-            program={program}
-            open={active.length === 1}
-          />
-        ))}
+        {/* The program a day was picked for comes first: that card is what the
+            tap on /programme came here for. */}
+        {[...active]
+          .sort(
+            (a, b) =>
+              Number(b.lineageId === chosen.programme) - Number(a.lineageId === chosen.programme),
+          )
+          .map((program) => (
+            <ProgramPick
+              key={program.lineageId}
+              date={date}
+              program={program}
+              chosen={chosen}
+              open={active.length === 1}
+            />
+          ))}
         <History date={date} />
       </div>
     );
@@ -224,6 +255,7 @@ export function Session({ date }: { date: string }) {
     edits[name] ?? workingValues(rowsOf({ name }, sets), repsSpec, durationSec);
 
   const done = sets.filter((set) => set.completed);
+  const passed = sets.filter((set) => set.skipped).length;
 
   // Guard, not a state the app produces: `workouts.today` only hands back a
   // séance that has a program, and a program row is never deleted. It stays
@@ -252,7 +284,9 @@ export function Session({ date }: { date: string }) {
             <p className="text-sm text-muted-foreground">
               {done.length === 0
                 ? "Rien de coché. On ne juge pas, mais on ne compte pas non plus."
-                : "À demain."}
+                : passed > 0
+                  ? `À demain. ${passed} série${passed > 1 ? "s" : ""} passée${passed > 1 ? "s" : ""}, c'est noté aussi.`
+                  : "À demain."}
             </p>
           </div>
           {/* One run of numbers split by hairlines, where three bordered tiles
@@ -358,7 +392,7 @@ export function Session({ date }: { date: string }) {
           <section className="flex flex-col gap-4">
             <p className="eyebrow">Il te reste</p>
             {left.map((program) => (
-              <ProgramPick key={program.lineageId} date={date} program={program} />
+              <ProgramPick key={program.lineageId} date={date} program={program} chosen={chosen} />
             ))}
           </section>
         ) : null}
@@ -386,10 +420,10 @@ export function Session({ date }: { date: string }) {
   // exercice 1 → 2 → 3 → tour suivant. Resuming is "first open step", so a
   // reload mid-circuit lands on the right tour and not on the first exercise.
   const steps = sessionSteps(exercises, sets);
-  const firstOpen = steps.find((step) => !step.row.completed);
+  const firstOpen = steps.find((step) => isOpen(step.row));
   const current = Math.min(pick ?? firstOpen?.at ?? 0, exercises.length - 1);
   // First open step belonging to another occurrence — the next thing to do.
-  const nextOpen = () => steps.find((s) => !s.row.completed && s.at !== current)?.at ?? -1;
+  const nextOpen = () => steps.find((s) => isOpen(s.row) && s.at !== current)?.at ?? -1;
   const exercise = exercises[current];
   const rows = rowsFor(exercise);
   // `at` rides along so a block can be matched back to the paged index.
@@ -413,8 +447,9 @@ export function Session({ date }: { date: string }) {
   // No match (or not resolved yet) → no affordance at all.
   const demoUrl = demoUrlFor(exercise.name);
   const lastTime = data.prefill.find((p) => p.name === exercise.name);
-  // The set the commit button will write. -1 when this exercise is done.
-  const nextAt = rows.findIndex((row) => !row.completed);
+  // The set the commit button will write. -1 when this exercise is done (every
+  // set validated or passed).
+  const nextAt = rows.findIndex(isOpen);
   const activeId = nextAt === -1 ? null : rows[nextAt]._id;
   // Tour of the row on screen; once bouclé it's the last one done. `round` is
   // missing on rows seeded before provenance existed — index + 1 is the same
@@ -434,7 +469,7 @@ export function Session({ date }: { date: string }) {
   // set bouclé it. Read off the rows we already hold: the optimistic write lands
   // after the tap returns.
   const advance = () =>
-    block || rows.filter((row) => !row.completed).length === 1 ? nextOpen() : -1;
+    block || rows.filter(isOpen).length === 1 ? nextOpen() : -1;
 
   const validate = (row: Doc<"sets">) => {
     // The chips log too, so the gate lives here and not only on the dock button.
@@ -484,6 +519,18 @@ export function Session({ date }: { date: string }) {
     },
   };
 
+  // « J'étais cuit » — pass the set on screen and move on, the same page turn a
+  // validation makes. A running rest keeps running: it's recovery from the set
+  // that WAS done, and the next set still wants it. No new rest either — a
+  // passed set cost nothing to recover from. A timed set mid-work is dropped
+  // unlogged, like the bar's X.
+  const skip = (row: Doc<"sets">) => {
+    const upcoming = advance();
+    if (working) workTimer.stop();
+    write({ setId: row._id, completed: false, weight: row.weight, reps: row.reps, skipped: true });
+    if (upcoming !== -1) setPick(upcoming);
+  };
+
   return (
     <div className="flex flex-1 flex-col">
       <div className="p-4">
@@ -504,6 +551,7 @@ export function Session({ date }: { date: string }) {
           <div className="flex shrink-0 flex-col items-end gap-1">
             <Badge variant="secondary" className="tabular-nums">
               {done.length}/{sets.length} séries
+              {passed > 0 ? ` · ${passed} passée${passed > 1 ? "s" : ""}` : ""}
             </Badge>
             {/* Up here, not in the dock: a started séance you can't get rid of is
                 a dead end, but the way out must not sit under the thumb that
@@ -583,9 +631,11 @@ export function Session({ date }: { date: string }) {
                             i === current ? "h-1.5" : "h-1",
                             row.completed
                               ? "bg-chart-1"
-                              : row._id === activeId
-                                ? "bg-accent-text"
-                                : "bg-accent",
+                              : row.skipped
+                                ? "bg-muted-foreground/35"
+                                : row._id === activeId
+                                  ? "bg-accent-text"
+                                  : "bg-accent",
                           )}
                         />
                       ))}
@@ -638,9 +688,7 @@ export function Session({ date }: { date: string }) {
             <div className="flex flex-col gap-3">
               <p className="eyebrow">
                 {nextAt === -1
-                  ? block
-                    ? `${rows.length} tours validés · exercice bouclé`
-                    : `${rows.length} séries validées · exercice bouclé`
+                  ? `${closedLabel(rows, block ? "tour" : "série")} · exercice bouclé`
                   : block
                     ? `Tour ${tour} sur ${rows.length}`
                     : `Prochaine série · ${nextAt + 1} sur ${rows.length}`}
@@ -703,7 +751,20 @@ export function Session({ date }: { date: string }) {
             </div>
 
             <div>
-              <p className="eyebrow mb-2">Séries</p>
+              <div className="mb-2 flex min-h-11 items-center justify-between gap-3">
+                <p className="eyebrow">Séries</p>
+                {/* Ghost and up here, away from the dock: passing a set is the
+                    exception, and it must never sit where the thumb validates. */}
+                {nextAt === -1 ? null : (
+                  <Button
+                    variant="ghost"
+                    className="-mr-2 h-11 px-2 text-muted-foreground active:scale-[0.98]"
+                    onClick={() => skip(rows[nextAt])}
+                  >
+                    Passer cette série
+                  </Button>
+                )}
+              </div>
               <div className="flex flex-wrap gap-2">
                 {rows.map((row) => (
                   <SetChip
@@ -711,6 +772,18 @@ export function Session({ date }: { date: string }) {
                     row={row}
                     next={row._id === activeId}
                     onToggle={() => {
+                      // Tapping a passed set takes the pass back: it's open
+                      // again, and the séance's cursor returns to it.
+                      if (row.skipped) {
+                        write({
+                          setId: row._id,
+                          completed: false,
+                          weight: row.weight,
+                          reps: row.reps,
+                          skipped: false,
+                        });
+                        return;
+                      }
                       // Tapping a chip corrects a set: un-checking is a fix, so
                       // no rest and no buzz.
                       if (row.completed) {
@@ -763,7 +836,7 @@ export function Session({ date }: { date: string }) {
             <p className="eyebrow">Ce qui reste</p>
             <ul className="mt-1 divide-y">
               {exercises.map((item, i) => {
-                const left = rowsFor(item).filter((row) => !row.completed).length;
+                const left = rowsFor(item).filter(isOpen).length;
                 const unit = item.circuit ? "tour" : "série";
                 return (
                   <li key={item.slot ?? `${item.name}-${i}`}>
@@ -878,7 +951,9 @@ export function Session({ date }: { date: string }) {
             ? `Valider maintenant · ${work.total - work.remaining} s`
             : nextAt === -1
               ? nextOpen() === -1
-                ? "Tout est validé, termine la séance"
+                ? passed > 0
+                  ? "Plus rien à faire, termine la séance"
+                  : "Tout est validé, termine la séance"
                 : "Passer à l'exercice suivant"
               : zeroLoad
                 ? "Mets la charge pour valider"
@@ -918,6 +993,19 @@ export function Session({ date }: { date: string }) {
       </div>
     </div>
   );
+}
+
+/**
+ * "3 séries validées" · "2 tours validés, 1 passé" — how an exercise ended once
+ * nothing is left open on it.
+ */
+function closedLabel(rows: Doc<"sets">[], unit: "série" | "tour") {
+  const plural = (n: number) => (n > 1 ? "s" : "");
+  const agree = unit === "série" ? "e" : "";
+  const done = rows.filter((row) => row.completed).length;
+  const passed = rows.filter((row) => row.skipped).length;
+  const head = `${done} ${unit}${plural(done)} validé${agree}${plural(done)}`;
+  return passed > 0 ? `${head}, ${passed} passé${agree}${plural(passed)}` : head;
 }
 
 /**
@@ -969,15 +1057,28 @@ type ProgramEntry = (typeof api.programs.list)["_returnType"][number];
 function ProgramPick({
   date,
   program,
+  chosen,
   open,
 }: {
   date: string;
   program: ProgramEntry;
+  chosen: { programme: string | null; jour: string | null };
   open?: boolean;
 }) {
   const start = useMutation(api.workouts.start);
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const exercises = program.days[program.nextDayIndex]?.exercises ?? [];
+  // The proposed day, unless /programme sent another one for THIS program.
+  const dayIndex = offeredDayIndex(chosen, program);
+  const picked = dayIndex !== program.nextDayIndex;
+  // `list` only prefills the proposed day; a picked one fetches its own, so it
+  // doesn't open on 0 kg. Start waits for it.
+  const pickedPrefill = useQuery(
+    api.programs.dayPrefill,
+    picked ? { programId: program.id, dayIndex } : "skip",
+  );
+  const prefill = picked ? pickedPrefill : program.prefill;
+  const exercises = program.days[dayIndex]?.exercises ?? [];
   const total = exercises.reduce((sum, exercise) => sum + exercise.sets, 0);
 
   return (
@@ -987,7 +1088,7 @@ function ProgramPick({
             programs live, "Jour 2" alone doesn't say which séance this is. */}
         <p className="eyebrow">{program.name}</p>
         <h2 className="font-heading text-2xl font-bold sm:text-3xl">
-          {program.nextDayName ?? "Prochaine séance"}
+          {program.days[dayIndex]?.name ?? "Prochaine séance"}
         </h2>
         <p className="text-sm text-muted-foreground">
           {exercises.length} exercice{exercises.length > 1 ? "s" : ""} ·{" "}
@@ -998,7 +1099,22 @@ function ProgramPick({
       {/* ponytail: native <details>, like everywhere else here. Open when it's
           the only program — with several, the whole prescription of each is a
           wall before the first button. */}
-      <details open={open} className="group">
+      {picked ? (
+        <div className="-mt-2 flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
+          <span>
+            À la place du jour <span className="tabular-nums">{program.nextDayIndex + 1}</span>.
+          </span>
+          <Link
+            href="/seance"
+            replace
+            className="inline-flex min-h-11 items-center font-medium text-foreground underline underline-offset-4"
+          >
+            Revenir au jour proposé
+          </Link>
+        </div>
+      ) : null}
+
+      <details open={open || picked} className="group">
         <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium marker:hidden">
           <ChevronDownIcon className="chevron" />
           Le détail
@@ -1044,15 +1160,22 @@ function ProgramPick({
           two red buttons competing inside ONE surface. */}
       <Button
         className="h-14 w-full text-base active:scale-[0.97]"
-        disabled={busy || exercises.length === 0}
+        disabled={busy || exercises.length === 0 || prefill === undefined}
         onClick={async () => {
+          if (prefill === undefined) return;
           setBusy(true);
           try {
             await start({
               date,
               programId: program.id,
-              sets: seedSets(exercises, program.prefill),
+              // Only a picked day is sent: the proposed one stays the server's
+              // call, exactly as before.
+              ...(picked && { dayIndex }),
+              sets: seedSets(exercises, prefill),
             });
+            // The choice is spent: drop it from the URL so this tab, left open
+            // until tomorrow, offers the rotation's day again.
+            if (picked) router.replace("/seance");
           } catch {
             toast.error("Séance pas démarrée, réessaie.");
           } finally {
@@ -1242,22 +1365,25 @@ function SetChip({
         // pointer-fine:, not bare hover:: this is a touch-first PWA, and an
         // ungated hover state stays lit under the finger after every tap.
         row.completed && "border-chart-1/70 bg-chart-1/20 pointer-fine:hover:bg-chart-1/30",
+        // Passed: neither the done tint nor an open chip — dashed and dimmed, the
+        // number struck through. A tap takes the pass back.
+        row.skipped && "border-dashed text-muted-foreground",
         next && "border-accent-text",
         // Only the check-off dips: un-checking is a correction, not an achievement.
         !row.completed && "active:scale-[0.96]",
       )}
       onClick={onToggle}
       aria-pressed={row.completed}
-      aria-label={`Série ${row.index + 1}`}
+      aria-label={`Série ${row.index + 1}${row.skipped ? ", passée" : ""}`}
     >
       <span className="flex items-center gap-1 text-sm font-semibold">
         {/* Always in the flow: mounting the check on validation shoved the set
             number 20px sideways, a hundred times a séance. */}
         <CheckIcon className={row.completed ? "text-chart-1" : "invisible"} />
-        {row.index + 1}
+        <span className={cn(row.skipped && "line-through")}>{row.index + 1}</span>
       </span>
       <span className="text-[10px] opacity-80 tabular-nums">
-        {row.completed ? formatSet(row) : "—"}
+        {row.completed ? formatSet(row) : row.skipped ? "passée" : "—"}
       </span>
     </Button>
   );
