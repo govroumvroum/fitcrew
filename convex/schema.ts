@@ -210,6 +210,17 @@ export default defineSchema({
     // and the Chef have a default context to talk about. Stamped by
     // `workouts.start`; read it as a hint, never as "the" program.
     currentProgramId: v.optional(v.id("programs")),
+    // --- Accueil et premiers pas (#127) ---
+    // On the server, not in localStorage: the iOS home-screen app has its own
+    // storage, and someone who installs mid-welcome must not get it twice.
+    // Present = the welcome was finished or skipped. Backfilled on every user
+    // that existed when it shipped (`markExistingUsersWelcomed`).
+    welcomedAt: v.optional(v.number()),
+    // The « Premiers pas » card, hidden by hand.
+    firstStepsDismissedAt: v.optional(v.number()),
+    // Seen running as an installed app (standalone display mode), stamped by
+    // the client — the server has no other way to know.
+    installedAt: v.optional(v.number()),
   }).index("by_token", ["tokenIdentifier"]),
 
   // A program is a LINEAGE of versioned rows: `generate_program` starts one,
