@@ -133,6 +133,16 @@ const agents = [
   assert.match(chef, /Jour off \(pas d'entraînement\) : 2000 kcal/);
   assert.match(chef, /Jour dur : 2480 kcal/);
   assert.match(chef, /lundi : muscu \(dur, 18h30\)/);
+
+  // No semaine type: the flat target, and no level talk at all (decided with
+  // Basile — the flat target already averages the sport in).
+  const flatChef = chefSystemPrompt(user, profileWithLevels, monday);
+  assert.match(flatChef, /CIBLE QUOTIDIENNE MOYENNE .*: 2300 kcal/);
+  assert.doesNotMatch(flatChef, /Jour dur|Jour off \(pas/);
+  // Stable within a day and only the date lines move, like the other branches.
+  assert.equal(flatChef, chefSystemPrompt(user, profileWithLevels, monday));
+  const [f1, f2] = [flatChef.split("\n"), chefSystemPrompt(user, profileWithLevels, tuesday).split("\n")];
+  assert.ok(f1.findIndex((line, i) => line !== f2[i]) > f1.length - 4);
 }
 
 for (const a of agents) {

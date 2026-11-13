@@ -77,7 +77,7 @@ async function sessionsOn(
 }
 
 export type DayLevelView = {
-  level: DayLevel;
+  level: DayLevel | null; // null: no semaine type, the flat target applies
   source: LevelSource;
   planned: (WeekEntry & { program: EntryProgram | null })[];
   hasTemplate: boolean;

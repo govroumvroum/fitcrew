@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import {
   type PlanDay,
+  dayTargets,
   estimateLevelTargets,
   estimateTargets,
   levelTargetsOf,
@@ -99,6 +100,19 @@ assert.ok(absurd.off.carbs >= 0 && absurd.dur.carbs >= absurd.off.carbs);
 const flat = { calories: 2300, protein: 160, carbs: 240, fat: 70 };
 assert.deepEqual(levelTargetsOf({ targets: flat }), { off: flat, leger: flat, dur: flat });
 assert.deepEqual(levelTargetsOf({ targets: flat, targetsByLevel: eighty }), eighty);
+
+// The day's targets: the level's own, null without a profile.
+const withLevels = { targets: flat, targetsByLevel: eighty };
+assert.deepEqual(dayTargets(withLevels, { level: "dur" }), {
+  targets: eighty.dur,
+  flatTarget: false,
+});
+assert.deepEqual(dayTargets(withLevels, { level: "off" }).targets, eighty.off);
+assert.deepEqual(dayTargets(null, { level: "dur" }), { targets: null, flatTarget: false });
+// No semaine type → no level → the flat target, an average that already
+// includes sport. Never the off target: that would count training twice.
+assert.deepEqual(dayTargets(withLevels, { level: null }), { targets: flat, flatTarget: true });
+assert.deepEqual(dayTargets(null, { level: null }), { targets: null, flatTarget: false });
 
 // A day with nothing logged is zeros, not a crash.
 assert.deepEqual(sumMacros([]), { calories: 0, protein: 0, carbs: 0, fat: 0 });

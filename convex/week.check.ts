@@ -75,11 +75,19 @@ assert.deepEqual(
   pick(resolveDayLevel({ date: TUESDAY, entries: week, sessions: [] })),
   { level: "off", source: "template" },
 );
-// No template at all: every day is off.
-assert.deepEqual(
-  pick(resolveDayLevel({ date: MONDAY, entries: [], sessions: [] })),
-  { level: "off", source: "template" },
-);
+// 0. No template at all: NO level — his flat target stays in force. Neither a
+// séance nor a manual choice may turn the day into a level: the flat target is
+// an average that already includes sport.
+for (const situation of [
+  { sessions: [] },
+  { sessions: [{ lineageId: "prog_boxe" }, { kind: "course" }] },
+  { sessions: [], override: { date: MONDAY, level: "dur" as const } },
+]) {
+  assert.deepEqual(pick(resolveDayLevel({ date: MONDAY, entries: [], ...situation })), {
+    level: null,
+    source: "none",
+  });
+}
 
 // 2. A séance on an off day makes it a training day — at the level the template
 // gives that program elsewhere in the week (boxe: dur on Wednesday, léger on
@@ -182,6 +190,6 @@ assert.match(rendered, /mardi : rien de prévu \(off\)/);
 
 console.log("semaine type ok");
 
-function pick(r: { level: string; source: string }) {
+function pick(r: { level: string | null; source: string }) {
   return { level: r.level, source: r.source };
 }

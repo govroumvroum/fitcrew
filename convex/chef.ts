@@ -87,7 +87,7 @@ type Dashboard = {
   weekStart: string;
   hasPlan: boolean;
   // Optional in the type: the shape `context` returned before #118 had none.
-  day?: (DayLevelView & { targets: Macros | null }) | null;
+  day?: (DayLevelView & { targets: Macros | null; flatTarget?: boolean }) | null;
 };
 
 type ChefContext = { user: Doc<"users">; dashboard: Dashboard; inventory: Doc<"inventory">[] };
@@ -198,7 +198,7 @@ export function chefTools(today: string) {
 
     read_today: createTool({
       description:
-        "L'état de la journée du user : son niveau du jour (off, léger, dur) et pourquoi, repas prévus au plan (avec leur verrou), ce qu'il a déjà loggué, les totaux du jour, ce qu'il reste sur la cible de ce niveau, et son hydratation. Rien de tout ça n'est dans ton prompt — appelle cet outil avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou avant de proposer un repas pour aujourd'hui.",
+        "L'état de la journée du user : son niveau du jour (off, léger, dur) et pourquoi — null s'il n'a pas de semaine type —, repas prévus au plan (avec leur verrou), ce qu'il a déjà loggué, les totaux du jour, ce qu'il reste sur la cible de ce niveau, et son hydratation. Rien de tout ça n'est dans ton prompt — appelle cet outil avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou avant de proposer un repas pour aujourd'hui.",
       inputSchema: z.object({}),
       execute: async (ctx: ToolCtx) => {
         // Only the dashboard: the fridge is `read_inventory`'s business.
@@ -207,16 +207,18 @@ export function chefTools(today: string) {
         const day = dashboard.day ?? null;
         // Today's level, the ONE place the Chef learns it: it moves during the
         // day, so it can't sit in the cached prompt (#118). `remaining` counts
-        // down from THIS level's target, not the flat one.
-        const targets = p && day ? levelTargetsOf(p)[day.level] : (p?.targets ?? null);
+        // down from the day's target (`dayTargets` in nutrition.ts).
+        const targets = day ? day.targets : (p?.targets ?? null);
         return {
           result: "ok" as const,
           date: today,
           weekday: WEEKDAYS[weekdayOf(today)],
-          level: day
+          // No semaine type → no level at all, the flat target (`dayTargets`).
+          level:
+            day && day.level !== null
             ? {
                 level: day.level,
-                why: LEVEL_SOURCE[day.source],
+                why: day.source === "none" ? null : LEVEL_SOURCE[day.source],
                 planned: day.planned.map((entry) => ({
                   what: entryLabel(entry),
                   level: entry.level,
@@ -538,9 +540,14 @@ ${
 - ${p.mealsPerDay} repas/jour${p.people && p.people > 1 ? `, il cuisine pour ${p.people} personnes` : ""}
 - Budget : ${p.budget ?? "non précisé"}${p.cookMinutes ? `, ${p.cookMinutes} min de cuisine par repas` : ""}
 
-CIBLES PAR NIVEAU DE JOURNÉE (estimées, Mifflin-St Jeor)
+${
+  week
+    ? `CIBLES PAR NIVEAU DE JOURNÉE (estimées, Mifflin-St Jeor)
 ${DAY_LEVEL_ORDER.map((level) => `- ${LEVEL_NAME[level]} : ${macroText(levels![level])}`).join("\n")}
-Les protéines et les lipides ne bougent pas d'un niveau à l'autre ; ce sont les glucides qui suivent l'entraînement.
+Les protéines et les lipides ne bougent pas d'un niveau à l'autre ; ce sont les glucides qui suivent l'entraînement.`
+    : `CIBLE QUOTIDIENNE MOYENNE (estimée, Mifflin-St Jeor, sport compris) : ${macroText(p.targets)}.
+La même chaque jour : sans semaine type, pas de jour off, léger ou dur.`
+}
 
 Le profil est déjà fait. S'il veut le refaire ou change de poids/objectif, reprends les questions et rappelle \`save_nutrition_profile\` à la fin.`
     : `PREMIÈRE CONVERSATION — LE PROFIL N'EXISTE PAS ENCORE
@@ -557,7 +564,7 @@ ${
   week
     ? `${renderWeek(week)}
 Le niveau d'un jour, c'est le plus haut de ses séances ; un jour sans séance est off. C'est ce que dit sa semaine, pas ce qu'il fera : le niveau RÉEL d'aujourd'hui (il a pu le changer, ou s'entraîner un jour off) te vient de \`read_today\`, jamais de cette liste.`
-    : "Il n'en a pas encore : tous ses jours comptent comme off. S'il te dit quand il s'entraîne, dis-lui de régler sa semaine sur la page Programme (section « Ma semaine ») ou avec le coach — toi, tu ne l'écris pas."
+    : "Il n'en a pas encore. Ne parle donc d'aucun niveau de journée : il a une seule cible moyenne. Une fois dans la conversation (pas à chaque message), quand tu proposes ou génères ses menus, dis-lui qu'en donnant ses jours d'entraînement au coach (ou sur la page Programme, section « Ma semaine »), il aura des objectifs jour par jour. Toi, tu ne l'écris pas."
 }
 
 \`ask_choices\` : QUAND UNE QUESTION EST FERMÉE
@@ -565,7 +572,7 @@ Une question dont tu connais déjà l'éventail des réponses (objectif, sexe, n
 
 CE PROMPT NE CONTIENT PAS SA JOURNÉE — TU VAS LA CHERCHER
 Ses repas prévus, ce qu'il a déjà mangé, ses totaux du jour, son hydratation et son frigo ne sont PAS écrits ici. Tu y as accès, mais par outil, et un outil qu'on n'appelle pas ne renvoie rien.
-- \`read_today\` : le niveau RÉEL d'aujourd'hui (off, léger, dur — il a pu le changer à la main ou s'entraîner un jour off), repas prévus (avec leur verrou), journal du jour, totaux, ce qu'il reste sur la cible de ce niveau, hydratation, et s'il existe un plan cette semaine. Appelle-le avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou de proposer un repas pour aujourd'hui — et avant \`generate_meal_plan\`, pour savoir si un plan existe déjà : générer ÉCRASE la semaine en cours, donc s'il en a un, dis-le et demande avant d'écraser.
+- \`read_today\` : le niveau RÉEL d'aujourd'hui quand il a une semaine type (off, léger, dur — il a pu le changer à la main ou s'entraîner un jour off), repas prévus (avec leur verrou), journal du jour, totaux, ce qu'il reste sur la cible du jour, hydratation, et s'il existe un plan cette semaine. Appelle-le avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou de proposer un repas pour aujourd'hui — et avant \`generate_meal_plan\`, pour savoir si un plan existe déjà : générer ÉCRASE la semaine en cours, donc s'il en a un, dis-le et demande avant d'écraser.
 - \`read_inventory\` : son frigo et ses placards. Appelle-le avant de proposer de cuisiner avec ce qu'il a.
 - Les totaux et le restant arrivent DÉJÀ calculés : ne refais pas les additions ni les soustractions.
 - Ne dis JAMAIS que tu n'as pas accès à sa journée, et n'invente ni un repas prévu, ni un chiffre du journal : tout ça se lit.
@@ -579,10 +586,16 @@ RÈGLES NON NÉGOCIABLES
 
 RÈGLES PLAN (quand tu appelles generate_meal_plan)
 - Les dates sont celles de la semaine en cours, entre le lundi et le dimanche donnés dans la section DATES en fin de prompt. Ne calcule aucune autre semaine.
-- ${p ? `${p.mealsPerDay} repas par jour` : "Le nombre de repas de son profil"}. Chaque jour vise la cible de SON niveau dans sa semaine type (off, léger ou dur, ci-dessus) : un jour de séance a plus de glucides qu'un jour off, les protéines restent les mêmes. Pas au kcal près : c'est une estimation. La date de chaque jour de la semaine est dans la section DATES.
+${
+  week
+    ? `- ${p ? `${p.mealsPerDay} repas par jour` : "Le nombre de repas de son profil"}. Chaque jour vise la cible de SON niveau dans sa semaine type (off, léger ou dur, ci-dessus) : un jour de séance a plus de glucides qu'un jour off, les protéines restent les mêmes. Pas au kcal près : c'est une estimation. La date de chaque jour de la semaine est dans la section DATES.
 - Respecte le temps de cuisine et le budget. Réutilise les mêmes ingrédients sur plusieurs repas — c'est moins cher et ça évite le gaspillage. Utilise \`mealPrep\` quand un plat se prépare la veille ou en double.
 - Sers son entraînement selon le moment prévu dans sa semaine type : les glucides dans le repas ou la collation ~1h30 AVANT la séance, les protéines dans le repas d'APRÈS. Séance le matin → glucides au petit-déjeuner ou juste avant, protéines au repas suivant ; le soir → glucides au déjeuner ou au goûter, protéines au dîner. Sans moment précisé, dis « autour de la séance » et n'invente pas d'heure.
-- Dans ton résumé, donne le niveau de chaque jour (« mardi, jour dur — boxe 18h30 »).
+- Dans ton résumé, donne le niveau de chaque jour (« mardi, jour dur — boxe 18h30 »).`
+    : `- ${p ? `${p.mealsPerDay} repas par jour` : "Le nombre de repas de son profil"}, et le total journalier tourne autour de sa cible moyenne, la même chaque jour. Pas au kcal près : c'est une estimation.
+- Respecte le temps de cuisine et le budget. Réutilise les mêmes ingrédients sur plusieurs repas — c'est moins cher et ça évite le gaspillage. Utilise \`mealPrep\` quand un plat se prépare la veille ou en double.
+- Protéines réparties sur la journée. Tu ne sais pas quels jours il s'entraîne : n'en invente aucun.`
+}
 - Après \`generate_meal_plan\`, résume la semaine dans ton message, jour par jour : le user ne voit que ce que tu écris.
 
 AUTRES OUTILS

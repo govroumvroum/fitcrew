@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from "convex/react";
 import { PlusIcon, Trash2Icon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,11 +46,23 @@ export function WeekSection({ date, programs }: { date: string; programs: Active
   const template = useQuery(api.week.template, {});
   const [editing, setEditing] = useState<number | null>(null);
 
+  const loaded = template !== undefined;
+  // /nutrition links to `/programme#ma-semaine`. The section only exists once
+  // the query lands — after the browser already looked for the anchor — so
+  // scroll to it ourselves.
+  useEffect(() => {
+    if (loaded && location.hash === "#ma-semaine")
+      document.getElementById("ma-semaine")?.scrollIntoView({ block: "start" });
+  }, [loaded]);
+
   if (template === undefined) return <Skeleton className="h-80" />;
   const entries: ShownEntry[] = template?.entries ?? [];
 
   return (
-    <section className="flex flex-col gap-2 rounded-lg border bg-card/55 p-3.5">
+    <section
+      id="ma-semaine"
+      className="flex scroll-mt-4 flex-col gap-2 rounded-lg border bg-card/55 p-3.5"
+    >
       <div>
         <p className="eyebrow">Ma semaine</p>
         <p className="text-sm text-muted-foreground">
@@ -127,10 +139,9 @@ function DayEditor({
     void save({ entries: all })
       .then((result) => {
         if (result.result === "refused") toast.error(result.error);
-        else {
-          toast.success(`${capitalize(WEEKDAYS[weekday])} enregistré.`);
-          onDone();
-        }
+        // No success toast: the sheet closing on the updated row says it, and a
+        // toast sat over the next day's « Enregistrer » for four seconds.
+        else onDone();
       })
       .catch(() => toast.error("Pas enregistré, réessaie."))
       .finally(() => setSaving(false));
@@ -191,7 +202,9 @@ function DayEditor({
                       lineageId,
                       // Picking a program names the séance after it, unless
                       // he already wrote something.
-                      kind: row.kind.trim() ? row.kind : name.slice(0, MAX_KIND),
+                      // « Gainage — 1 jour, 20 min » → « Gainage »: the part
+                      // before the dash is the name, the rest is its spec.
+                      kind: row.kind.trim() ? row.kind : shortName(name),
                     })
                   }
                 >
@@ -290,4 +303,6 @@ function Chip({
   );
 }
 
-const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+const shortName = (name: string) => (name.split(/\s+[—–-]\s+/)[0] ?? name).slice(0, MAX_KIND).trim();
+
+const capitalize =(text: string) => text.charAt(0).toUpperCase() + text.slice(1);

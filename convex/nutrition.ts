@@ -121,6 +121,21 @@ export function levelTargetsOf(profile: {
   );
 }
 
+/**
+ * Today's targets for /nutrition and the Chef's `read_today` — both read them
+ * from here. No level (no semaine type) → the flat `targets`, an average that
+ * already includes sport (decided with Basile); `flatTarget` lets the screen say
+ * « Objectif moyen ». Null without a profile.
+ */
+export function dayTargets(
+  profile: { targets: Macros; targetsByLevel?: Record<DayLevel, Macros> } | null,
+  day: { level: DayLevel | null },
+): { targets: Macros | null; flatTarget: boolean } {
+  if (!profile) return { targets: null, flatTarget: false };
+  if (day.level === null) return { targets: profile.targets, flatTarget: true };
+  return { targets: levelTargetsOf(profile)[day.level], flatTarget: false };
+}
+
 function targetsWithFactor(input: TargetInput, factor: number): Macros {
   const bmr =
     10 * input.weightKg + 6.25 * input.heightCm - 5 * input.age + (input.sex === "h" ? 5 : -161);
@@ -529,7 +544,7 @@ export const dashboard = query({
       // without a profile — there's nothing to aim at yet.
       day: {
         ...day,
-        targets: profile ? levelTargetsOf(profile)[day.level] : null,
+        ...dayTargets(profile, day),
       },
     };
   },

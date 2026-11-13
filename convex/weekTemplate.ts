@@ -186,14 +186,18 @@ export function levelForSessions(entries: WeekEntry[], sessions: DaySession[]): 
   return highestLevel(levels);
 }
 
-export type LevelSource = "manual" | "session" | "template";
+export type LevelSource = "manual" | "session" | "template" | "none";
 
 /**
  * Today's level, in the issue's order:
+ *  0. no semaine type at all → NO level (`null`, source "none"). Decided with
+ *     Basile: without a week, his flat target stays in force. That target is an
+ *     average that already includes sport, so neither a séance nor the selector
+ *     may turn the day into a level — training would count twice over the week;
  *  1. he set it by hand today → that;
  *  2. a séance was started or logged today while the template said `off` → a
  *     training day (`levelForSessions`);
- *  3. otherwise → what the template says (`off` without one).
+ *  3. otherwise → what the template says.
  * `planned` is the template's entries for that weekday, whatever won.
  */
 export function resolveDayLevel(input: {
@@ -201,7 +205,10 @@ export function resolveDayLevel(input: {
   entries: WeekEntry[];
   override?: { date: string; level: DayLevel } | null;
   sessions: DaySession[];
-}): { level: DayLevel; source: LevelSource; planned: WeekEntry[] } {
+}):
+  | { level: DayLevel; source: Exclude<LevelSource, "none">; planned: WeekEntry[] }
+  | { level: null; source: "none"; planned: WeekEntry[] } {
+  if (input.entries.length === 0) return { level: null, source: "none", planned: [] };
   const weekday = weekdayOf(input.date);
   const planned = entriesOn(input.entries, weekday);
   if (input.override && input.override.date === input.date)
