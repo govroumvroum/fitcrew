@@ -173,26 +173,36 @@ export function ToolPartView({
  * Catches a card that throws in render and shows the tool's failed line in its
  * place. The crash is still reported: this boundary sits below `app/error.tsx`,
  * so neither reporter would see it otherwise (same reason as there).
+ *
+ * One error is passed up instead: a tab running the previous bundle calling a
+ * function the backend no longer has. Its only cure is a reload, which is what
+ * `app/error.tsx` offers — a failed line here would leave the old bundle running.
  */
 class CardBoundary extends Component<
   { fallback: ReactNode; children: ReactNode },
-  { failed: boolean }
+  { error: unknown }
 > {
-  state = { failed: false };
+  state = { error: undefined as unknown };
 
-  static getDerivedStateFromError() {
-    return { failed: true };
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
   }
 
   componentDidCatch(error: unknown) {
+    if (staleBundle(error)) return;
     posthog.captureException(error);
     Sentry.captureException(error);
   }
 
   render() {
-    return this.state.failed ? this.props.fallback : this.props.children;
+    if (this.state.error === undefined) return this.props.children;
+    if (staleBundle(this.state.error)) throw this.state.error;
+    return this.props.fallback;
   }
 }
+
+const staleBundle = (error: unknown) =>
+  error instanceof Error && error.message.includes("Could not find public function");
 
 type ToolCallProps = ToolCallMessagePartProps<unknown, unknown>;
 
