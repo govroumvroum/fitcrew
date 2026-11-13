@@ -59,6 +59,11 @@ export const backfillTargetsByLevel = migrations.define({
  * A deployment with no user at all seeds nothing here: run `recipes:seed` there.
  * Production has users. The Recettes screen copes with an empty catalogue, which
  * it is between `convex deploy` and this running.
+ *
+ * Runs once per deployment: an edit to `SECHE_CATALOGUE` (a corrected macro, a
+ * dead hotlink) reaches the table through a NEW migration that calls the same
+ * `seedCatalogue` — say `seedRecipeCatalogue2`, one more line in `runAll`. The
+ * seed upserts, so it rewrites only the rows that changed.
  */
 export const seedRecipeCatalogue = migrations.define({
   table: "users",

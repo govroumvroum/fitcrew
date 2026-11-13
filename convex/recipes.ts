@@ -284,12 +284,19 @@ export const library = query({
     const own = (await ownedBy(ctx, user._id, args.category).take(OWN_LIMIT)).sort(
       (a, b) => b._creationTime - a._creationTime,
     );
+    // The WHOLE catalogue, never one shelf: the Chef files its copy of a catalogue
+    // dish by the slot it chose (a « collation » mousse eaten at déjeuner lands in
+    // `repas`), and that copy only inherits the curated `allergens` if its twin is
+    // in the merge. Filtering the catalogue first made the health guard depend on
+    // the tab. 31 rows; the shelf filter applies AFTER the guard.
     // Seed order (diet's order: by shelf), not the index's alphabetical one.
-    const catalogue = (await ownedBy(ctx, undefined, args.category).take(CATALOGUE_LIMIT)).sort(
+    const catalogue = (await ownedBy(ctx, undefined).take(CATALOGUE_LIMIT)).sort(
       (a, b) => a._creationTime - b._creationTime,
     );
 
-    const visible = mergeLibrary(own, catalogue).filter((r) => visibleTo(r, forbidden));
+    const visible = mergeLibrary(own, catalogue).filter(
+      (r) => visibleTo(r, forbidden) && (!args.category || r.category === args.category),
+    );
 
     return await Promise.all(
       visible.map(async (r) => {
