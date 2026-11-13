@@ -411,26 +411,18 @@ export function chefTools(today: string) {
 
     shopping_list: createTool({
       description:
-        "La liste de courses d'une semaine (en cours ou prochaine), consolidée depuis son plan. Rien à inventer : ça sort du plan enregistré.",
+        "La liste de courses d'une semaine (en cours ou prochaine), consolidée depuis son plan. Rien à inventer : ça sort du plan enregistré. Une liste vide veut dire qu'il n'y a pas de plan cette semaine-là : propose de le générer.",
       inputSchema: zShoppingList,
       execute: async (ctx: ToolCtx, { week: which }) => {
-        const monday = weeks[which];
         const items: { name: string; quantities: string[] }[] = await ctx.runQuery(
           api.nutrition.shoppingList,
-          { weekStart: monday },
+          { weekStart: weeks[which] },
         );
-        // An object since #126 (it was the bare list): the model has to know
-        // WHICH week it got, and that an empty list means "no plan". The card
-        // reads both shapes — older threads hold the array.
-        return {
-          week: WEEK_LABEL[which],
-          weekStart: monday,
-          items,
-          note:
-            items.length === 0
-              ? `Pas de plan pour la ${WEEK_LABEL[which]} (lundi ${monday}), donc rien à acheter. Propose de le générer.`
-              : null,
-        };
+        // Still the bare list, on purpose: a PWA tab on the previous bundle
+        // renders anything else as an empty card, and the list IS the card. The
+        // model knows the week (it chose `week`), and the description says what
+        // an empty list means. The card names the week from the input.
+        return items;
       },
     }),
 

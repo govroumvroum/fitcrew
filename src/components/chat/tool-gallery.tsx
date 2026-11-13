@@ -841,24 +841,15 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
   "tool-shopping_list": [
     {
       label: "Semaine prochaine (#126)",
-      tool: done(
-        "tool-shopping_list",
-        { week: "next" },
-        {
-          week: "semaine prochaine",
-          weekStart: "2026-11-16",
-          items: [
-            { name: "Filet de poulet", quantities: ["180 g", "180 g"] },
-            { name: "Riz basmati", quantities: ["80 g", "80 g", "60 g"] },
-            { name: "Courgettes", quantities: ["2"] },
-          ],
-          note: null,
-        },
-      ),
-      note: "Le résultat porte la semaine depuis #126 : le titre la nomme.",
+      tool: done("tool-shopping_list", { week: "next" }, [
+        { name: "Filet de poulet", quantities: ["180 g", "180 g"] },
+        { name: "Riz basmati", quantities: ["80 g", "80 g", "60 g", "100 g", "100 g", "110 g", "60 g"] },
+        { name: "Courgettes", quantities: ["2"] },
+      ]),
+      note: "Le résultat reste un tableau (un vieil onglet le lit) ; le titre vient de l'input `week`. Les quantités longues passent à la ligne.",
     },
     {
-      label: "Ancien format : ingrédient à plusieurs quantités",
+      label: "Sans input (fil d'avant #126) : ingrédient à plusieurs quantités",
       tool: done("tool-shopping_list", null, [
         { name: "Filet de poulet", quantities: ["180 g", "180 g", "2 filets"] },
         { name: "Flocons d'avoine", quantities: ["80 g", "80 g"] },

@@ -22,6 +22,7 @@ import type {
   zRegenerateDay,
   zReplaceMeal,
   zSaveNutritionProfile,
+  zShoppingList,
   zUpdateInventory,
 } from "../../../convex/chefToolSchemas";
 import type { FoodFact } from "../../../convex/foodFacts";
@@ -60,13 +61,16 @@ export type InventoryInput = z.infer<typeof zUpdateInventory>;
 type ShoppingLine = { name: string; quantities: string[] };
 
 /**
- * The `shopping_list` tool's result — the consolidated list IS the result. The
- * bare array is what it returned before #126, and threads already saved still
- * hold it; since then it's wrapped with the week it's for.
+ * The `shopping_list` tool's result — the consolidated list IS the result. A bare
+ * array, so a tab still on an older bundle renders it. The object form only
+ * exists in dev threads from an intermediate version of #126; read it anyway.
  */
 export type ShoppingListOutput =
   | ShoppingLine[]
   | { week: string; weekStart: string; items: ShoppingLine[]; note: string | null };
+
+/** The tool's input since #126; absent on older threads. */
+export type ShoppingListInput = Partial<z.infer<typeof zShoppingList>> | null | undefined;
 
 /** `api.vision.suggestRecipes` — the recipes are the result, nothing is saved. */
 export type RecipesOutput = {
@@ -310,20 +314,29 @@ export function RegenerateDayCard({
 /** Reads the OUTPUT: the consolidated list is the result — the input is empty. */
 export function ShoppingListCard({
   output,
+  input,
   isNew,
 }: {
   output: ShoppingListOutput;
+  input?: ShoppingListInput;
   isNew?: boolean;
 }) {
   const lines = Array.isArray(output) ? output : output?.items;
   if (!Array.isArray(lines) || lines.length === 0) return null;
-  const week = Array.isArray(output) ? null : formatWeekOf(output.weekStart);
+  const weekOf = Array.isArray(output) ? null : formatWeekOf(output.weekStart);
+  const title = weekOf
+    ? `Courses, semaine du ${weekOf}`
+    : input?.week === "next"
+      ? "Courses de la semaine prochaine"
+      : input?.week === "current"
+        ? "Courses de la semaine"
+        : "Liste de courses";
 
   return (
     <Surface isNew={isNew}>
       <Header
         icon={icon(ShoppingCartIcon)}
-        title={week ? `Courses, semaine du ${week}` : "Liste de courses"}
+        title={title}
         aside={`${lines.length} articles`}
       />
       <ul>

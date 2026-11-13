@@ -452,14 +452,19 @@ async function planOrRefusal(ctx: MutationCtx, week: string, dates: string[]) {
       `il n'a pas encore de plan pour la semaine du lundi ${week}. Propose-lui de la générer avec generate_meal_plan.`,
     );
   }
-  // A partial week is allowed (1 to 7 days), so a day can be missing from a plan
-  // that exists — `requireDay` below would throw on it.
-  const missing = dates.filter((date) => !plan.days.some((day) => day.date === date));
-  if (missing.length > 0) {
-    return refusal(
-      `le plan de la semaine du lundi ${week} n'a pas de jour ${missing.join(", ")}. Pour l'ajouter, regénère la semaine avec generate_meal_plan en reprenant les jours déjà prévus (lis-les avec read_plan).`,
-    );
+  const outside = datesOutsideWeek(week, dates);
+  if (outside.length > 0) {
+    return refusal(`${outside.join(", ")} n'est pas dans la semaine du lundi ${week}.`);
   }
+  // A partial week is allowed (1 to 7 days), so a day can be missing from a plan
+  // that exists. It's created empty, in place — the same way `replaceMeal` adds
+  // a missing slot. Rebuilding the week through `savePlan` instead would rewrite
+  // every other day from what the model remembers of them. In memory only: the
+  // caller's patch writes it, and a refusal after this point writes nothing.
+  for (const date of dates) {
+    if (!plan.days.some((day) => day.date === date)) plan.days.push({ date, meals: [] });
+  }
+  plan.days.sort((a, b) => a.date.localeCompare(b.date));
   return { plan };
 }
 
