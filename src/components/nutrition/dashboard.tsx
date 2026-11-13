@@ -1,15 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import {
-  BookOpenIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  ClockIcon,
-  LockIcon,
-  LockOpenIcon,
-  PlusIcon,
-} from "lucide-react";
+import { BookOpenIcon, ChevronRightIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -17,10 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatFull, monday } from "@/lib/dates";
+import { formatFull } from "@/lib/dates";
 import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
-import type { PlannedMeal } from "../../../convex/nutrition";
 import {
   type DayLevel,
   type LevelSource,
@@ -29,17 +20,19 @@ import {
   entryLabel,
 } from "../../../convex/weekTemplate";
 import { FoodLog } from "./food-log";
-import { MacroProgress, SLOT_LABELS, macroLine, pct, runMutation } from "./macros";
+import { MacroProgress, pct, runMutation } from "./macros";
+import { WeekPlan } from "./week-plan";
 
 /**
- * /nutrition. Reads one subscription (`api.nutrition.dashboard`) for today's
- * plan, log, hydration and targets.
+ * /nutrition. `api.nutrition.dashboard` for today (targets, journal,
+ * hydration) and `api.weekPlan.week` for the menu of this week or the next.
  *
- * This screen cannot generate anything: a menu comes out of the Chef's
- * `generate_meal_plan` tool, and replacing / moving / adapting a meal is natural
- * language. So every one of those is a link into /chef rather than a button that
- * would have to reimplement the agent. What it does own is the journal, the lock
- * toggle and hydration — three writes with no model in the loop.
+ * The rule since #121: swapping a meal for a recipe the library already has
+ * happens here, with no model — `weekPlan.swapMeal`, re-checked against the
+ * allergies on the server. Inventing a meal, moving one, « plus rapide »,
+ * « sans poisson », a whole new week: that's language, so it's the Chef's, and
+ * those stay links into /chef. The screen's other writes — journal, lock,
+ * hydration, shopping ticks — have no model in the loop either.
  */
 
 /** Also the placeholder the page shows before the local date exists, so the two
@@ -55,13 +48,10 @@ export function NutritionSkeleton() {
 
 export function NutritionDashboard({ today }: { today: string }) {
   const data = useQuery(api.nutrition.dashboard, { today });
-  // Same Monday the query computed server-side; the mutations key on it too, and
-  // the backend rejects anything that isn't a Monday.
-  const weekStart = monday(today);
 
   if (data === undefined) return <NutritionSkeleton />;
 
-  const { profile, todayMeals, log, consumed, hydrationMl, hasPlan, day } = data;
+  const { profile, log, consumed, hydrationMl, hasPlan, day } = data;
   // Today's level's targets; the flat one if the level isn't known.
   const targets = day?.targets ?? profile?.targets;
 
@@ -157,11 +147,11 @@ export function NutritionDashboard({ today }: { today: string }) {
                     : "Générer mon menu de la semaine"}
               </Link>
             </Button>
-            {/* #126: the Chef can prepare next week over the weekend. One line, no
-                week view — that's #121. On Monday it simply becomes `hasPlan`. */}
+            {/* #126: the Chef can prepare next week over the weekend. The line
+                opens it in the week view below (#121). */}
             {profile && data.hasPlanNextWeek ? (
               <Link
-                href="/chef"
+                href="/nutrition?semaine=prochaine#semaine"
                 className="-mt-1 text-center text-[11px] text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2"
               >
                 Plan de la semaine prochaine prêt
@@ -169,7 +159,7 @@ export function NutritionDashboard({ today }: { today: string }) {
             ) : null}
           </section>
 
-          <Meals meals={todayMeals} today={today} weekStart={weekStart} hasPlan={hasPlan} />
+          <WeekPlan today={today} hasPlanNextWeek={data.hasPlanNextWeek} />
 
           {/* #119: every recipe the Chef wrote, plus the sèche catalogue. */}
           <Link
@@ -212,7 +202,11 @@ const GOALS = {
   prise: "Prise de masse",
 } as const;
 
-const DAY_NAME: Record<DayLevel, string> = { off: "Jour off", leger: "Jour léger", dur: "Jour dur" };
+const DAY_NAME: Record<DayLevel, string> = {
+  off: "Jour off",
+  leger: "Jour léger",
+  dur: "Jour dur",
+};
 
 /** "Jour dur · boxe 18h30" — the level, then what the week planned for today. */
 const dayTitle = (level: DayLevel, planned: { kind: string; time?: string; level: DayLevel }[]) =>
@@ -272,133 +266,6 @@ function DayLevelPicker({
       </fieldset>
       {why ? <p className="text-[11px] text-muted-foreground">{why}</p> : null}
     </div>
-  );
-}
-
-
-function Meals({
-  meals,
-  today,
-  weekStart,
-  hasPlan,
-}: {
-  meals: PlannedMeal[];
-  today: string;
-  weekStart: string;
-  hasPlan: boolean;
-}) {
-  const logPlannedMeal = useMutation(api.nutrition.logPlannedMeal);
-  const toggleLock = useMutation(api.nutrition.toggleLock);
-
-  return (
-    <section className="flex flex-col gap-2.5">
-      <div>
-        <h2 className="text-[1.05rem] font-bold">Repas prévus</h2>
-        <p className="text-sm text-muted-foreground">
-          {meals.length === 0
-            ? hasPlan
-              ? "Rien de prévu aujourd'hui dans ton menu."
-              : "Pas encore de menu. Le Chef en écrit un pour la semaine."
-            : "Valeurs estimées par repas. Verrouille ceux que tu gardes avant une régénération."}
-        </p>
-      </div>
-
-      {meals.map((meal) => (
-        // Concentric radii: rounded-xl with p-3 outside, rounded-md rows inside.
-        <article key={meal.slot} className="flex flex-col gap-2 rounded-xl border bg-card p-3">
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="eyebrow">{SLOT_LABELS[meal.slot]}</p>
-              <p className="font-heading font-semibold">{meal.name}</p>
-              <p className="text-[11px] text-muted-foreground tabular-nums">
-                {macroLine(meal.macros)}
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-11 shrink-0"
-              aria-label={meal.locked ? `Déverrouiller ${meal.name}` : `Verrouiller ${meal.name}`}
-              aria-pressed={meal.locked === true}
-              onClick={() =>
-                runMutation(
-                  () => toggleLock({ weekStart, date: today, slot: meal.slot }),
-                  meal.locked
-                    ? "Repas déverrouillé."
-                    : "Repas verrouillé, il survit à une régénération.",
-                )
-              }
-            >
-              {meal.locked ? (
-                <LockIcon className="size-4 text-accent-text" aria-hidden />
-              ) : (
-                <LockOpenIcon className="size-4 text-muted-foreground" aria-hidden />
-              )}
-            </Button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1 tabular-nums">
-              <ClockIcon className="size-3" aria-hidden />
-              {meal.prepMinutes} min
-            </span>
-            {meal.mealPrep ? <span>{meal.mealPrep}</span> : null}
-          </div>
-
-          {/* Native <details>, like the coach's program cards: the recipe is what
-              you open when you cook, not what you scan at 8h. */}
-          <details className="group">
-            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-2 text-sm font-medium marker:hidden hover:bg-muted/60">
-              <ChevronDownIcon className="chevron" />
-              <span className="min-w-0 flex-1">La recette</span>
-              <span className="shrink-0 text-muted-foreground tabular-nums">
-                {meal.ingredients.length} ingrédient{meal.ingredients.length > 1 ? "s" : ""}
-              </span>
-            </summary>
-            <ul className="mt-1">
-              {meal.ingredients.map((ingredient) => (
-                <li
-                  key={ingredient.name}
-                  className="flex items-baseline gap-2 rounded-md px-2 py-1 text-sm odd:bg-muted/40"
-                >
-                  <span className="min-w-0 flex-1">{ingredient.name}</span>
-                  <span className="shrink-0 text-muted-foreground tabular-nums">
-                    {ingredient.quantity}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <ol className="mt-1 flex list-decimal flex-col gap-1 pl-6 text-sm">
-              {meal.steps.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
-          </details>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              className="h-11 flex-1"
-              onClick={() =>
-                runMutation(
-                  () => logPlannedMeal({ date: today, slot: meal.slot, weekStart }),
-                  "Ajouté au journal.",
-                )
-              }
-            >
-              <PlusIcon className="size-4" aria-hidden />
-              Ajouter au journal
-            </Button>
-            {/* Remplacer, déplacer, "plus rapide", "sans poisson" — all one
-                sentence to the Chef. A dropdown of canned alternatives here would
-                be a worse version of the thing that can actually cook. */}
-            <Button asChild variant="ghost" className="h-11">
-              <Link href="/chef">Changer</Link>
-            </Button>
-          </div>
-        </article>
-      ))}
-    </section>
   );
 }
 

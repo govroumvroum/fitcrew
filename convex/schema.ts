@@ -426,6 +426,16 @@ export default defineSchema({
     days: v.array(planDay),
   }).index("by_user_and_week", ["userId", "weekStart"]),
 
+  // The shopping list's ticks (#121), one row per user and week. Keyed by the
+  // list's `normalizeName`, so a tick follows its ingredient when the Chef
+  // rewrites the week, and an ingredient that left the plan is pruned at the
+  // next write — bounded by the list itself.
+  shoppingChecks: defineTable({
+    userId: v.id("users"),
+    weekStart: v.string(),
+    keys: v.array(v.string()),
+  }).index("by_user_and_week", ["userId", "weekStart"]),
+
   foodLog: defineTable({
     userId: v.id("users"),
     date: v.string(), // YYYY-MM-DD, local to the user
