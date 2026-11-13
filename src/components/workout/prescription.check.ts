@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import {
   defaultReps,
   formatSet,
+  isOpen,
+  offeredDayIndex,
   rowsOf,
+  seanceHref,
   seedSets,
   sessionSteps,
   workingValues,
@@ -218,6 +221,26 @@ const abandoned = sessionSteps(circuitDay, rowsAfter(circuitDay, 6)).filter(
 assert.equal(abandoned.length, 6);
 assert.equal(abandoned[0].row.round, 3);
 
+// A passed set (« j'étais cuit ») is not open: the resume point walks past it,
+// in a circuit exactly as on a classic exercise, and taking the pass back makes
+// it the resume point again.
+const passed = rowsAfter(circuitDay, 4) as (ReturnType<typeof rowsAfter>[number] & {
+  skipped?: boolean;
+})[];
+passed[4].skipped = true; // Abdos tour 2, the step the séance stood on
+const afterPass = sessionSteps(circuitDay, passed).find((step) => isOpen(step.row));
+assert.equal(afterPass?.row.exerciseName, "Tractions", "passer avance au pas suivant");
+assert.equal(afterPass?.row.round, 2);
+assert.equal(passed[4].completed, false, "une série passée n'est pas faite");
+passed[4].skipped = false;
+assert.equal(sessionSteps(circuitDay, passed).find((step) => isOpen(step.row))?.row.exerciseName, "Abdos");
+// Passing every set left: nothing open, which is the "termine la séance" state.
+const allPassed = rowsAfter(circuitDay, 10).map((r) => (r.completed ? r : { ...r, skipped: true }));
+assert.equal(sessionSteps(circuitDay, allPassed).filter((step) => isOpen(step.row)).length, 0);
+assert.equal(isOpen({ completed: false }), true);
+assert.equal(isOpen({ completed: true }), false);
+assert.equal(isOpen({ completed: false, skipped: true }), false);
+
 // The same exercise twice in one circuit: two occurrences, two slots, and their
 // rows must not merge. Pompes appears at index 0 and index 2.
 const twice = [
@@ -302,5 +325,19 @@ const classicExtra = seedSets(classic, []).map((set) => ({ ...set, completed: fa
 classicExtra.push({ exerciseName: "Squat", index: 3, weight: 0, reps: 5, completed: false });
 assert.equal(rowsOf(classic[0], classicExtra).length, 4);
 assert.equal(sessionSteps(classic, classicExtra).length, 6);
+
+// --- a day picked instead of the proposed one --------------------------------
+const prog = { lineageId: "abc", dayCount: 3, nextDayIndex: 2 };
+const url = (programme: string | null, jour: string | null) => ({ programme, jour });
+assert.equal(seanceHref("abc", 0), "/seance?programme=abc&jour=1");
+assert.equal(offeredDayIndex(url("abc", "1"), prog), 0, "le jour choisi");
+assert.equal(offeredDayIndex(url("abc", "3"), prog), 2);
+assert.equal(offeredDayIndex(url(null, null), prog), 2, "rien dans l'URL : le jour proposé");
+assert.equal(offeredDayIndex(url("autre", "1"), prog), 2, "un autre programme n'y touche pas");
+assert.equal(offeredDayIndex(url("abc", "4"), prog), 2, "hors programme");
+assert.equal(offeredDayIndex(url("abc", "0"), prog), 2);
+assert.equal(offeredDayIndex(url("abc", "1.5"), prog), 2);
+assert.equal(offeredDayIndex(url("abc", "x"), prog), 2);
+assert.equal(offeredDayIndex(url("abc", null), prog), 2);
 
 console.log("prescription.ts ok");

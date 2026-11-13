@@ -226,6 +226,12 @@ export default defineSchema({
     // `reps` are both 0: nothing was lifted or counted, so every weight × reps
     // reader (volume, 1RM, records) sees a set that adds nothing, not a fake one.
     seconds: v.optional(v.number()),
+    // Passed on purpose mid-séance (« j'étais cuit »): not done, but not still
+    // to do either, so the séance moves past it. Always with `completed: false`,
+    // so every reader that counts `completed` (volume, records, récap, coach)
+    // stays right without knowing this field. Optional forever: older rows and
+    // the previous bundle never write it.
+    skipped: v.optional(v.boolean()),
   })
     .index("by_workout", ["workoutId"])
     .index("by_user_and_exercise", ["userId", "exerciseName"]),
