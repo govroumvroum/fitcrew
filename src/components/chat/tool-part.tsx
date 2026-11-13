@@ -154,16 +154,19 @@ export function ToolPartView({
   // No card for this tool (its result is the prose above). The line still says it
   // ran — that's cheaper than the user wondering.
   if (!card) return <ToolLine Icon={label.icon} text={label.done} tone="done" />;
-  // A card that throws costs its own row, not the page: without this, one bad
-  // card sent the whole route to `app/error.tsx`.
-  const guarded = (
-    <CardBoundary fallback={failed}>
-      <Boundary>{card}</Boundary>
-    </CardBoundary>
-  );
   // A card the user must act on stays open; everything else collapses.
-  if (config.needsValidation.includes(tool.type)) return guarded;
-  return <ToolDisclosure label={label}>{guarded}</ToolDisclosure>;
+  const row = config.needsValidation.includes(tool.type) ? (
+    <Boundary>{card}</Boundary>
+  ) : (
+    <ToolDisclosure label={label}>
+      <Boundary>{card}</Boundary>
+    </ToolDisclosure>
+  );
+  // A card that throws costs its own row, not the page: without this, one bad
+  // card sent the whole route to `app/error.tsx`. Around the ROW, not the card,
+  // so a collapsed card fails as the same red line as every other failure
+  // instead of hiding it under a green summary.
+  return <CardBoundary fallback={failed}>{row}</CardBoundary>;
 }
 
 /**
