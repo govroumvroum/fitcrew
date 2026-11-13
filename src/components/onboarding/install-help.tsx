@@ -30,7 +30,7 @@ export function InstallHelp({ install }: { install: InstallState }) {
       <Button
         size="lg"
         className="h-14 w-full rounded-lg text-base active:scale-[0.96]"
-        onClick={() => void promptInstall()}
+        onClick={promptInstall}
       >
         <SquarePlusIcon aria-hidden />
         Installer FitCrew

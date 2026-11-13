@@ -12,10 +12,8 @@ import { useSyncExternalStore } from "react";
  * which the root layout renders on every route, imports it for that side effect.
  */
 
-type InstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
+// The outcome isn't read: an accepted install shows up as `appinstalled`.
+type InstallPromptEvent = Event & { prompt: () => Promise<void> };
 
 let deferred: InstallPromptEvent | null = null;
 // Set by `appinstalled`: the tab that installed is still a browser tab, so the
@@ -93,14 +91,12 @@ export function useInstall(): InstallState | null {
   return useSyncExternalStore(subscribe, read, unknown);
 }
 
-/** Opens the browser's own install dialog. False when there is none to open. */
-export async function promptInstall(): Promise<boolean> {
+/** Opens the browser's own install dialog, when it gave us one. */
+export function promptInstall(): void {
   const event = deferred;
-  if (!event) return false;
+  if (!event) return;
   // A prompt can be shown once; Chrome fires a fresh event later if it wants.
   deferred = null;
   emit();
-  await event.prompt();
-  const { outcome } = await event.userChoice;
-  return outcome === "accepted";
+  void event.prompt();
 }

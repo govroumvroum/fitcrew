@@ -162,7 +162,7 @@ export function FirstSteps({ state }: { state: WelcomeState }) {
                 onClick={() => {
                   // One tap installs where the browser allows it; elsewhere the
                   // gestures, in a drawer.
-                  if (install?.canPrompt) void promptInstall();
+                  if (install?.canPrompt) promptInstall();
                   else setInstallOpen(true);
                 }}
               />
