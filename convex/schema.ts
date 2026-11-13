@@ -505,6 +505,7 @@ export default defineSchema({
   // One row per recipe per owner, deduplicated on `nameKey`. Grows by up to
   // ~28 a week per user, so every read is bounded.
   recipes: defineTable(recipe)
+    .index("by_user", ["userId"]) // (userId, _creationTime): newest first, seed order
     .index("by_user_and_name_key", ["userId", "nameKey"])
     .index("by_user_and_category", ["userId", "category"]),
 

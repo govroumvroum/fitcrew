@@ -4,7 +4,7 @@ import { useAction, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { ArrowLeftIcon, ClockIcon, XIcon } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -192,8 +192,27 @@ function usePhotoLookup(recipes: Recipe[] | undefined) {
     .filter((r) => r.photoPending)
     .map((r) => r.name)
     .join("\n");
+  // One call at a time. `pending` shrinks while a call is still working through
+  // its batch, and the server reads its queue at the start of each call, so a
+  // second concurrent call would be handed — and bill — the same names again.
+  // When a call ends and the set has moved on, the next one starts from there;
+  // when it hasn't (a transient failure cached nothing), nothing loops.
+  const inFlight = useRef(false);
+  const latest = useRef("");
   useEffect(() => {
-    if (pending) void resolve({}).catch(() => {});
+    latest.current = pending;
+    if (!pending || inFlight.current) return;
+    const run = () => {
+      inFlight.current = true;
+      const asked = latest.current;
+      void resolve({})
+        .catch(() => {})
+        .finally(() => {
+          inFlight.current = false;
+          if (latest.current && latest.current !== asked) run();
+        });
+    };
+    run();
   }, [pending, resolve]);
 }
 

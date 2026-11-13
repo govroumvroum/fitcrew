@@ -251,7 +251,7 @@ const ownedBy = (ctx: QueryCtx, userId: Id<"users"> | undefined, category?: Reci
     ? ctx.db
         .query("recipes")
         .withIndex("by_user_and_category", (q) => q.eq("userId", userId).eq("category", category))
-    : ctx.db.query("recipes").withIndex("by_user_and_name_key", (q) => q.eq("userId", userId));
+    : ctx.db.query("recipes").withIndex("by_user", (q) => q.eq("userId", userId));
 
 const photoFor = (ctx: QueryCtx, nameKey: string) =>
   ctx.db
@@ -281,18 +281,16 @@ export const library = query({
     if (!user) return [];
 
     const forbidden = await forbiddenFor(ctx, user._id);
-    const own = (await ownedBy(ctx, user._id, args.category).take(OWN_LIMIT)).sort(
-      (a, b) => b._creationTime - a._creationTime,
-    );
+    // Both indexes end in `_creationTime`, so `desc` + `take` is the NEWEST 400,
+    // already in order — sorting after `take` would keep an arbitrary 400.
+    const own = await ownedBy(ctx, user._id, args.category).order("desc").take(OWN_LIMIT);
     // The WHOLE catalogue, never one shelf: the Chef files its copy of a catalogue
     // dish by the slot it chose (a « collation » mousse eaten at déjeuner lands in
     // `repas`), and that copy only inherits the curated `allergens` if its twin is
     // in the merge. Filtering the catalogue first made the health guard depend on
     // the tab. 31 rows; the shelf filter applies AFTER the guard.
-    // Seed order (diet's order: by shelf), not the index's alphabetical one.
-    const catalogue = (await ownedBy(ctx, undefined).take(CATALOGUE_LIMIT)).sort(
-      (a, b) => a._creationTime - b._creationTime,
-    );
+    // Ascending `by_user` = insertion order = the seed's (diet's, by shelf).
+    const catalogue = await ownedBy(ctx, undefined).take(CATALOGUE_LIMIT);
 
     const visible = mergeLibrary(own, catalogue).filter(
       (r) => visibleTo(r, forbidden) && (!args.category || r.category === args.category),
@@ -339,7 +337,7 @@ export const pendingPhotoNames = internalQuery({
     const user = await getCurrentUser(ctx);
     if (!user) return { userId: null, names: [] };
     const names: string[] = [];
-    for (const r of await ownedBy(ctx, user._id).take(OWN_LIMIT)) {
+    for (const r of await ownedBy(ctx, user._id).order("desc").take(OWN_LIMIT)) {
       if (names.length >= RESOLVE_BATCH) break;
       if (r.photoUrl || (await photoFor(ctx, r.nameKey))) continue;
       // A Chef recipe named like a catalogue one borrows the catalogue's photo.
