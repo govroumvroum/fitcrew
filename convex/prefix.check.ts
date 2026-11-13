@@ -143,6 +143,37 @@ const agents = [
   assert.equal(flatChef, chefSystemPrompt(user, profileWithLevels, monday));
   const [f1, f2] = [flatChef.split("\n"), chefSystemPrompt(user, profileWithLevels, tuesday).split("\n")];
   assert.ok(f1.findIndex((line, i) => line !== f2[i]) > f1.length - 4);
+
+  // The plan rules: targets follow the PROFILE, training days follow the WEEK.
+  // The Coach can write a week before the Chef's onboarding, so all four exist.
+  const both = chef;
+  assert.match(both, /Chaque jour vise la cible de SON niveau/);
+  assert.match(both, /~1h30 AVANT la séance/);
+  assert.doesNotMatch(both, /Tu ne sais pas quels jours/);
+
+  // Profile, no week: one average target, no training days invented.
+  assert.match(flatChef, /autour de sa cible moyenne/);
+  assert.match(flatChef, /Tu ne sais pas quels jours il s'entraîne/);
+  assert.doesNotMatch(flatChef, /cible de SON niveau|~1h30 AVANT/);
+
+  // Week, no profile: no numbers anywhere, onboarding first — but the training
+  // days ARE known, so the timing rule stays and nothing claims otherwise.
+  const weekOnly = chefSystemPrompt(blankUser, null, monday, week);
+  assert.match(weekOnly, /Pas encore de profil nutrition, donc aucune cible/);
+  assert.match(weekOnly, /~1h30 AVANT la séance/);
+  assert.match(weekOnly, /lundi : muscu \(dur, 18h30\)/);
+  assert.doesNotMatch(weekOnly, /cible de SON niveau|cible moyenne|Tu ne sais pas quels jours/);
+  // No target printed (the « 612 kcal » in the estimates rule is an example).
+  assert.doesNotMatch(weekOnly, /CIBLE|kcal —/);
+  assert.equal(weekOnly, chefSystemPrompt(blankUser, null, monday, week));
+  const [w1, w2] = [weekOnly.split("\n"), chefSystemPrompt(blankUser, null, tuesday, week).split("\n")];
+  assert.ok(w1.findIndex((line, i) => line !== w2[i]) > w1.length - 4);
+
+  // Neither: no numbers, no invented days.
+  const neither = chefSystemPrompt(blankUser, null, monday);
+  assert.match(neither, /Pas encore de profil nutrition, donc aucune cible/);
+  assert.match(neither, /Tu ne sais pas quels jours il s'entraîne/);
+  assert.doesNotMatch(neither, /CIBLE|kcal —/);
 }
 
 for (const a of agents) {

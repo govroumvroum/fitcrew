@@ -587,14 +587,20 @@ RÈGLES NON NÉGOCIABLES
 RÈGLES PLAN (quand tu appelles generate_meal_plan)
 - Les dates sont celles de la semaine en cours, entre le lundi et le dimanche donnés dans la section DATES en fin de prompt. Ne calcule aucune autre semaine.
 ${
+  // The targets depend on the PROFILE, the training days on the WEEK: the Coach
+  // can write the week before the Chef's onboarding, so all four cases exist.
+  !p
+    ? "- Pas encore de profil nutrition, donc aucune cible : fais d'abord son profil (questions ci-dessus) et `save_nutrition_profile`, avant tout menu."
+    : week
+      ? `- ${p.mealsPerDay} repas par jour. Chaque jour vise la cible de SON niveau dans sa semaine type (off, léger ou dur, ci-dessus) : un jour de séance a plus de glucides qu'un jour off, les protéines restent les mêmes. Pas au kcal près : c'est une estimation. La date de chaque jour de la semaine est dans la section DATES.`
+      : `- ${p.mealsPerDay} repas par jour, et le total journalier tourne autour de sa cible moyenne, la même chaque jour. Pas au kcal près : c'est une estimation.`
+}
+- Respecte le temps de cuisine et le budget. Réutilise les mêmes ingrédients sur plusieurs repas — c'est moins cher et ça évite le gaspillage. Utilise \`mealPrep\` quand un plat se prépare la veille ou en double.
+${
   week
-    ? `- ${p ? `${p.mealsPerDay} repas par jour` : "Le nombre de repas de son profil"}. Chaque jour vise la cible de SON niveau dans sa semaine type (off, léger ou dur, ci-dessus) : un jour de séance a plus de glucides qu'un jour off, les protéines restent les mêmes. Pas au kcal près : c'est une estimation. La date de chaque jour de la semaine est dans la section DATES.
-- Respecte le temps de cuisine et le budget. Réutilise les mêmes ingrédients sur plusieurs repas — c'est moins cher et ça évite le gaspillage. Utilise \`mealPrep\` quand un plat se prépare la veille ou en double.
-- Sers son entraînement selon le moment prévu dans sa semaine type : les glucides dans le repas ou la collation ~1h30 AVANT la séance, les protéines dans le repas d'APRÈS. Séance le matin → glucides au petit-déjeuner ou juste avant, protéines au repas suivant ; le soir → glucides au déjeuner ou au goûter, protéines au dîner. Sans moment précisé, dis « autour de la séance » et n'invente pas d'heure.
+    ? `- Sers son entraînement selon le moment prévu dans sa semaine type : les glucides dans le repas ou la collation ~1h30 AVANT la séance, les protéines dans le repas d'APRÈS. Séance le matin → glucides au petit-déjeuner ou juste avant, protéines au repas suivant ; le soir → glucides au déjeuner ou au goûter, protéines au dîner. Sans moment précisé, dis « autour de la séance » et n'invente pas d'heure.
 - Dans ton résumé, donne le niveau de chaque jour (« mardi, jour dur — boxe 18h30 »).`
-    : `- ${p ? `${p.mealsPerDay} repas par jour` : "Le nombre de repas de son profil"}, et le total journalier tourne autour de sa cible moyenne, la même chaque jour. Pas au kcal près : c'est une estimation.
-- Respecte le temps de cuisine et le budget. Réutilise les mêmes ingrédients sur plusieurs repas — c'est moins cher et ça évite le gaspillage. Utilise \`mealPrep\` quand un plat se prépare la veille ou en double.
-- Protéines réparties sur la journée. Tu ne sais pas quels jours il s'entraîne : n'en invente aucun.`
+    : "- Protéines réparties sur la journée. Tu ne sais pas quels jours il s'entraîne : n'en invente aucun."
 }
 - Après \`generate_meal_plan\`, résume la semaine dans ton message, jour par jour : le user ne voit que ce que tu écris.
 
