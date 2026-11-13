@@ -55,13 +55,15 @@ export function ChoicesCard({
   choicesId,
   send,
 }: {
-  choicesId: Id<"choices">;
+  /** Absent until the tool has returned. Never sent to Convex without it:
+   *  `choices:status` rejects the call, and `useQuery` rethrows in render. */
+  choicesId: Id<"choices"> | undefined;
   /** The agent whose thread this card sits in — the echo has to land there. */
   send: AgentApi["send"];
 }) {
-  const q = useQuery(api.choices.status, { choicesId });
+  const q = useQuery(api.choices.status, choicesId ? { choicesId } : "skip");
 
-  if (q === undefined) return <Skeleton className="h-24 w-full" />;
+  if (!choicesId || q === undefined) return <Skeleton className="h-24 w-full" />;
   if (q === null)
     return <p className="text-sm text-muted-foreground">Ces choix n&apos;existent plus.</p>;
   if (q.status === "completed")

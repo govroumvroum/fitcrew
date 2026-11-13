@@ -5,10 +5,12 @@ import {
   useAuiState,
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
+import * as Sentry from "@sentry/nextjs";
 import { ChevronDownIcon, WrenchIcon } from "lucide-react";
-import type { ComponentType, ReactNode } from "react";
+import posthog from "posthog-js";
+import { Component, type ComponentType, type ReactNode } from "react";
 import type { AgentConfig, AgentToolLabel } from "@/components/chat/agent-chat";
-import { agentStatus } from "@/components/chat/convert-message";
+import { agentStatus, toolPartFromCall } from "@/components/chat/convert-message";
 import { ToolLine } from "@/components/chat/tool-cards";
 
 /**
@@ -140,19 +142,53 @@ export function ToolPartView({
   // reassembled from deltas can land the output first — so a card that reads its
   // input stays hidden until the input exists (see `outputOnly`). Skipping this
   // guard crashed /coach in prod on mobile.
-  if (!tool.input && !config.outputOnly.includes(tool.type)) return inputMissing;
+  const readsOutput = config.outputOnly.includes(tool.type);
+  if (!tool.input && !readsOutput) return inputMissing;
+  // The same guard, the other way round: a card that reads its OUTPUT gets one,
+  // or the failed line. Every tool returns an object, so anything else is a
+  // result that never was — and a card handed it reads its id as `undefined`
+  // and sends that to Convex (see `settled` in convert-message).
+  if (readsOutput && (typeof tool.output !== "object" || tool.output === null)) return failed;
 
   const card = config.renderTool(tool, isNew);
   // No card for this tool (its result is the prose above). The line still says it
   // ran — that's cheaper than the user wondering.
   if (!card) return <ToolLine Icon={label.icon} text={label.done} tone="done" />;
-  // A card the user must act on stays open; everything else collapses.
-  if (config.needsValidation.includes(tool.type)) return <Boundary>{card}</Boundary>;
-  return (
-    <ToolDisclosure label={label}>
+  // A card that throws costs its own row, not the page: without this, one bad
+  // card sent the whole route to `app/error.tsx`.
+  const guarded = (
+    <CardBoundary fallback={failed}>
       <Boundary>{card}</Boundary>
-    </ToolDisclosure>
+    </CardBoundary>
   );
+  // A card the user must act on stays open; everything else collapses.
+  if (config.needsValidation.includes(tool.type)) return guarded;
+  return <ToolDisclosure label={label}>{guarded}</ToolDisclosure>;
+}
+
+/**
+ * Catches a card that throws in render and shows the tool's failed line in its
+ * place. The crash is still reported: this boundary sits below `app/error.tsx`,
+ * so neither reporter would see it otherwise (same reason as there).
+ */
+class CardBoundary extends Component<
+  { fallback: ReactNode; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    posthog.captureException(error);
+    Sentry.captureException(error);
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
 }
 
 type ToolCallProps = ToolCallMessagePartProps<unknown, unknown>;
@@ -163,14 +199,7 @@ type ToolCallProps = ToolCallMessagePartProps<unknown, unknown>;
  * exactly the case the input guard exists for.
  */
 function toolPartOf(props: ToolCallProps): ToolPart {
-  return (
-    (props.artifact as ToolPart | undefined) ?? {
-      type: `tool-${props.toolName}`,
-      state: "output-available",
-      input: props.args,
-      output: props.result,
-    }
-  );
+  return (props.artifact as ToolPart | undefined) ?? toolPartFromCall(props);
 }
 
 /** Only a streaming turn animates its cards in — not one merely left `pending`. */
