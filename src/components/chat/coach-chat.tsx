@@ -72,7 +72,15 @@ export const COACH: AgentConfig = {
   // The screenshot review, the sources list and the chips read the output rather
   // than the input — the chips because their id is in it, and their input streams
   // in piece by piece, which the guard would read as "not landed yet".
-  outputOnly: ["tool-extract_screenshot", "tool-search_web", "tool-fetch_url", "tool-ask_choices"],
+  outputOnly: [
+    "tool-extract_screenshot",
+    "tool-search_web",
+    "tool-fetch_url",
+    "tool-ask_choices",
+    // Its card draws the week as SAVED (normalised times, program names from the
+    // database), never the input.
+    "tool-set_week_template",
+  ],
   toolLabels: {
     "tool-ask_choices": {
       icon: ClipboardListIcon,
