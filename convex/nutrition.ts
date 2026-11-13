@@ -362,7 +362,7 @@ export function shoppingListFrom(days: PlanDay[]): { name: string; quantities: s
 const SLOT_ORDER: MealSlot[] = ["petit_dejeuner", "dejeuner", "collation", "diner"];
 
 /** Chronological, so a regenerated day doesn't read out of order. */
-const bySlot = (a: PlannedMeal, b: PlannedMeal) =>
+export const bySlot = (a: PlannedMeal, b: PlannedMeal) =>
   SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot);
 
 /**
@@ -378,7 +378,7 @@ export function clampMacros(m: Macros): Macros {
   };
 }
 
-const clampMeal = (meal: PlannedMeal): PlannedMeal => ({
+export const clampMeal = (meal: PlannedMeal): PlannedMeal => ({
   ...meal,
   macros: clampMacros(meal.macros),
 });
@@ -387,13 +387,13 @@ const clampMeal = (meal: PlannedMeal): PlannedMeal => ({
 // Convex
 // ---------------------------------------------------------------------------
 
-const profileFor = (ctx: QueryCtx, userId: Id<"users">) =>
+export const profileFor = (ctx: QueryCtx, userId: Id<"users">) =>
   ctx.db
     .query("nutritionProfiles")
     .withIndex("by_user", (q) => q.eq("userId", userId))
     .unique();
 
-const planFor = (ctx: QueryCtx, userId: Id<"users">, week: string) =>
+export const planFor = (ctx: QueryCtx, userId: Id<"users">, week: string) =>
   ctx.db
     .query("mealPlans")
     .withIndex("by_user_and_week", (q) => q.eq("userId", userId).eq("weekStart", week))

@@ -39,6 +39,8 @@ import type * as toolSchemas from "../toolSchemas.js";
 import type * as users from "../users.js";
 import type * as vision from "../vision.js";
 import type * as week from "../week.js";
+import type * as weekPlan from "../weekPlan.js";
+import type * as weekPlanLogic from "../weekPlanLogic.js";
 import type * as weekTemplate from "../weekTemplate.js";
 import type * as welcome from "../welcome.js";
 import type * as workouts from "../workouts.js";
@@ -81,6 +83,8 @@ declare const fullApi: ApiFromModules<{
   users: typeof users;
   vision: typeof vision;
   week: typeof week;
+  weekPlan: typeof weekPlan;
+  weekPlanLogic: typeof weekPlanLogic;
   weekTemplate: typeof weekTemplate;
   welcome: typeof welcome;
   workouts: typeof workouts;

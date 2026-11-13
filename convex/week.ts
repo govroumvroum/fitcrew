@@ -54,7 +54,7 @@ export async function entriesWithPrograms(
 }
 
 /** What was trained on `date`: séances (with their program's lineage) and cardio. */
-async function sessionsOn(
+export async function sessionsOn(
   ctx: QueryCtx,
   userId: Id<"users">,
   date: string,
