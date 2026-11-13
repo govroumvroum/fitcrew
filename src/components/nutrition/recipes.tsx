@@ -95,7 +95,12 @@ export function RecipeLibrary() {
                 variant={pressed ? "secondary" : "outline"}
                 size="sm"
                 aria-pressed={pressed}
-                onClick={() => setFilter(f.value)}
+                onClick={(event) => {
+                  setFilter(f.value);
+                  // « Cheat » sits past the edge at 390 px: bring the pressed
+                  // chip fully into the row, never scroll the page.
+                  event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
+                }}
                 className={cn(
                   "h-auto min-h-11 shrink-0 px-3.5 text-sm",
                   pressed && "border-primary/50 ring-1 ring-primary/30",
@@ -294,9 +299,9 @@ function RecipeSheet({ recipe }: { recipe: Recipe }) {
   return (
     <DialogContent
       showCloseButton={false}
-      className="max-h-[88dvh] gap-0 overflow-y-auto p-0 sm:max-w-md"
+      className="flex max-h-[88dvh] flex-col gap-0 overflow-y-auto p-0 sm:max-w-md"
     >
-      <RecipeVisual recipe={recipe} className="rounded-t-xl" />
+      <RecipeVisual recipe={recipe} className="shrink-0 rounded-t-xl" />
       <DialogClose
         render={
           <Button

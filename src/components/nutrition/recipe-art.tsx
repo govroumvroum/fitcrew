@@ -49,10 +49,12 @@ type Topping =
   | "cream"
   | "choco"
   | "potato"
-  | "bread";
+  | "bread"
+  | "soup";
 
 /** Word stems → topping. First match per topping; order is drawing order (bed first). */
 const KEYWORDS: [Topping, RegExp][] = [
+  ["soup", /\b(veloute|soupe|potage|gaspacho)/],
   ["rice", /\b(riz|risotto|quinoa|boulgour|semoule)/],
   ["pasta", /\b(pate|spaghetti|penne|nouille|tagliatelle|lasagne|coquillette)/],
   ["oats", /\b(avoine|flocon|granola|muesli|porridge)/],
@@ -68,7 +70,7 @@ const KEYWORDS: [Topping, RegExp][] = [
   ["fish", /\b(saumon|thon|cabillaud|poisson|crevette|colin|truite|sardine)/],
   ["egg", /\b(oeuf|omelette)/],
   ["tomato", /\b(tomate|poivron|ratatouille)/],
-  ["berries", /\b(fruits rouges|myrtille|fraise|framboise|banane|pomme|mangue|fruit)/],
+  ["berries", /\b(fruits rouges|myrtille|fraise|framboise|banane|pomme(?! de terre)|mangue|fruit)/],
   ["choco", /\b(chocolat|cacao|cafe|espresso)/],
 ];
 
@@ -145,6 +147,15 @@ export function RecipeArt({
 
   for (const t of toppings) {
     switch (t) {
+      case "soup":
+        // A full bowl: the soup is the dish, toppings float on it.
+        add(
+          <path
+            d={blob(cx, cy, r * 0.8, 0.04, 12)}
+            fill={`hsl(${Math.floor(R(20, 45))} 80% 58%)`}
+          />,
+        );
+        break;
       case "rice":
         add(<path d={blob(cx - r * 0.2, cy, r * 0.45, 0.12)} fill="#F7F4EC" />);
         scatter(
