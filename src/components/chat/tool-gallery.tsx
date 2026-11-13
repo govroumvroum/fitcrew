@@ -795,6 +795,18 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
         meal: OMELETTE,
       }),
     },
+    {
+      label: "Refusé : pas de plan pour cette semaine (#126)",
+      tool: done(
+        "tool-replace_meal",
+        { date: "2026-11-17", slot: "diner", meal: OMELETTE },
+        {
+          result: "refused",
+          note: "Rien n'a été modifié : il n'a pas encore de plan pour la semaine du lundi 2026-11-16.",
+        },
+      ),
+      note: "Un refus retourné (`result: \"refused\"`) s'affiche comme un échec : rien n'a été écrit, la carte ne doit pas montrer le repas.",
+    },
   ],
   "tool-move_meal": [
     {
@@ -828,7 +840,16 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
   ],
   "tool-shopping_list": [
     {
-      label: "Ingrédient à plusieurs quantités",
+      label: "Semaine prochaine (#126)",
+      tool: done("tool-shopping_list", { week: "next" }, [
+        { name: "Filet de poulet", quantities: ["180 g", "180 g"] },
+        { name: "Riz basmati", quantities: ["80 g", "80 g", "60 g", "100 g", "100 g", "110 g", "60 g"] },
+        { name: "Courgettes", quantities: ["2"] },
+      ]),
+      note: "Le résultat reste un tableau (un vieil onglet le lit) ; le titre vient de l'input `week`. Les quantités longues passent à la ligne.",
+    },
+    {
+      label: "Sans input (fil d'avant #126) : ingrédient à plusieurs quantités",
       tool: done("tool-shopping_list", null, [
         { name: "Filet de poulet", quantities: ["180 g", "180 g", "2 filets"] },
         { name: "Flocons d'avoine", quantities: ["80 g", "80 g"] },

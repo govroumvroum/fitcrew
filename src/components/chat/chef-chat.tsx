@@ -46,6 +46,7 @@ import {
   type RecipesOutput,
   type RegenerateDayInput,
   type ReplaceMealInput,
+  type ShoppingListInput,
   type ShoppingListOutput,
 } from "@/components/chat/chef-tool-cards";
 import { ChoicesCard } from "@/components/chat/choices-card";
@@ -307,7 +308,13 @@ export const CHEF: AgentConfig = {
           />
         );
       case "tool-shopping_list":
-        return <ShoppingListCard output={output as ShoppingListOutput} isNew={isNew} />;
+        return (
+          <ShoppingListCard
+            output={output as ShoppingListOutput}
+            input={input as ShoppingListInput}
+            isNew={isNew}
+          />
+        );
       case "tool-add_food_log_entry":
         return <FoodLogCard input={input as FoodLogInput} isNew={isNew} />;
       case "tool-log_planned_meal":

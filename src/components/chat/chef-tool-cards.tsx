@@ -22,13 +22,14 @@ import type {
   zRegenerateDay,
   zReplaceMeal,
   zSaveNutritionProfile,
+  zShoppingList,
   zUpdateInventory,
 } from "../../../convex/chefToolSchemas";
 import type { FoodFact } from "../../../convex/foodFacts";
 import type { Macros } from "../../../convex/nutrition";
 import { Chips, Estimated, Field, Header, Surface } from "@/components/chat/tool-cards";
 import { SLOT_LABELS, macroLine, macrosOnly } from "@/components/nutrition/macros";
-import { formatLoose } from "@/lib/dates";
+import { formatLoose, formatWeekOf } from "@/lib/dates";
 import { formatNumber } from "@/lib/utils";
 
 /**
@@ -57,8 +58,19 @@ export type FoodLogInput = z.infer<typeof zAddFoodLogEntry>;
 export type PlannedMealInput = z.infer<typeof zLogPlannedMeal>;
 export type InventoryInput = z.infer<typeof zUpdateInventory>;
 
-/** `api.nutrition.shoppingList` — the consolidated list IS the result. */
-export type ShoppingListOutput = { name: string; quantities: string[] }[];
+type ShoppingLine = { name: string; quantities: string[] };
+
+/**
+ * The `shopping_list` tool's result — the consolidated list IS the result. A bare
+ * array, so a tab still on an older bundle renders it. The object form only
+ * exists in dev threads from an intermediate version of #126; read it anyway.
+ */
+export type ShoppingListOutput =
+  | ShoppingLine[]
+  | { week: string; weekStart: string; items: ShoppingLine[]; note: string | null };
+
+/** The tool's input since #126; absent on older threads. */
+export type ShoppingListInput = Partial<z.infer<typeof zShoppingList>> | null | undefined;
 
 /** `api.vision.suggestRecipes` — the recipes are the result, nothing is saved. */
 export type RecipesOutput = {
@@ -200,11 +212,13 @@ export function MealPlanCard({
   meals?: number;
   isNew?: boolean;
 }) {
+  // The week the plan is for (#126): this one or the next, the title says which.
+  const week = input.days[0] ? formatWeekOf(input.days[0].date) : null;
   return (
     <Surface isNew={isNew}>
       <Header
         icon={icon(CalendarDaysIcon)}
-        title="Ta semaine de repas"
+        title={week ? `Ta semaine du ${week}` : "Ta semaine de repas"}
         aside={meals ? `${meals} repas` : undefined}
       />
       {/* Native <details>: a disclosure without a dependency or a state hook.
@@ -300,28 +314,41 @@ export function RegenerateDayCard({
 /** Reads the OUTPUT: the consolidated list is the result — the input is empty. */
 export function ShoppingListCard({
   output,
+  input,
   isNew,
 }: {
   output: ShoppingListOutput;
+  input?: ShoppingListInput;
   isNew?: boolean;
 }) {
-  if (!Array.isArray(output) || output.length === 0) return null;
+  const lines = Array.isArray(output) ? output : output?.items;
+  if (!Array.isArray(lines) || lines.length === 0) return null;
+  const weekOf = Array.isArray(output) ? null : formatWeekOf(output.weekStart);
+  const title = weekOf
+    ? `Courses, semaine du ${weekOf}`
+    : input?.week === "next"
+      ? "Courses de la semaine prochaine"
+      : input?.week === "current"
+        ? "Courses de la semaine"
+        : "Liste de courses";
 
   return (
     <Surface isNew={isNew}>
       <Header
         icon={icon(ShoppingCartIcon)}
-        title="Liste de courses"
-        aside={`${output.length} articles`}
+        title={title}
+        aside={`${lines.length} articles`}
       />
       <ul>
-        {output.map((line) => (
+        {lines.map((line) => (
           <li
             key={line.name}
             className="flex items-baseline gap-2 border-b px-1 py-2 last:border-b-0"
           >
             <span className="min-w-0 flex-1 text-sm">{line.name}</span>
-            <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+            {/* Wraps, capped at 60 %: a week of rice is ten quantities, and an
+                unshrinkable line used to squeeze the name to one letter a row. */}
+            <span className="max-w-[60%] text-right text-[11px] text-muted-foreground tabular-nums">
               {line.quantities.join(" + ")}
             </span>
           </li>
