@@ -257,7 +257,10 @@ const photoFor = (ctx: QueryCtx, nameKey: string) =>
   ctx.db
     .query("recipePhotos")
     .withIndex("by_name_key", (q) => q.eq("nameKey", nameKey))
-    .unique();
+    // `.first()`, not `.unique()`: `cachePhoto` is read-then-write, so two overlapping
+    // lookups for one name can both insert, and `.unique()` would then throw for
+    // every user of this global cache. A duplicate holds the same answer.
+    .first();
 
 /**
  * The Recettes screen: the user's own recipes (newest first), then the shared

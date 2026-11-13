@@ -44,7 +44,7 @@ type Recipe = FunctionReturnType<typeof api.recipes.library>[number];
 export function RecipeLibrary() {
   const [filter, setFilter] = useState<RecipeFilter>("all");
   const [sort, setSort] = useState<RecipeSort>("recent");
-  const [open, setOpen] = useState<Recipe | null>(null);
+  const [openId, setOpenId] = useState<Recipe["_id"] | null>(null);
 
   // A shelf goes through the server's category index; « Cheat » and « Tout »
   // read everything. While the new answer is on its way, the previous one is
@@ -56,6 +56,9 @@ export function RecipeLibrary() {
   const data = fresh ?? last;
 
   usePhotoLookup(data);
+  // The live row, not a snapshot from the click: a photo resolved while the
+  // sheet is open has to reach it.
+  const open = data?.find((r) => r._id === openId) ?? null;
 
   if (data === undefined) return <RecipesSkeleton />;
 
@@ -150,13 +153,17 @@ export function RecipeLibrary() {
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {shown.map((recipe) => (
             <li key={recipe._id}>
-              <RecipeCard recipe={recipe} maxDensity={maxDensity} onOpen={() => setOpen(recipe)} />
+              <RecipeCard
+                recipe={recipe}
+                maxDensity={maxDensity}
+                onOpen={() => setOpenId(recipe._id)}
+              />
             </li>
           ))}
         </ul>
       )}
 
-      <Dialog open={open !== null} onOpenChange={(next) => !next && setOpen(null)}>
+      <Dialog open={open !== null} onOpenChange={(next) => !next && setOpenId(null)}>
         {open ? <RecipeSheet recipe={open} /> : null}
       </Dialog>
     </div>
