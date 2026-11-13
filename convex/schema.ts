@@ -119,6 +119,26 @@ export const nutritionProfile = v.object({
   // numbers and they must not silently drift under an existing plan when the
   // user logs a new weight.
   targets: macros,
+  // One target per day level (#118). Optional: a profile saved before it has
+  // none until `backfillTargetsByLevel` runs, and every reader falls back to
+  // `targets` for the three. `targets` itself stays written — the previous
+  // bundle's /nutrition reads `profile.targets.calories`.
+  targetsByLevel: v.optional(v.object({ off: macros, leger: macros, dur: macros })),
+});
+
+// How hard a day is, for the Chef: no training, a light one, a hard one.
+export const dayLevel = v.union(v.literal("off"), v.literal("leger"), v.literal("dur"));
+
+// One planned thing on one weekday of the semaine type. `lineageId` when it is
+// one of the user's programs — always the lineage, never a row id, which changes
+// on every edit. `time` is "matin" | "midi" | "soir" or an "HH:MM", normalised
+// by `normalizeTime` in convex/week.ts.
+export const weekEntry = v.object({
+  weekday: v.number(), // 0 = lundi … 6 = dimanche
+  kind: v.string(), // "boxe", "muscu"… the user's words
+  lineageId: v.optional(v.id("programs")),
+  level: dayLevel,
+  time: v.optional(v.string()),
 });
 
 export const visionIntent = v.union(
@@ -340,6 +360,17 @@ export default defineSchema({
   }).index("by_week", ["weekStart"]),
 
   nutritionProfiles: defineTable(nutritionProfile).index("by_user", ["userId"]),
+
+  // The semaine type (#118): WHICH weekdays he trains, never WHICH séance — the
+  // programs keep their calendar-free rotation. One row per user, a handful of
+  // entries (≤ 3 per day, so ≤ 21).
+  weekTemplates: defineTable({
+    userId: v.id("users"),
+    entries: v.array(weekEntry),
+    // The level he picked by hand on /nutrition, for that date only. A single
+    // slot, not a log: once the date has passed it means nothing.
+    override: v.optional(v.object({ date: v.string(), level: dayLevel })),
+  }).index("by_user", ["userId"]),
 
   mealPlans: defineTable({
     userId: v.id("users"),

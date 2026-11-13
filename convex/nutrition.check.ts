@@ -2,7 +2,10 @@
 import assert from "node:assert/strict";
 import {
   type PlanDay,
+  dayTargets,
+  estimateLevelTargets,
   estimateTargets,
+  levelTargetsOf,
   forbiddenHits,
   shoppingListFrom,
   sumMacros,
@@ -48,6 +51,65 @@ assert.ok(
     activityLevel: "sedentaire",
   }).carbs >= 0,
 );
+
+// --- Targets per day level (#118) --------------------------------------------
+for (const goal of ["perte", "maintien", "prise"] as const) {
+  for (const activityLevel of ["sedentaire", "modere", "tres_actif"] as const) {
+    const input = { ...base, goal, activityLevel };
+    const levels = estimateLevelTargets(input);
+    // Protein (and fat) are the same every day; carbs absorb the gap.
+    assert.equal(levels.off.protein, levels.leger.protein);
+    assert.equal(levels.off.protein, levels.dur.protein);
+    assert.equal(levels.off.fat, levels.dur.fat);
+    assert.ok(levels.off.calories < levels.leger.calories, "léger au-dessus de off");
+    assert.ok(levels.leger.calories < levels.dur.calories, "dur au-dessus de léger");
+    assert.ok(levels.off.carbs < levels.dur.carbs, "les glucides suivent l'entraînement");
+    for (const t of Object.values(levels)) {
+      assert.ok(t.carbs >= 0, "glucides jamais négatifs");
+      for (const value of Object.values(t)) assert.ok(Number.isInteger(value));
+      const fromMacros = t.protein * 4 + t.carbs * 4 + t.fat * 9;
+      assert.ok(Math.abs(fromMacros - t.calories) <= 4, `${fromMacros} vs ${t.calories}`);
+    }
+    // The off day starts from the activity WITHOUT sport: below the flat
+    // target, which already counted training in its factor. Otherwise a séance
+    // would be counted twice — once in the factor, once in the level.
+    assert.ok(
+      levels.off.calories < estimateTargets(input).calories ||
+        activityLevel === "sedentaire",
+      `off (${levels.off.calories}) must not already include training`,
+    );
+  }
+}
+// Gaps proportional to weight: 80 kg → +240 léger, +480 dur.
+const eighty = estimateLevelTargets({ ...base, goal: "maintien" });
+assert.equal(eighty.leger.calories - eighty.off.calories, 240);
+assert.equal(eighty.dur.calories - eighty.off.calories, 480);
+assert.equal(eighty.dur.carbs - eighty.off.carbs, 120);
+// Carbs floor survives the absurd input too.
+const absurd = estimateLevelTargets({
+  goal: "perte",
+  age: 100,
+  sex: "f",
+  heightCm: 100,
+  weightKg: 300,
+  activityLevel: "sedentaire",
+});
+assert.ok(absurd.off.carbs >= 0 && absurd.dur.carbs >= absurd.off.carbs);
+
+// A profile saved before #118 reads its flat target for all three levels.
+const flat = { calories: 2300, protein: 160, carbs: 240, fat: 70 };
+assert.deepEqual(levelTargetsOf({ targets: flat }), { off: flat, leger: flat, dur: flat });
+assert.deepEqual(levelTargetsOf({ targets: flat, targetsByLevel: eighty }), eighty);
+
+// The day's targets: the level's own, null without a profile.
+const withLevels = { targets: flat, targetsByLevel: eighty };
+assert.deepEqual(dayTargets(withLevels, { level: "dur" }), eighty.dur);
+assert.deepEqual(dayTargets(withLevels, { level: "off" }), eighty.off);
+assert.equal(dayTargets(null, { level: "dur" }), null);
+// No semaine type → no level → the flat target, an average that already
+// includes sport. Never the off target: that would count training twice.
+assert.deepEqual(dayTargets(withLevels, { level: null }), flat);
+assert.equal(dayTargets(null, { level: null }), null);
 
 // A day with nothing logged is zeros, not a crash.
 assert.deepEqual(sumMacros([]), { calories: 0, protein: 0, carbs: 0, fat: 0 });

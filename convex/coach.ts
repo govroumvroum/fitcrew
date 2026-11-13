@@ -38,11 +38,14 @@ import {
   zLogWorkout,
   zSaveOnboarding,
   zSetProgramStatus,
+  zSetWeekTemplate,
   zSwapExercise,
 } from "./toolSchemas";
 import { KICKOFF, COACH_ATTACHMENTS, isSentinel } from "./sentinels";
 import { emptyMessages, greetIfExists, messagesAccess } from "./threadAccess";
 import { getCurrentUser, requireCurrentUser } from "./users";
+import { type EntryProgram, loadTemplate } from "./week";
+import { type WeekEntry, WEEKDAYS, renderWeek } from "./weekTemplate";
 
 // ---------------------------------------------------------------------------
 // Pure shape conversion (model output -> what the schema accepts)
@@ -337,7 +340,9 @@ export const saveProgram = internalMutation({
     // A root row's lineage is itself, and we only know the id after the insert.
     await ctx.db.patch("programs", programId, { lineageId: programId });
     await ctx.db.patch("users", user._id, { currentProgramId: programId });
-    return { version: 1, days: args.days.length };
+    // `lineageId` so the coach can put the new program straight into the
+    // semaine type (`set_week_template`) without a `read_programs` round trip.
+    return { version: 1, days: args.days.length, lineageId: programId };
   },
 });
 
@@ -579,7 +584,12 @@ export const context = internalQuery({
  */
 export const streamContext = internalQuery({
   args: {},
-  handler: async (ctx) => ({ user: await requireCurrentUser(ctx) }),
+  handler: async (ctx) => {
+    const user = await requireCurrentUser(ctx);
+    // The semaine type (#118): rewritten a few times a year, so it can sit in
+    // the cached prefix. Reads the user's programs only when an entry names one.
+    return { user, week: await loadTemplate(ctx, user._id) };
+  },
 });
 
 /**
@@ -958,6 +968,25 @@ export function coachTools(today: string) {
         }),
     }),
 
+    set_week_template: createTool({
+      description:
+        "Écrit sa semaine type : quels jours il s'entraîne, à quoi, à quel niveau (off, léger, dur) et à quel moment. Le Chef la lit pour ses menus, et elle s'affiche sur /programme. Remplace toute la semaine précédente. Ne change rien à la rotation des programmes : elle dit QUELS jours, le programme dit QUELLE séance.",
+      inputSchema: zSetWeekTemplate,
+      execute: async (ctx: ToolCtx, { days }) =>
+        await ctx.runMutation(api.week.save, {
+          entries: days.flatMap(({ day, sessions }) =>
+            sessions.map((session) => ({
+              weekday: WEEKDAYS.indexOf(day),
+              kind: session.kind,
+              level: session.level,
+              // The model's nulls and blanks are "not given".
+              ...(session.lineageId?.trim() ? { lineageId: session.lineageId.trim() } : {}),
+              ...(session.time?.trim() ? { time: session.time.trim() } : {}),
+            })),
+          ),
+        }),
+    }),
+
     read_programs: createTool({
       description:
         "Les programmes que le user suit ACTUELLEMENT, rendus en entier : jours, exercices, séries × reps, repos, règles de progression, deload. Ils ne sont pas dans ton prompt — appelle cet outil avant toute réponse qui parle de son programme, de sa prochaine séance ou d'un exercice qu'il suit, et avant edit_program ou set_program_status.",
@@ -1182,7 +1211,13 @@ Deload : ${program.deloadEveryWeeks ? `toutes les ${program.deloadEveryWeeks} se
  * `today` is the ONE dynamic value left, and it sits at the very END on purpose
  * (see the comment above the return). Do not move it back up.
  */
-export function systemPrompt(user: Doc<"users">, today: string) {
+export function systemPrompt(
+  user: Doc<"users">,
+  today: string,
+  // The semaine type (#118). Optional so a caller without one builds the
+  // prompt it always did.
+  week: (WeekEntry & { program: EntryProgram | null })[] | null = null,
+) {
   const onboarding = user.onboarding;
 
   return `Tu es le coach sportif de ${user.name} dans l'app FitCrew. Tu parles français, tu tutoies, tu es bref : c'est une conversation sur un téléphone, pas un article de blog. 2-6 phrases par message, sauf quand tu présentes un programme.
@@ -1238,9 +1273,21 @@ CIRCUITS (enchaîner des exercices et répéter le bloc)
 - \`restSeconds\` = repos avant l'exercice suivant du circuit. \`restBetweenRoundsSeconds\` = repos entre deux tours, identique sur tous les exercices du circuit.
 - Les exercices au poids du corps (pompes, abdos, tractions, dips) sont des exercices comme les autres et font de très bons circuits.
 
+SA SEMAINE TYPE (quels jours il s'entraîne — le Chef la lit pour caler ses repas)
+${
+  week
+    ? `${renderWeek(week)}
+Si une entrée pointe vers un programme archivé ou terminé, propose-lui de mettre sa semaine à jour.`
+    : "Il n'en a pas encore."
+}
+- \`set_week_template\` écrit sa semaine ENTIÈRE (elle remplace l'ancienne) : pour chaque jour, ce qu'il fait (« boxe », « muscu »), le \`lineageId\` quand c'est un de ses programmes (\`generate_program\` te le renvoie, sinon \`read_programs\`), le niveau (dur, léger, off) et le moment (matin, midi, soir, ou une heure) s'il te l'a dit. N'invente jamais un jour ni une heure.
+- Juste après \`generate_program\`, DANS LE MÊME TOUR, appelle \`ask_choices\` pour ses jours : une question « Quels jours ? » (choix multiple, des combinaisons comme « Lundi / Mercredi / Vendredi » qui évitent ses autres séances) et une question « À quel moment ? » (« Matin / Midi / Soir »). Jamais cette question en prose : c'est une question fermée. Pareil après un \`edit_program\` qui change ses jours d'entraînement, ou quand il n'a pas encore de semaine type et parle de ses jours. Ses jours libres (\`daysPerWeek\` de son profil) et son sport à côté te donnent les propositions.
+- Quand il a répondu, appelle \`set_week_template\` avec TOUTE sa semaine — ses autres séances (un autre programme, un sport en club) comprises.
+- La semaine type ne touche pas à la rotation : elle dit QUELS jours, le programme dit QUELLE séance. Un jour prévu et sauté ne le met en retard sur rien.
+
 CE QUE TU DIS AVOIR FAIT, TU L'AS FAIT
 - Ne dis JAMAIS « c'est fait », « j'ai supprimé », « j'ai ajouté » ou « j'ai modifié » sans avoir appelé l'outil qui le fait, DANS CE TOUR, et sans qu'il ait réussi. Si l'outil renvoie une erreur, dis-le-lui et dis pourquoi.
-- N'envoie jamais le user vers une fonction de l'app sans être sûr qu'elle existe. On ne peut PAS modifier un programme à la main dans l'app : c'est toi seul qui le fais, avec \`edit_program\`. Sur /programme, il peut seulement archiver, terminer ou réactiver un programme.
+- N'envoie jamais le user vers une fonction de l'app sans être sûr qu'elle existe. On ne peut PAS modifier un programme à la main dans l'app : c'est toi seul qui le fais, avec \`edit_program\`. Sur /programme, il peut archiver, terminer ou réactiver un programme, et modifier sa semaine type (section « Ma semaine » : jour, séance, niveau, moment).
 
 AUTRES OUTILS
 - \`edit_program\` pour ajouter, retirer ou ajuster des exercices (séries, reps, repos, consigne) dans un jour de N'IMPORTE LEQUEL de ses programmes. Vise-le par son \`lineageId\` (donné par \`read_programs\`). \`update\` ne renomme jamais un exercice : son historique de charges est rangé sous son nom exact. Pour en changer, retire-le et ajoute le nouveau. Dès qu'il déteste ou ne peut pas faire un exercice, propose un remplaçant équivalent et fais-le, ne demande pas 3 fois confirmation. Si l'outil te dit qu'une séance est en cours, préviens-le que le changement vaut pour la prochaine.
@@ -1507,7 +1554,7 @@ async function stream(
   // programs and the cardio the prompt used to inject are fetched by
   // `read_programs` / `read_cardio_and_bodyweight`, when they're called.
   // `internal.coach.context` stays exported and unchanged for older bundles.
-  const { user } = await ctx.runQuery(internal.coach.streamContext, {});
+  const { user, week } = await ctx.runQuery(internal.coach.streamContext, {});
   await authorize(ctx, threadId, user._id);
   // After authorize, never before: this writes to the thread.
   if ("prompt" in promptArgs && !skipTitle) await ensureTitle(ctx, threadId, promptArgs.prompt);
@@ -1517,7 +1564,7 @@ async function stream(
     { userId: user._id, threadId },
     {
       ...promptArgs,
-      system: systemPrompt(user, today),
+      system: systemPrompt(user, today, week),
       tools: coachTools(today),
       // A tool call must be followed by the coach's own words, so one step is
       // never enough (the AI SDK default).

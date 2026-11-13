@@ -10,9 +10,16 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatFull, monday } from "@/lib/dates";
-import { formatNumber } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 import type { PlannedMeal } from "../../../convex/nutrition";
+import {
+  type DayLevel,
+  type LevelSource,
+  DAY_LEVELS,
+  LEVEL_LABEL,
+  entryLabel,
+} from "../../../convex/weekTemplate";
 import { FoodLog } from "./food-log";
 import { MacroProgress, SLOT_LABELS, macroLine, pct, runMutation } from "./macros";
 
@@ -46,7 +53,9 @@ export function NutritionDashboard({ today }: { today: string }) {
 
   if (data === undefined) return <NutritionSkeleton />;
 
-  const { profile, todayMeals, log, consumed, hydrationMl, hasPlan } = data;
+  const { profile, todayMeals, log, consumed, hydrationMl, hasPlan, day } = data;
+  // Today's level's targets; the flat one if the level isn't known.
+  const targets = day?.targets ?? profile?.targets;
 
   // ph-mask: what someone eats, their targets and their weight-derived figures
   // are personal. PostHog session replay must not record any of it.
@@ -64,21 +73,37 @@ export function NutritionDashboard({ today }: { today: string }) {
               one it's the day's estimated numbers. Either way the journal below
               works — that's explicit in issue #31. */}
           <section className="slab flex flex-col gap-3.5">
-            {profile ? (
+            {profile && targets ? (
               <>
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="eyebrow">Aujourd&apos;hui · estimations</p>
+                    <p className="eyebrow">
+                      {day && day.level !== null
+                        ? dayTitle(day.level, day.planned)
+                        : `Objectif moyen · ${formatNumber(targets.calories)} kcal`}{" "}
+                      · estimations
+                    </p>
                     <h2 className="font-heading text-[1.375rem] leading-tight font-bold">
-                      {formatNumber(consumed.calories)} kcal sur{" "}
-                      {formatNumber(profile.targets.calories)}
+                      {formatNumber(consumed.calories)} kcal sur {formatNumber(targets.calories)}
                     </h2>
                   </div>
                   <Badge variant="secondary" className="shrink-0">
                     {GOALS[profile.goal]}
                   </Badge>
                 </div>
-                <MacroProgress consumed={consumed} targets={profile.targets} />
+                <MacroProgress consumed={consumed} targets={targets} />
+                {/* No semaine type: no level, no selector — the flat target is an
+                    average that already includes sport. He fills his week first. */}
+                {day && day.level !== null ? (
+                  <DayLevelPicker today={today} level={day.level} source={day.source} />
+                ) : (
+                  <Link
+                    href="/programme#ma-semaine"
+                    className="text-[11px] text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2"
+                  >
+                    Dis au Coach tes jours d&apos;entraînement pour des objectifs jour par jour
+                  </Link>
+                )}
               </>
             ) : (
               <>
@@ -153,6 +178,70 @@ const GOALS = {
   maintien: "Maintien",
   prise: "Prise de masse",
 } as const;
+
+const DAY_NAME: Record<DayLevel, string> = { off: "Jour off", leger: "Jour léger", dur: "Jour dur" };
+
+/** "Jour dur · boxe 18h30" — the level, then what the week planned for today. */
+const dayTitle = (level: DayLevel, planned: { kind: string; time?: string; level: DayLevel }[]) =>
+  [DAY_NAME[level], ...planned.filter((e) => e.level !== "off").map(entryLabel)].join(" · ");
+
+const WHY: Partial<Record<LevelSource, string>> = {
+  manual: "Choisi à la main, pour aujourd'hui seulement.",
+  session: "Tu t'es entraîné aujourd'hui : ta semaine disait off.",
+};
+
+/**
+ * One tap changes today's level — for today only (`week.setDayLevel`). Only
+ * shown with a semaine type. The targets above follow through the dashboard
+ * subscription; nothing local to keep in sync.
+ */
+function DayLevelPicker({
+  today,
+  level: current,
+  source,
+}: {
+  today: string;
+  level: DayLevel;
+  source: LevelSource;
+}) {
+  const setDayLevel = useMutation(api.week.setDayLevel);
+  const why = WHY[source];
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <fieldset className="grid min-w-0 grid-cols-3 gap-1.5">
+        <legend className="sr-only">Niveau du jour</legend>
+        {DAY_LEVELS.map((level) => {
+          const pressed = current === level;
+          return (
+            <Button
+              key={level}
+              type="button"
+              variant={pressed ? "secondary" : "outline"}
+              aria-pressed={pressed}
+              className={cn(
+                "h-11 text-sm transition-transform active:scale-[0.96]",
+                pressed && "border-primary/50 ring-1 ring-primary/30",
+              )}
+              onClick={() =>
+                pressed
+                  ? undefined
+                  : runMutation(
+                      () => setDayLevel({ date: today, level }),
+                      `${DAY_NAME[level]} pour aujourd'hui.`,
+                    )
+              }
+            >
+              {LEVEL_LABEL[level]}
+            </Button>
+          );
+        })}
+      </fieldset>
+      {why ? <p className="text-[11px] text-muted-foreground">{why}</p> : null}
+    </div>
+  );
+}
+
 
 function Meals({
   meals,

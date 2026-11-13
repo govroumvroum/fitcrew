@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { WeekSection } from "@/components/week/week-section";
 import { ExerciseDemo, useExerciseDemos } from "@/components/workout/demo";
 import { seanceHref } from "@/components/workout/prescription";
 import type { Block } from "@/lib/circuits";
@@ -84,6 +85,11 @@ function Programme({ date }: { date: string }) {
         <Button asChild size="lg" className="mt-4 h-14 w-full text-base">
           <Link href="/coach">Passe voir le coach</Link>
         </Button>
+        {/* A week works without a program: a boxing club the app doesn't run
+            is still a training day for the Chef. */}
+        <div className="mt-6 text-left">
+          <WeekSection date={date} programs={[]} />
+        </div>
       </div>
     );
   }
@@ -164,6 +170,11 @@ function Programme({ date }: { date: string }) {
           onCopyLink={copyLink}
         />
       ) : null}
+
+      <WeekSection
+        date={date}
+        programs={active.map((program) => ({ lineageId: program.lineageId, name: program.name }))}
+      />
 
       {past.length > 0 ? (
         // ponytail: native <details> again. Archived programs are kept, not
