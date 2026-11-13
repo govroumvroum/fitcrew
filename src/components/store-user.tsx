@@ -4,6 +4,10 @@ import { useUser } from "@clerk/nextjs";
 import { useConvexAuth, useMutation } from "convex/react";
 import posthog from "posthog-js";
 import { useEffect } from "react";
+// For its side effect: `beforeinstallprompt` fires once, early, on whatever
+// route the app opens on. This component is in the root layout, so the listener
+// is attached everywhere — see src/lib/install.ts.
+import "@/lib/install";
 import { api } from "../../convex/_generated/api";
 
 /** Creates the Convex user profile on first sign-in, syncs Clerk fields after. */

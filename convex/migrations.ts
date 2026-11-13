@@ -72,10 +72,25 @@ export const seedRecipeCatalogue = migrations.define({
   },
 });
 
+/**
+ * #127: everyone who already has an account when the welcome screen ships has
+ * already found their way around — they get the « Premiers pas » card, never the
+ * welcome. Stamped with their creation time, not now: it is a backfill, not an
+ * event. Idempotent. Anyone created after this ran is new by definition.
+ */
+export const markExistingUsersWelcomed = migrations.define({
+  table: "users",
+  migrateOne: async (_ctx, user) => {
+    if (user.welcomedAt !== undefined) return;
+    return { welcomedAt: user._creationTime };
+  },
+});
+
 // The deploy runs this list (see `buildCommand` in vercel.json). A new migration
 // is one more line here — never a new command chained onto the deploy.
 export const runAll = migrations.runner([
   internal.migrations.backfillLineage,
   internal.migrations.backfillTargetsByLevel,
   internal.migrations.seedRecipeCatalogue,
+  internal.migrations.markExistingUsersWelcomed,
 ]);

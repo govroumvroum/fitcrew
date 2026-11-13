@@ -2,7 +2,7 @@
 
 import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
 import Link from "next/link";
-import { Today, TodaySkeleton } from "@/components/home/today";
+import { SignedInHome } from "@/components/onboarding/home-gate";
 import { Button } from "@/components/ui/button";
 import { useLocalDate } from "@/lib/dates";
 
@@ -54,7 +54,7 @@ export default function Home() {
               this page, and Today's biggest heading is the day name (an <h2>).
               So the level-1 has to exist without changing a pixel. */}
           <h1 className="sr-only">Aujourd&apos;hui</h1>
-          {date ? <Today date={date} /> : <TodaySkeleton />}
+          <SignedInHome date={date} />
         </Show>
 
         {/* The only way in to /changelog: TABS is full (6 entries) and a list of

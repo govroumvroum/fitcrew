@@ -29,7 +29,12 @@ export function TodaySkeleton() {
   );
 }
 
-export function Today({ date }: { date: string }) {
+/**
+ * `firstSteps` is the « Premiers pas » card (#127), passed in rather than
+ * queried here: the page already holds its state, because it decides between
+ * this screen and the welcome.
+ */
+export function Today({ date, firstSteps }: { date: string; firstSteps?: React.ReactNode }) {
   const today = useQuery(api.workouts.today, { date });
   const stats = useQuery(api.home.stats, { date });
   // Programs run in parallel, so with nothing running there is no single "next
@@ -193,6 +198,11 @@ export function Today({ date }: { date: string }) {
               </Button>
             ) : null}
           </section>
+
+          {/* Right under the hero, not down the right column: on a phone that
+              column comes last, and an old hand would never scroll to what we
+              shipped. A panel, so the slab keeps the only red. */}
+          {firstSteps}
 
           {stats.streak >= 2 ? (
             <Streak streak={stats.streak} weeks={stats.weeks8} />

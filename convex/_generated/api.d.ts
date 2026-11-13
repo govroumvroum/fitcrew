@@ -17,6 +17,7 @@ import type * as consult from "../consult.js";
 import type * as crew from "../crew.js";
 import type * as crons from "../crons.js";
 import type * as exerciseDemos from "../exerciseDemos.js";
+import type * as firstSteps from "../firstSteps.js";
 import type * as foodFacts from "../foodFacts.js";
 import type * as home from "../home.js";
 import type * as http from "../http.js";
@@ -38,6 +39,7 @@ import type * as users from "../users.js";
 import type * as vision from "../vision.js";
 import type * as week from "../week.js";
 import type * as weekTemplate from "../weekTemplate.js";
+import type * as welcome from "../welcome.js";
 import type * as workouts from "../workouts.js";
 
 import type {
@@ -56,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   crew: typeof crew;
   crons: typeof crons;
   exerciseDemos: typeof exerciseDemos;
+  firstSteps: typeof firstSteps;
   foodFacts: typeof foodFacts;
   home: typeof home;
   http: typeof http;
@@ -77,6 +80,7 @@ declare const fullApi: ApiFromModules<{
   vision: typeof vision;
   week: typeof week;
   weekTemplate: typeof weekTemplate;
+  welcome: typeof welcome;
   workouts: typeof workouts;
 }>;
 
