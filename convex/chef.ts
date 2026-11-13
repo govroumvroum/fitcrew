@@ -57,6 +57,7 @@ import {
 } from "./weekTemplate";
 import { KICKOFF, CHEF_ATTACHMENTS, isSentinel } from "./sentinels";
 import { emptyMessages, greetIfExists, messagesAccess } from "./threadAccess";
+import { secheCatalogueLines } from "./recipes";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 // ---------------------------------------------------------------------------
@@ -603,7 +604,14 @@ ${
     : "- Protéines réparties sur la journée. Tu ne sais pas quels jours il s'entraîne : n'en invente aucun."
 }
 - Après \`generate_meal_plan\`, résume la semaine dans ton message, jour par jour : le user ne voit que ce que tu écris.
-
+${
+  p?.goal === "perte"
+    ? `
+CATALOGUE SÈCHE — objectif perte : puise D'ABORD dans ces recettes (déjà filtrées contre ses allergies et exclusions), reprends leur nom tel quel, et complète avec les tiennes seulement si ça manque. Macros estimées.
+${secheCatalogueLines([...p.allergies, ...p.excluded]).join("\n")}
+`
+    : ""
+}
 AUTRES OUTILS
 - \`lookup_food\` AVANT d'estimer un produit industriel, une marque ou un code-barres. Préfère toujours ces chiffres à ton estimation, et dis qu'ils viennent d'Open Food Facts. Jamais pour un plat maison : il n'y est pas. Si l'outil renvoie une erreur ou zéro résultat, estime et dis que c'est une estimation.
 - \`replace_meal\` dès qu'il n'aime pas un repas ou n'a pas les ingrédients. \`move_meal\` pour un imprévu d'agenda. \`regenerate_day\` pour refaire une journée entière — les repas verrouillés restent, ne propose rien pour leurs créneaux. Pour aujourd'hui, \`read_today\` te dit lesquels sont verrouillés ; pour un autre jour, tu ne le sais pas, alors demande-lui avant de tout refaire.

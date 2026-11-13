@@ -1,4 +1,5 @@
 import { type Infer, v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   type MutationCtx,
@@ -587,6 +588,12 @@ export const savePlan = internalMutation({
     } else {
       await ctx.db.insert("mealPlans", { userId: user._id, weekStart: args.weekStart, days });
     }
+    // Same transaction as the plan, after the allergy check: a refused plan
+    // adds no recipe (#119).
+    await ctx.runMutation(internal.recipes.upsertFromMeals, {
+      userId: user._id,
+      meals: days.flatMap((day) => day.meals),
+    });
     return { result: "ok" as const, meals: days.reduce((n, day) => n + day.meals.length, 0) };
   },
 });
@@ -607,6 +614,7 @@ export const replaceMeal = internalMutation({
     day.meals.sort(bySlot);
 
     await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
+    await ctx.runMutation(internal.recipes.upsertFromMeals, { userId: plan.userId, meals: [meal] });
     return { result: "ok" as const, name: meal.name };
   },
 });
@@ -663,6 +671,7 @@ export const regenerateDay = internalMutation({
 
     day.meals = [...kept, ...added].sort(bySlot);
     await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
+    await ctx.runMutation(internal.recipes.upsertFromMeals, { userId: plan.userId, meals: added });
     return { result: "ok" as const, kept: kept.length, added: added.length };
   },
 });

@@ -158,7 +158,44 @@ export const aiFeature = v.union(
   v.literal("chef"),
   v.literal("vision"),
   v.literal("consult"),
+  v.literal("photos"),
 );
+
+// --- Recettes (#119) -------------------------------------------------------
+
+// The library's three shelves. Coarser than `mealSlot` on purpose: a déjeuner
+// recipe is a dîner recipe too. See `categoryForSlot` in recipes.ts.
+export const recipeCategory = v.union(
+  v.literal("petit_dej"),
+  v.literal("repas"),
+  v.literal("collation"),
+);
+
+export const recipe = v.object({
+  // Absent = the shared catalogue (the « sèche » recipes, seeded by migration).
+  // Present = one user's own library, written from the Chef's plans. A user's
+  // recipe NEVER becomes shared: it carries their preferences and their diet.
+  userId: v.optional(v.id("users")),
+  name: v.string(),
+  nameKey: v.string(), // `normalizeName(name)`, the dedup key within one owner
+  category: recipeCategory,
+  cheat: v.optional(v.boolean()),
+  tags: v.array(v.string()), // "seche" on the catalogue
+  description: v.optional(v.string()),
+  // Same shape as `plannedMeal`: an array, because French names aren't valid
+  // Convex field names.
+  ingredients: v.array(v.object({ name: v.string(), quantity: v.string() })),
+  steps: v.array(v.string()),
+  prepMinutes: v.number(),
+  macros,
+  // Hand-picked on the catalogue. A Chef recipe has none: its photo is looked
+  // up at read time and cached in `recipePhotos`, never at write time.
+  photoUrl: v.optional(v.string()),
+  // Hidden allergens the ingredient names don't spell out (skyr → lactose,
+  // chorizo → porc). Curated on the catalogue only; the read filter checks the
+  // user's allergies and exclusions against them too.
+  allergens: v.optional(v.array(v.string())),
+});
 
 export default defineSchema({
   users: defineTable({
@@ -463,4 +500,22 @@ export default defineSchema({
     costUsd: v.optional(v.number()),
     date: v.string(), // YYYY-MM-DD (UTC), so aggregating never scans _creationTime
   }).index("by_user_and_date", ["userId", "date"]),
+
+  // --- Recettes (#119) ---------------------------------------------------
+  // One row per recipe per owner, deduplicated on `nameKey`. Grows by up to
+  // ~28 a week per user, so every read is bounded.
+  recipes: defineTable(recipe)
+    .index("by_user", ["userId"]) // (userId, _creationTime): newest first, seed order
+    .index("by_user_and_name_key", ["userId", "nameKey"])
+    .index("by_user_and_category", ["userId", "category"]),
+
+  // Recipe name -> TheMealDB photo, resolved once per normalised name and cached
+  // forever, `photoUrl: null` included — « no photo » is a real answer and the
+  // card draws an illustration instead. Same contract as `exerciseDemoMatches`.
+  recipePhotos: defineTable({
+    nameKey: v.string(),
+    name: v.string(), // the first spelling that asked, for the dashboard
+    englishGuess: v.optional(v.string()),
+    photoUrl: v.union(v.string(), v.null()),
+  }).index("by_name_key", ["nameKey"]),
 });
