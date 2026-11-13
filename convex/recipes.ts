@@ -281,7 +281,10 @@ export const library = query({
     const own = (await ownedBy(ctx, user._id, args.category).take(OWN_LIMIT)).sort(
       (a, b) => b._creationTime - a._creationTime,
     );
-    const catalogue = await ownedBy(ctx, undefined, args.category).take(CATALOGUE_LIMIT);
+    // Seed order (diet's order: by shelf), not the index's alphabetical one.
+    const catalogue = (await ownedBy(ctx, undefined, args.category).take(CATALOGUE_LIMIT)).sort(
+      (a, b) => a._creationTime - b._creationTime,
+    );
 
     const visible = mergeLibrary(own, catalogue).filter((r) => visibleTo(r, forbidden));
 
@@ -388,7 +391,7 @@ const zTranslate = z.object({
   queries: z
     .array(z.string())
     .describe(
-      "1 to 3 search terms for a recipe site, most specific first (e.g. 'beef teriyaki', 'teriyaki')",
+      "1 to 4 short search terms (1-2 words each), most specific first; the site matches a substring of the dish name (e.g. 'beef teriyaki', 'teriyaki'; 'pumpkin soup', 'pumpkin', 'squash'; 'lasagn')",
     ),
 });
 
@@ -446,14 +449,16 @@ export const resolvePhotos = action({
           temperature: 0,
           system:
             "Tu traduis le nom d'un plat français en anglais, pour chercher sa photo sur un site de " +
-            "recettes anglophone. Donne le nom anglais usuel du plat, et 1 à 3 termes de recherche du " +
-            "plus précis au plus général. Pas de marque, pas de quantité.",
+            "recettes anglophone. Donne le nom anglais usuel du plat, et 1 à 4 termes de recherche du " +
+            "plus précis au plus général. Le site cherche une SOUS-CHAÎNE dans le nom du plat : des " +
+            "termes courts (1 ou 2 mots), dont le mot-clé du plat seul, au radical quand l'orthographe " +
+            "varie (« lasagn » trouve « Lasagne » et « Lasagna »). Pas de marque, pas de quantité.",
           prompt: name,
         });
         await bill(translated.usage, translated.providerMetadata);
 
         const seen = new Map<string, MealDbMeal>();
-        for (const term of translated.object.queries.slice(0, 3)) {
+        for (const term of translated.object.queries.slice(0, 4)) {
           for (const meal of await searchMealDb(term)) seen.set(meal.idMeal, meal);
         }
         const candidates = [...seen.values()].slice(0, 30);
