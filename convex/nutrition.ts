@@ -431,8 +431,26 @@ const refused = (violations: ForbiddenHit[]) =>
 async function requirePlan(ctx: MutationCtx, week: string) {
   const user = await requireCurrentUser(ctx);
   const plan = await planFor(ctx, user._id, week);
-  if (!plan) throw new Error("Aucun plan pour cette semaine");
+  if (!plan) throw new Error(`Aucun plan pour la semaine du lundi ${week}`);
   return plan;
+}
+
+/**
+ * The Chef's edits (`replaceMeal`, `moveMeal`, `regenerateDay`) on a week with no
+ * plan. Since #126 they can target next week, which is usually still empty on the
+ * weekend — exactly when he asks. Returned, not thrown, like `refused`: a throw
+ * is a broken turn that tells the model nothing.
+ */
+async function planOrRefusal(ctx: MutationCtx, week: string) {
+  const user = await requireCurrentUser(ctx);
+  const plan = await planFor(ctx, user._id, week);
+  if (plan) return { plan };
+  return {
+    refusal: {
+      result: "refused" as const,
+      note: `Rien n'a été modifié : il n'a pas encore de plan pour la semaine du lundi ${week}. Propose-lui de la générer avec generate_meal_plan.`,
+    },
+  };
 }
 
 /** The day's meals, mutable in place — the caller patches `plan.days` back. */
@@ -622,7 +640,9 @@ export const savePlan = internalMutation({
 export const replaceMeal = internalMutation({
   args: { weekStart: v.string(), date: v.string(), slot: mealSlot, meal: plannedMeal },
   handler: async (ctx, args) => {
-    const plan = await requirePlan(ctx, args.weekStart);
+    const found = await planOrRefusal(ctx, args.weekStart);
+    if (found.refusal) return found.refusal;
+    const { plan } = found;
     const day = requireDay(plan, args.date);
     const meal = clampMeal({ ...args.meal, slot: args.slot });
 
@@ -645,7 +665,9 @@ const slotRef = v.object({ date: v.string(), slot: mealSlot });
 export const moveMeal = internalMutation({
   args: { weekStart: v.string(), from: slotRef, to: slotRef },
   handler: async (ctx, args) => {
-    const plan = await requirePlan(ctx, args.weekStart);
+    const found = await planOrRefusal(ctx, args.weekStart);
+    if (found.refusal) return found.refusal;
+    const { plan } = found;
     const from = requireDay(plan, args.from.date);
     const to = requireDay(plan, args.to.date);
 
@@ -677,7 +699,9 @@ export const moveMeal = internalMutation({
 export const regenerateDay = internalMutation({
   args: { weekStart: v.string(), date: v.string(), meals: v.array(plannedMeal) },
   handler: async (ctx, args) => {
-    const plan = await requirePlan(ctx, args.weekStart);
+    const found = await planOrRefusal(ctx, args.weekStart);
+    if (found.refusal) return found.refusal;
+    const { plan } = found;
     const day = requireDay(plan, args.date);
 
     const kept = day.meals.filter((meal) => meal.locked === true);
