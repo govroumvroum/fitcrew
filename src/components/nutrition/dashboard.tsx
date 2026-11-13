@@ -1,7 +1,15 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import { ChevronDownIcon, ClockIcon, LockIcon, LockOpenIcon, PlusIcon } from "lucide-react";
+import {
+  BookOpenIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  LockIcon,
+  LockOpenIcon,
+  PlusIcon,
+} from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -152,6 +160,21 @@ export function NutritionDashboard({ today }: { today: string }) {
           </section>
 
           <Meals meals={todayMeals} today={today} weekStart={weekStart} hasPlan={hasPlan} />
+
+          {/* #119: every recipe the Chef wrote, plus the sèche catalogue. */}
+          <Link
+            href="/nutrition/recettes"
+            className="flex min-h-14 items-center gap-3 rounded-xl border bg-card px-3 py-2.5 transition-transform active:scale-[0.98]"
+          >
+            <BookOpenIcon className="size-5 shrink-0 text-accent-text" aria-hidden />
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">Recettes</span>
+              <span className="block text-[11px] text-muted-foreground">
+                Celles du Chef et le catalogue sèche, avec photos.
+              </span>
+            </span>
+            <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          </Link>
 
           <Separator className="md:hidden" />
           <Hydration today={today} ml={hydrationMl} />
