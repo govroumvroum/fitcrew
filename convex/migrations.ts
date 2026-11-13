@@ -1,6 +1,7 @@
 import { Migrations } from "@convex-dev/migrations";
 import { components, internal } from "./_generated/api";
 import { Doc } from "./_generated/dataModel";
+import { estimateLevelTargets } from "./nutrition";
 import { userPrograms } from "./programs";
 import schema from "./schema";
 
@@ -31,6 +32,24 @@ export const backfillLineage = migrations.define({
   },
 });
 
+/**
+ * #118: every profile saved before day levels gets its three targets, computed
+ * from the fields it already stores — exactly what `saveProfile` writes today.
+ * `targets` is left as it is. Idempotent: a profile that already has
+ * `targetsByLevel` is skipped. Readers fall back to `targets` until this has run
+ * (`levelTargetsOf`), so the deploy doesn't depend on its timing.
+ */
+export const backfillTargetsByLevel = migrations.define({
+  table: "nutritionProfiles",
+  migrateOne: async (_ctx, profile) => {
+    if (profile.targetsByLevel) return;
+    return { targetsByLevel: estimateLevelTargets(profile) };
+  },
+});
+
 // The deploy runs this list (see `buildCommand` in vercel.json). A new migration
 // is one more line here — never a new command chained onto the deploy.
-export const runAll = migrations.runner([internal.migrations.backfillLineage]);
+export const runAll = migrations.runner([
+  internal.migrations.backfillLineage,
+  internal.migrations.backfillTargetsByLevel,
+]);

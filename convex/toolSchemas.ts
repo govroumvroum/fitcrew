@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WEEKDAYS } from "./weekTemplate";
 
 /**
  * The coach's tool inputSchemas, zod only — no Convex server imports, so the
@@ -274,4 +275,45 @@ export const zLogWorkout = z.object({
     )
     .min(1),
   notes: z.string().nullable(),
+});
+
+/**
+ * `set_week_template` (#118). The WHOLE week, replacing the previous one — a
+ * partial update would leave the model guessing what's still there. Days by
+ * name, not index: « lundi » can't be off by one.
+ */
+export const zWeekSession = z.object({
+  kind: z
+    .string()
+    .describe(`Ce qu'il fait ce jour-là, en 1 à 3 mots, dans ses mots : "boxe", "muscu", "course"`),
+  lineageId: z
+    .string()
+    .nullable()
+    .describe(
+      "Le lineageId du programme quand c'est une séance d'un de SES programmes (read_programs, ou le retour de generate_program). null pour une activité hors app : club, course, foot.",
+    ),
+  level: z
+    .enum(["off", "leger", "dur"])
+    .describe(
+      "dur = séance exigeante (muscu lourde, sparring, fractionné, match) ; leger = séance facile (technique, mobilité, footing tranquille) ; off = rien qui fatigue (marche)",
+    ),
+  time: z
+    .string()
+    .nullable()
+    .describe(
+      `"matin", "midi", "soir", ou une heure "18:30". null s'il ne l'a pas dit : n'invente pas d'heure`,
+    ),
+});
+
+export const zSetWeekTemplate = z.object({
+  days: z
+    .array(
+      z.object({
+        day: z.enum(WEEKDAYS),
+        sessions: z.array(zWeekSession).describe("0 à 3 séances ce jour-là"),
+      }),
+    )
+    .describe(
+      "Sa semaine ENTIÈRE : elle remplace la précédente. Un jour absent, ou sans séance, est un jour off.",
+    ),
 });

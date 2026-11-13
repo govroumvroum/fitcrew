@@ -50,6 +50,28 @@ const profile = {
   targets: { calories: 2300, protein: 160, carbs: 240, fat: 70 },
 } as unknown as Doc<"nutritionProfiles">;
 
+const profileWithLevels = {
+  ...profile,
+  targetsByLevel: {
+    off: { calories: 2000, protein: 160, carbs: 165, fat: 70 },
+    leger: { calories: 2240, protein: 160, carbs: 225, fat: 70 },
+    dur: { calories: 2480, protein: 160, carbs: 285, fat: 70 },
+  },
+} as unknown as Doc<"nutritionProfiles">;
+
+// A semaine type: Monday dur, Tuesday nothing (off).
+const week = [
+  {
+    weekday: 0,
+    kind: "muscu",
+    lineageId: "prog_muscu",
+    level: "dur" as const,
+    time: "18:30",
+    program: { name: "Full body", status: "active" as const },
+  },
+  { weekday: 3, kind: "boxe", level: "leger" as const, program: null },
+];
+
 /**
  * Every tool as the provider actually receives it: name, description AND input
  * schema. The schema counts — a `${today}` in a `.describe()` or a default would
@@ -77,11 +99,41 @@ const agents = [
   },
   {
     label: "chef",
-    system: (today: string) => chefSystemPrompt(user, profile, today),
+    system: (today: string) => chefSystemPrompt(user, profile, today, week),
     blank: (today: string) => chefSystemPrompt(blankUser, null, today),
     tools: chefTools,
   },
+  {
+    label: "coach + semaine type",
+    system: (today: string) => coachSystemPrompt(user, today, week),
+    blank: (today: string) => coachSystemPrompt(blankUser, today),
+    tools: coachTools,
+  },
 ];
+
+// #118: TODAY'S level must never reach the cached prefix — it moves when a séance
+// starts or the user taps the selector. Monday is a dur day and Tuesday an off
+// day in this template: from one to the other, only the DATES lines at the very
+// end may change. The level, its targets, its "why" all live in `read_today`.
+{
+  const monday = "2026-11-09";
+  const tuesday = "2026-11-10";
+  for (const [label, build] of [
+    ["chef", (d: string) => chefSystemPrompt(user, profileWithLevels, d, week)],
+    ["coach", (d: string) => coachSystemPrompt(user, d, week)],
+  ] as const) {
+    const [a, b] = [build(monday).split("\n"), build(tuesday).split("\n")];
+    const first = a.findIndex((line, i) => line !== b[i]);
+    assert.ok(first > a.length - 4, `${label}: today's level leaked above the DATES section`);
+    for (const line of a.filter((line, i) => line !== b[i]))
+      assert.match(line, ISO_DATE, `${label}: a line that moved with the day carries no date`);
+  }
+  // And the three targets ARE in the prefix — they change only with the profile.
+  const chef = chefSystemPrompt(user, profileWithLevels, monday, week);
+  assert.match(chef, /Jour off \(pas d'entraînement\) : 2000 kcal/);
+  assert.match(chef, /Jour dur : 2480 kcal/);
+  assert.match(chef, /lundi : muscu \(dur, 18h30\)/);
+}
 
 for (const a of agents) {
   for (const [branch, build] of [

@@ -5,6 +5,7 @@ import {
   ArchiveIcon,
   ArrowLeftRightIcon,
   BookOpenIcon,
+  CalendarDaysIcon,
   CheckIcon,
   ClipboardListIcon,
   DumbbellIcon,
@@ -39,7 +40,9 @@ import {
   type StatusInput,
   type SwapInput,
 } from "@/components/chat/tool-cards";
+import { WeekCard } from "@/components/chat/week-card";
 import { ExtractedReview } from "@/components/import/extracted-review";
+import type { ShownEntry } from "@/components/week/week-rows";
 
 /**
  * The Coach, as a configuration of the shared chat shell. Everything structural —
@@ -106,6 +109,13 @@ export const COACH: AgentConfig = {
       running: "Je modifie ton programme…",
       done: "Programme modifié",
       failed: "Le programme n'a pas été modifié.",
+    },
+    "tool-set_week_template": {
+      icon: CalendarDaysIcon,
+      pending: "Je prépare ta semaine…",
+      running: "J'écris ta semaine type…",
+      done: "Semaine type enregistrée",
+      failed: "La semaine type n'a pas été enregistrée.",
     },
     "tool-set_program_status": {
       icon: ArchiveIcon,
@@ -240,6 +250,10 @@ export const COACH: AgentConfig = {
             isNew={isNew}
           />
         );
+      }
+      case "tool-set_week_template": {
+        const saved = (output as { entries?: ShownEntry[] })?.entries;
+        return saved ? <WeekCard entries={saved} isNew={isNew} /> : null;
       }
       case "tool-set_program_status":
         return (

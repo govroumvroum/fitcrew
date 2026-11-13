@@ -33,6 +33,8 @@ import type * as threadAccess from "../threadAccess.js";
 import type * as toolSchemas from "../toolSchemas.js";
 import type * as users from "../users.js";
 import type * as vision from "../vision.js";
+import type * as week from "../week.js";
+import type * as weekTemplate from "../weekTemplate.js";
 import type * as workouts from "../workouts.js";
 
 import type {
@@ -67,6 +69,8 @@ declare const fullApi: ApiFromModules<{
   toolSchemas: typeof toolSchemas;
   users: typeof users;
   vision: typeof vision;
+  week: typeof week;
+  weekTemplate: typeof weekTemplate;
   workouts: typeof workouts;
 }>;
 

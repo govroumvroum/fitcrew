@@ -8,6 +8,8 @@ import {
   query,
 } from "./_generated/server";
 import { weekStart } from "./progress";
+import { loadDayLevel } from "./week";
+import type { DayLevel } from "./weekTemplate";
 import {
   activityLevel,
   macros,
@@ -49,6 +51,15 @@ const PROTEIN_PER_KG = { perte: 2.0, maintien: 1.6, prise: 1.6 } as const;
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
+type TargetInput = {
+  goal: NutritionGoal;
+  age: number;
+  sex: "h" | "f";
+  heightCm: number;
+  weightKg: number;
+  activityLevel: ActivityLevel;
+};
+
 /**
  * Mifflin-St Jeor -> activity factor -> goal delta, then macros by the usual
  * rules of thumb: protein per kilo, fat at a quarter of the calories, carbs take
@@ -56,19 +67,64 @@ const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(mi
  *
  * These are ESTIMATES, not a prescription. Every surface showing them says so.
  */
-export function estimateTargets(input: {
-  goal: NutritionGoal;
-  age: number;
-  sex: "h" | "f";
-  heightCm: number;
-  weightKg: number;
-  activityLevel: ActivityLevel;
-}): Macros {
+export function estimateTargets(input: TargetInput): Macros {
+  return targetsWithFactor(input, ACTIVITY_FACTOR[input.activityLevel]);
+}
+
+/**
+ * The activity factor WITHOUT training. The Chef asks for the activity « hors
+ * sport », but `ACTIVITY_FACTOR` holds the textbook values, which already
+ * include exercise (1.55 is "3-5 sessions a week"). With day levels the
+ * training is added per day on top, so the off day must start from a factor
+ * that leaves it out — otherwise every séance is counted twice.
+ */
+const NON_EXERCISE_FACTOR = {
+  sedentaire: 1.2,
+  leger: 1.3,
+  modere: 1.4,
+  actif: 1.5,
+  tres_actif: 1.6,
+} as const;
+
+/**
+ * What a level adds to the off day, in kcal per kilo (option (a) of #118: fixed
+ * gaps, proportional to weight — a session costs a 90 kg boxer more than a 60 kg
+ * one). 80 kg → léger +240, dur +480, close to the +250 / +500 the issue sketched.
+ */
+const LEVEL_KCAL_PER_KG: Record<DayLevel, number> = { off: 0, leger: 3, dur: 6 };
+
+/**
+ * One target per day level. Protein and fat stay the same every day; the carbs
+ * absorb the gap — the training is what they fuel. Carbs never go negative: the
+ * off day's are floored at 0 and the levels only add.
+ */
+export function estimateLevelTargets(input: TargetInput): Record<DayLevel, Macros> {
+  const off = targetsWithFactor(input, NON_EXERCISE_FACTOR[input.activityLevel]);
+  const at = (level: DayLevel): Macros => {
+    const extra = Math.round(LEVEL_KCAL_PER_KG[level] * input.weightKg);
+    return { ...off, calories: off.calories + extra, carbs: off.carbs + Math.round(extra / 4) };
+  };
+  return { off, leger: at("leger"), dur: at("dur") };
+}
+
+/**
+ * A profile's three targets. One saved before #118 has no `targetsByLevel` until
+ * the migration runs: it reads its single `targets` for all three, so the code
+ * works before the backfill does.
+ */
+export function levelTargetsOf(profile: {
+  targets: Macros;
+  targetsByLevel?: Record<DayLevel, Macros>;
+}): Record<DayLevel, Macros> {
+  return (
+    profile.targetsByLevel ?? { off: profile.targets, leger: profile.targets, dur: profile.targets }
+  );
+}
+
+function targetsWithFactor(input: TargetInput, factor: number): Macros {
   const bmr =
     10 * input.weightKg + 6.25 * input.heightCm - 5 * input.age + (input.sex === "h" ? 5 : -161);
-  const calories = Math.round(
-    bmr * ACTIVITY_FACTOR[input.activityLevel] * (1 + GOAL_DELTA[input.goal]),
-  );
+  const calories = Math.round(bmr * factor * (1 + GOAL_DELTA[input.goal]));
   const protein = Math.round(PROTEIN_PER_KG[input.goal] * input.weightKg);
   const fat = Math.round((calories * 0.25) / 9);
   // Carbs are the remainder, so the three macros add back up to the calories.
@@ -371,7 +427,9 @@ function requireDay(plan: Doc<"mealPlans">, date: string) {
 }
 
 export const saveProfile = mutation({
-  args: nutritionProfile.omit("userId", "targets").fields,
+  // `targetsByLevel` is left out like `targets`: both are computed here, never
+  // sent by the client or the model.
+  args: nutritionProfile.omit("userId", "targets", "targetsByLevel").fields,
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
     const measurements = {
@@ -380,6 +438,7 @@ export const saveProfile = mutation({
       weightKg: clamp(args.weightKg, 30, 300),
     };
     const targets = estimateTargets({ ...args, ...measurements });
+    const targetsByLevel = estimateLevelTargets({ ...args, ...measurements });
 
     // Convex `patch` DELETES a key set to `undefined`, so spreading the optional
     // fields blindly would erase the diet the user gave last turn just because
@@ -397,6 +456,7 @@ export const saveProfile = mutation({
       ...(args.cookMinutes !== undefined && { cookMinutes: args.cookMinutes }),
       ...(args.people !== undefined && { people: args.people }),
       targets,
+      targetsByLevel,
     };
 
     const existing = await profileFor(ctx, user._id);
@@ -405,7 +465,8 @@ export const saveProfile = mutation({
     } else {
       await ctx.db.insert("nutritionProfiles", { userId: user._id, ...fields });
     }
-    return { targets };
+    // `targets` as before — the chat card reads it — plus the three levels.
+    return { targets, targetsByLevel };
   },
 });
 
@@ -438,6 +499,7 @@ export const dashboard = query({
         hydrationMl: 0,
         weekStart: week,
         hasPlan: false,
+        day: null,
       };
     }
 
@@ -451,14 +513,24 @@ export const dashboard = query({
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.today))
       .unique();
 
+    const profile = await profileFor(ctx, user._id);
+    const day = await loadDayLevel(ctx, user._id, args.today);
+
     return {
-      profile: await profileFor(ctx, user._id),
+      profile,
       todayMeals: plan?.days.find((d) => d.date === args.today)?.meals ?? [],
       log,
       consumed: sumMacros(log),
       hydrationMl: water?.ml ?? 0,
       weekStart: week,
       hasPlan: plan !== null,
+      // Today's level and its targets (#118). Added, not swapped in: the
+      // previous bundle keeps reading `profile.targets`. `targets` is null
+      // without a profile — there's nothing to aim at yet.
+      day: {
+        ...day,
+        targets: profile ? levelTargetsOf(profile)[day.level] : null,
+      },
     };
   },
 });

@@ -434,6 +434,64 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
       ),
     },
   ],
+  "tool-set_week_template": [
+    {
+      label: "Muscu + boxe en club, un programme archivé",
+      tool: done(
+        "tool-set_week_template",
+        {
+          days: [
+            {
+              day: "lundi",
+              sessions: [{ kind: "muscu", lineageId: "demo_muscu", level: "dur", time: "18h30" }],
+            },
+            {
+              day: "mercredi",
+              sessions: [{ kind: "boxe", lineageId: null, level: "dur", time: "soir" }],
+            },
+            {
+              day: "vendredi",
+              sessions: [{ kind: "muscu", lineageId: "demo_muscu", level: "leger", time: null }],
+            },
+            {
+              day: "samedi",
+              sessions: [{ kind: "course", lineageId: "demo_old", level: "leger", time: "matin" }],
+            },
+          ],
+        },
+        {
+          result: "saved",
+          entries: [
+            {
+              weekday: 0,
+              kind: "muscu",
+              lineageId: "demo_muscu",
+              level: "dur",
+              time: "18:30",
+              program: { name: "Full body 3 jours", status: "active" },
+            },
+            { weekday: 2, kind: "boxe", level: "dur", time: "soir", program: null },
+            {
+              weekday: 4,
+              kind: "muscu",
+              lineageId: "demo_muscu",
+              level: "leger",
+              program: { name: "Full body 3 jours", status: "active" },
+            },
+            {
+              weekday: 5,
+              kind: "course",
+              lineageId: "demo_old",
+              level: "leger",
+              time: "matin",
+              program: { name: "Prépa 10 km", status: "archived" },
+            },
+          ],
+        },
+      ),
+      note: "La carte lit la sortie : l'heure normalisée et le nom du programme viennent de la base.",
+    },
+  ],
   "tool-set_program_status": [
     {
       label: "« Supprime-le » : archivé, rien d'effacé",
