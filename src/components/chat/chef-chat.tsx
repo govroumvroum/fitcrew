@@ -267,7 +267,7 @@ export const CHEF: AgentConfig = {
       case "tool-ask_choices":
         return (
           <ChoicesCard
-            choicesId={(output as { choicesId: Id<"choices"> }).choicesId}
+            choicesId={(output as { choicesId?: Id<"choices"> } | undefined)?.choicesId}
             send={api.chef.send}
           />
         );

@@ -15,8 +15,11 @@ import {
   agentStatus,
   convertMessage,
   ECHO_KEY,
+  settled,
   threadIsRunning,
+  toolPartFromCall,
 } from "@/components/chat/convert-message";
+import type { ToolPart } from "@/components/chat/tool-part";
 
 const FALLBACK = { type: "complete", reason: "unknown" } as const;
 const toThread = (m: UIMessage) =>
@@ -140,6 +143,74 @@ function message(overrides: Partial<UIMessage> & Pick<UIMessage, "parts">): UIMe
   const part = out.content[0] as { result: unknown; isError?: boolean };
   assert.equal(part.result, undefined);
   assert.equal(part.isError, true);
+}
+
+// --- A tool that threw, as STORED. The AI SDK saves a throw as a result whose
+// output is `{ type: "error-text", value }`, without `isError`, and the agent's
+// `toUIMessages` unwraps it to `output-available` with the message as a string.
+// Left as a success, ask_choices read `choicesId` off the string and sent
+// `choices:status` an empty argument object on every load of /chef.
+{
+  const out = toThread(
+    message({
+      parts: [
+        {
+          type: "tool-ask_choices",
+          toolCallId: "c3",
+          state: "output-available",
+          input: { questions: [] },
+          output: "ask_choices appelé hors conversation",
+        },
+      ] as UIMessage["parts"],
+    }),
+  );
+  const part = out.content[0] as {
+    result: unknown;
+    isError?: boolean;
+    artifact: ToolPart & { errorText?: string };
+  };
+  assert.equal(part.artifact.state, "output-error");
+  assert.equal(part.artifact.output, undefined);
+  assert.equal(part.artifact.errorText, "ask_choices appelé hors conversation");
+  assert.equal(part.result, undefined);
+  assert.equal(part.isError, true);
+  // An object output, the only kind our tools return, is left alone.
+  const ok = { type: "tool-ask_choices", state: "output-available", output: { choicesId: "x" } };
+  assert.equal(settled(ok), ok);
+}
+
+// --- A part rebuilt from assistant-ui's view (no `artifact`). It used to claim
+// `output-available` while the tool was still running, handing the card an
+// undefined output.
+{
+  const call = { toolName: "ask_choices", args: { questions: [] } };
+  assert.deepEqual(toolPartFromCall({ ...call, status: { type: "running" } }), {
+    type: "tool-ask_choices",
+    state: "input-available",
+    input: call.args,
+  });
+  assert.equal(
+    toolPartFromCall({ ...call, status: { type: "requires-action" } }).state,
+    "input-available",
+  );
+  assert.deepEqual(
+    toolPartFromCall({ ...call, result: { choicesId: "x" }, status: { type: "complete" } }),
+    {
+      type: "tool-ask_choices",
+      state: "output-available",
+      input: call.args,
+      output: { choicesId: "x" },
+    },
+  );
+  assert.equal(
+    toolPartFromCall({ ...call, result: "boom", isError: true, status: { type: "complete" } })
+      .state,
+    "output-error",
+  );
+  assert.equal(
+    toolPartFromCall({ ...call, status: { type: "incomplete" } }).state,
+    "output-error",
+  );
 }
 
 // --- Stable ids: the stream's key, whatever the content. A generated id would

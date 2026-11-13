@@ -28,6 +28,49 @@ export function agentStatus(metadata: { custom?: Record<string, unknown> }) {
   return (metadata.custom as Custom | undefined)?.agentStatus;
 }
 
+/**
+ * A tool that THREW comes back from the agent as a success whose output is the
+ * error message.
+ *
+ * The AI SDK stores a thrown tool as a `tool-result` with `output: { type:
+ * "error-text", value }` and no `isError` flag, and `@convex-dev/agent`'s
+ * `toUIMessages` unwraps that to `state: "output-available"` with the message as
+ * a bare string. No tool of ours returns a string — they all return objects,
+ * errors included (`{ error }`, see `toolErrored`) — so a string output can only
+ * be a throw. Left as a success, `ask_choices` read `choicesId` off that string,
+ * got `undefined`, and `choices:status` rejected the call on every load of /chef.
+ */
+export function settled<T extends ToolPart>(tool: T): T {
+  if (tool.state !== "output-available" || typeof tool.output !== "string") return tool;
+  return { ...tool, state: "output-error", output: undefined, errorText: tool.output } as T;
+}
+
+/** The slice of assistant-ui's `ToolCallMessagePartProps` that `toolPartFromCall` reads. */
+export type ToolCall = {
+  toolName: string;
+  args: unknown;
+  result?: unknown;
+  isError?: boolean;
+  status: { type: string };
+};
+
+/**
+ * A tool part rebuilt from assistant-ui's own view of the call, for when the
+ * stream's part didn't ride along in `artifact`.
+ *
+ * It used to claim `output-available` whatever the call's status, so a call
+ * still running reached a card with `output: undefined`. The state follows the
+ * result instead: no result is no output, whatever the status says.
+ */
+export function toolPartFromCall(call: ToolCall): ToolPart {
+  const base = { type: `tool-${call.toolName}`, input: call.args };
+  if (call.isError || call.status.type === "incomplete") {
+    return { ...base, state: "output-error", output: call.result };
+  }
+  if (call.result !== undefined) return { ...base, state: "output-available", output: call.result };
+  return { ...base, state: "input-available" };
+}
+
 export function convertMessage(row: Row): ThreadMessageLike {
   if (row.key === ECHO_KEY) {
     return {
@@ -49,7 +92,7 @@ export function convertMessage(row: Row): ThreadMessageLike {
     if (part.type === "text") {
       content.push({ type: "text", text: part.text });
     } else if (message.role === "assistant" && part.type.startsWith("tool-")) {
-      const tool = part as ToolPart & { toolCallId: string };
+      const tool = settled(part as ToolPart & { toolCallId: string });
       content.push({
         type: "tool-call",
         toolCallId: tool.toolCallId,

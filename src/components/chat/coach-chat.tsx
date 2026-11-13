@@ -202,7 +202,7 @@ export const COACH: AgentConfig = {
       case "tool-ask_choices":
         return (
           <ChoicesCard
-            choicesId={(output as { choicesId: Id<"choices"> }).choicesId}
+            choicesId={(output as { choicesId?: Id<"choices"> } | undefined)?.choicesId}
             send={api.coach.send}
           />
         );
