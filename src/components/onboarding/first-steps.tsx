@@ -105,7 +105,11 @@ export function FirstSteps({ state }: { state: WelcomeState }) {
 
   // Standalone right now counts before the mutation recording it lands.
   const done = { ...state.done, install: state.done.install || install?.installed === true };
-  const summary = summarize(done, state.dismissed);
+  const summary = summarize(
+    done,
+    state.dismissed,
+    install?.unsupported && !done.install ? ["install"] : [],
+  );
   if (!summary.visible) return null;
 
   const required = summary.steps.filter((step) => !step.optional);

@@ -49,6 +49,11 @@ const isIos = () =>
   // iPadOS asks for the desktop site and reports itself as a Mac.
   (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
+// Desktop Firefox has no install at all: no prompt, no menu entry. Firefox on
+// Android does have one, hence the Android exclusion.
+const cannotInstall = () =>
+  /Firefox\//.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
+
 export type InstallState = {
   /** Running as the installed app, or installed from this very tab. */
   installed: boolean;
@@ -56,17 +61,25 @@ export type InstallState = {
   canPrompt: boolean;
   /** No prompt will ever come; the user does it from Safari's share sheet. */
   ios: boolean;
+  /** This browser can't install the app, so the step isn't asked of it. */
+  unsupported: boolean;
 };
 
 // Stable references: useSyncExternalStore compares snapshots with Object.is.
 let snapshot: InstallState | null = null;
 const read = (): InstallState => {
-  const next = { installed: installedHere || isStandalone(), canPrompt: deferred !== null, ios: isIos() };
+  const next = {
+    installed: installedHere || isStandalone(),
+    canPrompt: deferred !== null,
+    ios: isIos(),
+    unsupported: cannotInstall(),
+  };
   if (
     !snapshot ||
     snapshot.installed !== next.installed ||
     snapshot.canPrompt !== next.canPrompt ||
-    snapshot.ios !== next.ios
+    snapshot.ios !== next.ios ||
+    snapshot.unsupported !== next.unsupported
   ) {
     snapshot = next;
   }

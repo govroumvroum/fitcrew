@@ -5,7 +5,8 @@ import { useMutation } from "convex/react";
 import { TrophyIcon } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { InstallHelp } from "@/components/onboarding/install-help";
 import { Button } from "@/components/ui/button";
 import { useInstall } from "@/lib/install";
@@ -39,6 +40,24 @@ export function Welcome() {
   const [withInstall, setWithInstall] = useState(true);
 
   const steps: Step[] = withInstall ? ["intro", "install", "coach"] : ["intro", "coach"];
+
+  // Covering the tab bar isn't hiding it: everything else on the page stays
+  // focusable and read aloud underneath. So the welcome renders straight into
+  // <body> and makes its siblings inert while it's up — the tab bar, the home
+  // header, the « Du nouveau » badge. Only what it set is restored: the cleanup
+  // also runs when <Activity> hides the route.
+  const root = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const self = root.current;
+    if (!self) return;
+    const others = [...document.body.children].filter(
+      (element) => element !== self && !element.hasAttribute("inert"),
+    );
+    for (const element of others) element.setAttribute("inert", "");
+    return () => {
+      for (const element of others) element.removeAttribute("inert");
+    };
+  }, []);
   const firstName = user?.firstName?.trim();
 
   const leave = () => void finish();
@@ -46,16 +65,18 @@ export function Welcome() {
     if (step === "intro") {
       // Already running as the app (or a browser that can't tell yet): no point
       // explaining how to install it.
-      const skipInstall = install === null || install.installed;
+      const skipInstall = install === null || install.installed || install.unsupported;
       setWithInstall(!skipInstall);
       setStep(skipInstall ? "coach" : "install");
     } else setStep("coach");
   };
 
-  return (
+  return createPortal(
     // A page, not a dialog: it replaces the home screen, nothing sits behind it
-    // to go back to. Fixed and z-50 only so it covers the tab bar.
+    // to go back to. Fixed and z-50 so it covers the tab bar; inert (above) so
+    // nothing under it can be reached either.
     <section
+      ref={root}
       aria-labelledby="welcome-title"
       className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-background pt-[var(--safe-top)]"
     >
@@ -117,7 +138,8 @@ export function Welcome() {
           </div>
         </div>
       </div>
-    </section>
+    </section>,
+    document.body,
   );
 }
 

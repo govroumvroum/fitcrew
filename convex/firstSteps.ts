@@ -73,8 +73,17 @@ export type Summary = {
  * (it sees standalone mode before the mutation recording it lands), which is why
  * this takes the map rather than the facts.
  */
-export function summarize(done: Record<StepKey, boolean>, dismissed: boolean): Summary {
-  const steps = STEPS.map((step) => ({
+export function summarize(
+  done: Record<StepKey, boolean>,
+  dismissed: boolean,
+  /**
+   * Steps this device can't do at all, left out of the list and the count —
+   * « installer l'app » on desktop Firefox, which has no install. Otherwise the
+   * card would sit at 5 of 6 forever.
+   */
+  skip: readonly StepKey[] = [],
+): Summary {
+  const steps = STEPS.filter((step) => !skip.includes(step.key)).map((step) => ({
     key: step.key,
     optional: step.optional,
     done: done[step.key],

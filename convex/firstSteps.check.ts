@@ -105,4 +105,18 @@ assert.equal(summarize(stepsDone(blank), true).visible, false);
   assert.equal(summarize(done, false).visible, false);
 }
 
+// A browser that can't install (desktop Firefox) drops the step entirely: five
+// required, and everything else done hides the card instead of pinning it at 5/6.
+{
+  const summary = summarize(
+    stepsDone({ ...everything, installedAt: undefined }),
+    false,
+    ["install"],
+  );
+  assert.equal(summary.required, 5);
+  assert.equal(summary.requiredDone, 5);
+  assert.equal(summary.visible, false);
+  assert.ok(!summary.steps.some((step) => step.key === "install"));
+}
+
 console.log("firstSteps.check: ok");
