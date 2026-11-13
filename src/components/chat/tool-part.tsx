@@ -34,9 +34,15 @@ export type ToolPart = { type: string; state: string; input?: unknown; output?: 
  * and `lookup_food` do, so a dead page can't abort the turn — never reaches
  * `output-error`. Without this the row read "Page lue" in success green over a
  * 429.
+ *
+ * `result: "refused"` too: every write that refuses (allergy guard, a week with
+ * no plan, a date outside the two plan weeks, the semaine type) RETURNS it, and
+ * nothing was written — its card would show the input as if it had been.
  */
-const toolErrored = (tool: ToolPart) =>
-  Boolean((tool.output as { error?: string } | null)?.error);
+const toolErrored = (tool: ToolPart) => {
+  const output = tool.output as { error?: string; result?: string } | null | undefined;
+  return Boolean(output?.error) || output?.result === "refused";
+};
 
 /**
  * Copy for a tool with no entry in `toolLabels`. A tool added to the backend and

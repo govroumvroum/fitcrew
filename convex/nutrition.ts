@@ -441,16 +441,26 @@ async function requirePlan(ctx: MutationCtx, week: string) {
  * weekend — exactly when he asks. Returned, not thrown, like `refused`: a throw
  * is a broken turn that tells the model nothing.
  */
-async function planOrRefusal(ctx: MutationCtx, week: string) {
+async function planOrRefusal(ctx: MutationCtx, week: string, dates: string[]) {
   const user = await requireCurrentUser(ctx);
   const plan = await planFor(ctx, user._id, week);
-  if (plan) return { plan };
-  return {
-    refusal: {
-      result: "refused" as const,
-      note: `Rien n'a été modifié : il n'a pas encore de plan pour la semaine du lundi ${week}. Propose-lui de la générer avec generate_meal_plan.`,
-    },
-  };
+  const refusal = (note: string) => ({
+    refusal: { result: "refused" as const, note: `Rien n'a été modifié : ${note}` },
+  });
+  if (!plan) {
+    return refusal(
+      `il n'a pas encore de plan pour la semaine du lundi ${week}. Propose-lui de la générer avec generate_meal_plan.`,
+    );
+  }
+  // A partial week is allowed (1 to 7 days), so a day can be missing from a plan
+  // that exists — `requireDay` below would throw on it.
+  const missing = dates.filter((date) => !plan.days.some((day) => day.date === date));
+  if (missing.length > 0) {
+    return refusal(
+      `le plan de la semaine du lundi ${week} n'a pas de jour ${missing.join(", ")}. Pour l'ajouter, regénère la semaine avec generate_meal_plan en reprenant les jours déjà prévus (lis-les avec read_plan).`,
+    );
+  }
+  return { plan };
 }
 
 /** The day's meals, mutable in place — the caller patches `plan.days` back. */
@@ -640,8 +650,8 @@ export const savePlan = internalMutation({
 export const replaceMeal = internalMutation({
   args: { weekStart: v.string(), date: v.string(), slot: mealSlot, meal: plannedMeal },
   handler: async (ctx, args) => {
-    const found = await planOrRefusal(ctx, args.weekStart);
-    if (found.refusal) return found.refusal;
+    const found = await planOrRefusal(ctx, args.weekStart, [args.date]);
+    if ("refusal" in found) return found.refusal;
     const { plan } = found;
     const day = requireDay(plan, args.date);
     const meal = clampMeal({ ...args.meal, slot: args.slot });
@@ -665,14 +675,19 @@ const slotRef = v.object({ date: v.string(), slot: mealSlot });
 export const moveMeal = internalMutation({
   args: { weekStart: v.string(), from: slotRef, to: slotRef },
   handler: async (ctx, args) => {
-    const found = await planOrRefusal(ctx, args.weekStart);
-    if (found.refusal) return found.refusal;
+    const found = await planOrRefusal(ctx, args.weekStart, [args.from.date, args.to.date]);
+    if ("refusal" in found) return found.refusal;
     const { plan } = found;
     const from = requireDay(plan, args.from.date);
     const to = requireDay(plan, args.to.date);
 
     const index = from.meals.findIndex((m) => m.slot === args.from.slot);
-    if (index < 0) throw new Error("Aucun repas à déplacer sur ce créneau");
+    if (index < 0) {
+      return {
+        result: "refused" as const,
+        note: `Rien n'a été modifié : aucun repas prévu le ${args.from.date} sur ce créneau. Vérifie avec read_plan.`,
+      };
+    }
     const moved = { ...from.meals[index], slot: args.to.slot };
 
     // An occupied destination swaps instead of overwriting: dropping a planned
@@ -699,8 +714,8 @@ export const moveMeal = internalMutation({
 export const regenerateDay = internalMutation({
   args: { weekStart: v.string(), date: v.string(), meals: v.array(plannedMeal) },
   handler: async (ctx, args) => {
-    const found = await planOrRefusal(ctx, args.weekStart);
-    if (found.refusal) return found.refusal;
+    const found = await planOrRefusal(ctx, args.weekStart, [args.date]);
+    if ("refusal" in found) return found.refusal;
     const { plan } = found;
     const day = requireDay(plan, args.date);
 

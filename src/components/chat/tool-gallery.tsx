@@ -795,6 +795,18 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
         meal: OMELETTE,
       }),
     },
+    {
+      label: "Refusé : pas de plan pour cette semaine (#126)",
+      tool: done(
+        "tool-replace_meal",
+        { date: "2026-11-17", slot: "diner", meal: OMELETTE },
+        {
+          result: "refused",
+          note: "Rien n'a été modifié : il n'a pas encore de plan pour la semaine du lundi 2026-11-16.",
+        },
+      ),
+      note: "Un refus retourné (`result: \"refused\"`) s'affiche comme un échec : rien n'a été écrit, la carte ne doit pas montrer le repas.",
+    },
   ],
   "tool-move_meal": [
     {
