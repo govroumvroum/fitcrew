@@ -103,16 +103,13 @@ assert.deepEqual(levelTargetsOf({ targets: flat, targetsByLevel: eighty }), eigh
 
 // The day's targets: the level's own, null without a profile.
 const withLevels = { targets: flat, targetsByLevel: eighty };
-assert.deepEqual(dayTargets(withLevels, { level: "dur" }), {
-  targets: eighty.dur,
-  flatTarget: false,
-});
-assert.deepEqual(dayTargets(withLevels, { level: "off" }).targets, eighty.off);
-assert.deepEqual(dayTargets(null, { level: "dur" }), { targets: null, flatTarget: false });
+assert.deepEqual(dayTargets(withLevels, { level: "dur" }), eighty.dur);
+assert.deepEqual(dayTargets(withLevels, { level: "off" }), eighty.off);
+assert.equal(dayTargets(null, { level: "dur" }), null);
 // No semaine type → no level → the flat target, an average that already
 // includes sport. Never the off target: that would count training twice.
-assert.deepEqual(dayTargets(withLevels, { level: null }), { targets: flat, flatTarget: true });
-assert.deepEqual(dayTargets(null, { level: null }), { targets: null, flatTarget: false });
+assert.deepEqual(dayTargets(withLevels, { level: null }), flat);
+assert.equal(dayTargets(null, { level: null }), null);
 
 // A day with nothing logged is zeros, not a crash.
 assert.deepEqual(sumMacros([]), { calories: 0, protein: 0, carbs: 0, fat: 0 });

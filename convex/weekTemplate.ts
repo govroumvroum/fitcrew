@@ -43,7 +43,7 @@ export type Weekday = (typeof WEEKDAYS)[number];
 
 /** At most this many things planned on one day — the issue's « 0 à 3 entrées ». */
 export const MAX_PER_DAY = 3;
-const MAX_KIND_CHARS = 40;
+export const MAX_KIND_CHARS = 40;
 
 const DAY = 86_400_000;
 

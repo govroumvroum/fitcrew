@@ -46,6 +46,7 @@ import { levelTargetsOf, type Macros, type PlannedMeal } from "./nutrition";
 import { shift, weekStart } from "./progress";
 import { type DayLevelView, type EntryProgram, loadTemplate } from "./week";
 import {
+  DAY_LEVELS,
   type DayLevel,
   type WeekEntry,
   WEEKDAYS,
@@ -87,7 +88,7 @@ type Dashboard = {
   weekStart: string;
   hasPlan: boolean;
   // Optional in the type: the shape `context` returned before #118 had none.
-  day?: (DayLevelView & { targets: Macros | null; flatTarget?: boolean }) | null;
+  day?: (DayLevelView & { targets: Macros | null }) | null;
 };
 
 type ChefContext = { user: Doc<"users">; dashboard: Dashboard; inventory: Doc<"inventory">[] };
@@ -491,7 +492,6 @@ const QUESTIONS = `1. Objectif (perte de poids, maintien, prise de masse)
 
 const GOAL_LABEL = { perte: "perte de poids", maintien: "maintien", prise: "prise de masse" };
 
-const DAY_LEVEL_ORDER: DayLevel[] = ["off", "leger", "dur"];
 const LEVEL_NAME: Record<DayLevel, string> = {
   off: "Jour off (pas d'entraînement)",
   leger: "Jour léger",
@@ -543,7 +543,7 @@ ${
 ${
   week
     ? `CIBLES PAR NIVEAU DE JOURNÉE (estimées, Mifflin-St Jeor)
-${DAY_LEVEL_ORDER.map((level) => `- ${LEVEL_NAME[level]} : ${macroText(levels![level])}`).join("\n")}
+${DAY_LEVELS.map((level) => `- ${LEVEL_NAME[level]} : ${macroText(levels![level])}`).join("\n")}
 Les protéines et les lipides ne bougent pas d'un niveau à l'autre ; ce sont les glucides qui suivent l'entraînement.`
     : `CIBLE QUOTIDIENNE MOYENNE (estimée, Mifflin-St Jeor, sport compris) : ${macroText(p.targets)}.
 La même chaque jour : sans semaine type, pas de jour off, léger ou dur.`

@@ -80,7 +80,6 @@ export type DayLevelView = {
   level: DayLevel | null; // null: no semaine type, the flat target applies
   source: LevelSource;
   planned: (WeekEntry & { program: EntryProgram | null })[];
-  hasTemplate: boolean;
 };
 
 /** Today's level for /nutrition and the Chef's `read_today` — see `resolveDayLevel`. */
@@ -100,7 +99,6 @@ export async function loadDayLevel(
     level: resolved.level,
     source: resolved.source,
     planned: await entriesWithPrograms(ctx, userId, resolved.planned),
-    hasTemplate: (template?.entries.length ?? 0) > 0,
   };
 }
 
@@ -179,17 +177,19 @@ export const save = mutation({
 
 /**
  * /nutrition's one-tap selector. Valid for `date` only: a new day reads the
- * template again. Creates the row when he has no template yet — choosing a level
- * doesn't require planning a week first.
+ * template again. Without a template there is no level to choose (the flat
+ * target applies, see `resolveDayLevel`), so nothing is written — the screen
+ * only offers the selector once a week exists.
  */
 export const setDayLevel = mutation({
   args: { date: v.string(), level: dayLevel },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
-    const override = { date: args.date, level: args.level };
     const existing: Doc<"weekTemplates"> | null = await templateFor(ctx, user._id);
-    if (existing) await ctx.db.patch("weekTemplates", existing._id, { override });
-    else await ctx.db.insert("weekTemplates", { userId: user._id, entries: [], override });
+    if (!existing) return null;
+    await ctx.db.patch("weekTemplates", existing._id, {
+      override: { date: args.date, level: args.level },
+    });
     return null;
   },
 });

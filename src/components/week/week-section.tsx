@@ -20,6 +20,7 @@ import {
   type DayLevel,
   DAY_LEVELS,
   LEVEL_LABEL,
+  MAX_KIND_CHARS,
   MAX_PER_DAY,
   WEEKDAYS,
   entriesOn,
@@ -40,7 +41,6 @@ import { type ShownEntry, WeekRows } from "./week-rows";
 type ActiveProgram = { lineageId: string; name: string };
 
 const MOMENTS = ["matin", "midi", "soir"] as const;
-const MAX_KIND = 40;
 
 export function WeekSection({ date, programs }: { date: string; programs: ActiveProgram[] }) {
   const template = useQuery(api.week.template, {});
@@ -168,7 +168,7 @@ function DayEditor({
           <div className="flex items-center gap-2">
             <Input
               value={row.kind}
-              maxLength={MAX_KIND}
+              maxLength={MAX_KIND_CHARS}
               placeholder="boxe, muscu, course…"
               aria-label="Séance"
               className="h-11 flex-1"
@@ -303,6 +303,6 @@ function Chip({
   );
 }
 
-const shortName = (name: string) => (name.split(/\s+[—–-]\s+/)[0] ?? name).slice(0, MAX_KIND).trim();
+const shortName = (name: string) => (name.split(/\s+[—–-]\s+/)[0] ?? name).slice(0, MAX_KIND_CHARS).trim();
 
 const capitalize =(text: string) => text.charAt(0).toUpperCase() + text.slice(1);
