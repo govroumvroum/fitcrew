@@ -23,6 +23,7 @@ import type * as http from "../http.js";
 import type * as migrations from "../migrations.js";
 import type * as model from "../model.js";
 import type * as nutrition from "../nutrition.js";
+import type * as planWeeks from "../planWeeks.js";
 import type * as programs from "../programs.js";
 import type * as progress from "../progress.js";
 import type * as recipeCatalogue from "../recipeCatalogue.js";
@@ -62,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   migrations: typeof migrations;
   model: typeof model;
   nutrition: typeof nutrition;
+  planWeeks: typeof planWeeks;
   programs: typeof programs;
   progress: typeof progress;
   recipeCatalogue: typeof recipeCatalogue;

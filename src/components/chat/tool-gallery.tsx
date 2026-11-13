@@ -828,7 +828,25 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
   ],
   "tool-shopping_list": [
     {
-      label: "Ingrédient à plusieurs quantités",
+      label: "Semaine prochaine (#126)",
+      tool: done(
+        "tool-shopping_list",
+        { week: "next" },
+        {
+          week: "semaine prochaine",
+          weekStart: "2026-11-16",
+          items: [
+            { name: "Filet de poulet", quantities: ["180 g", "180 g"] },
+            { name: "Riz basmati", quantities: ["80 g", "80 g", "60 g"] },
+            { name: "Courgettes", quantities: ["2"] },
+          ],
+          note: null,
+        },
+      ),
+      note: "Le résultat porte la semaine depuis #126 : le titre la nomme.",
+    },
+    {
+      label: "Ancien format : ingrédient à plusieurs quantités",
       tool: done("tool-shopping_list", null, [
         { name: "Filet de poulet", quantities: ["180 g", "180 g", "2 filets"] },
         { name: "Flocons d'avoine", quantities: ["80 g", "80 g"] },

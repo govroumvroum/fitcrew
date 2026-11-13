@@ -72,6 +72,20 @@ export const zRegenerateDay = z.object({
   meals: z.array(zPlannedMeal).min(1).max(6).describe("Les repas des créneaux NON verrouillés"),
 });
 
+/**
+ * The two weeks the Chef works on (#126). Named, not a date: the server turns it
+ * into a Monday, so the model never does calendar arithmetic.
+ */
+export const zPlanWeek = z
+  .enum(["current", "next"])
+  .describe(
+    '"current" = la semaine en cours, "next" = la semaine prochaine. Les deux sont datées dans la section DATES',
+  );
+
+export const zShoppingList = z.object({ week: zPlanWeek });
+
+export const zReadPlan = z.object({ week: zPlanWeek });
+
 export const zAddFoodLogEntry = z.object({
   date: z.string(),
   slot: zMealSlot,

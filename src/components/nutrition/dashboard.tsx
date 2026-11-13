@@ -157,6 +157,16 @@ export function NutritionDashboard({ today }: { today: string }) {
                     : "Générer mon menu de la semaine"}
               </Link>
             </Button>
+            {/* #126: the Chef can prepare next week over the weekend. One line, no
+                week view — that's #121. On Monday it simply becomes `hasPlan`. */}
+            {profile && data.hasPlanNextWeek ? (
+              <Link
+                href="/chef"
+                className="-mt-1 text-center text-[11px] text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2"
+              >
+                Plan de la semaine prochaine prêt
+              </Link>
+            ) : null}
           </section>
 
           <Meals meals={todayMeals} today={today} weekStart={weekStart} hasPlan={hasPlan} />

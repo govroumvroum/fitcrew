@@ -34,15 +34,18 @@ import {
   zLookupFood,
   zMoveMeal,
   zPlannedMeal,
+  zReadPlan,
   zRegenerateDay,
   zReplaceMeal,
   zSaveNutritionProfile,
+  zShoppingList,
   zSuggestRecipes,
   zUpdateInventory,
 } from "./chefToolSchemas";
 import { foodByBarcode, isBarcode, searchFood } from "./foodFacts";
 import { CONTEXT_OPTIONS, languageModel } from "./model";
 import { levelTargetsOf, type Macros, type PlannedMeal } from "./nutrition";
+import { WEEK_LABEL, nextWeekLine, planWeeks, weekOfDates } from "./planWeeks";
 import { shift, weekStart } from "./progress";
 import { type DayLevelView, type EntryProgram, loadTemplate } from "./week";
 import {
@@ -88,6 +91,8 @@ type Dashboard = {
   hydrationMl: number;
   weekStart: string;
   hasPlan: boolean;
+  // Optional: added in #126, after `context` already returned this shape.
+  hasPlanNextWeek?: boolean;
   // Optional in the type: the shape `context` returned before #118 had none.
   day?: (DayLevelView & { targets: Macros | null }) | null;
 };
@@ -175,8 +180,13 @@ const LEVEL_SOURCE = {
  * the dates the model needs to WRITE are at the end of the system prompt.
  */
 export function chefTools(today: string) {
-  const monday = weekStart(today);
-  const week = { weekStart: monday };
+  // The two weeks the Chef may touch (#126): this one and the next. The plan
+  // writes derive theirs from the DATES the model wrote (`weekOfDates`), the
+  // reads take it by name — never a Monday from the model.
+  const weeks = planWeeks(today);
+  const week = { weekStart: weeks.current };
+  const outOfRange = (error: string) =>
+    ({ result: "refused" as const, note: `${error} Rien n'a été enregistré.` }) as const;
 
   return {
     // Shared with the Coach, definition and all — see `convex/choices.ts`.
@@ -200,7 +210,7 @@ export function chefTools(today: string) {
 
     read_today: createTool({
       description:
-        "L'état de la journée du user : son niveau du jour (off, léger, dur) et pourquoi — null s'il n'a pas de semaine type —, repas prévus au plan (avec leur verrou), ce qu'il a déjà loggué, les totaux du jour, ce qu'il reste sur la cible de ce niveau, et son hydratation. Rien de tout ça n'est dans ton prompt — appelle cet outil avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou avant de proposer un repas pour aujourd'hui.",
+        "L'état de la journée du user : son niveau du jour (off, léger, dur) et pourquoi — null s'il n'a pas de semaine type —, repas prévus au plan (avec leur verrou), ce qu'il a déjà loggué, les totaux du jour, ce qu'il reste sur la cible de ce niveau, son hydratation, et s'il a déjà un plan cette semaine et la semaine prochaine. Rien de tout ça n'est dans ton prompt — appelle cet outil avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou avant de proposer un repas pour aujourd'hui.",
       inputSchema: z.object({}),
       execute: async (ctx: ToolCtx) => {
         // Only the dashboard: the fridge is `read_inventory`'s business.
@@ -231,6 +241,9 @@ export function chefTools(today: string) {
             : null,
           weekStart: dashboard.weekStart,
           hasPlanThisWeek: dashboard.hasPlan,
+          // So he's warned before `generate_meal_plan` overwrites next week too.
+          nextWeekStart: weeks.next,
+          hasPlanNextWeek: dashboard.hasPlanNextWeek === true,
           plannedMeals: dashboard.todayMeals.map((m) => ({
             slot: SLOT_LABEL[m.slot],
             name: m.name,
@@ -294,53 +307,131 @@ export function chefTools(today: string) {
 
     generate_meal_plan: createTool({
       description:
-        "Génère et enregistre les repas de la semaine EN COURS. Chaque date doit tomber entre le lundi et le dimanche de cette semaine — les deux sont écrits à la fin de ton system prompt. Écrase le plan existant de la semaine.",
+        "Génère et enregistre les repas d'UNE semaine : la semaine en cours OU la semaine prochaine, jamais une autre. Toutes les dates dans la même semaine, du lundi au dimanche, prises dans la section DATES à la fin de ton system prompt — la semaine est déduite des dates. Écrase le plan existant de CETTE semaine-là, sans toucher l'autre.",
       inputSchema: zGenerateMealPlan,
-      execute: async (ctx: ToolCtx, { days }) =>
-        await ctx.runMutation(internal.nutrition.savePlan, {
-          ...week,
+      execute: async (ctx: ToolCtx, { days }) => {
+        const target = weekOfDates(
+          today,
+          days.map((day) => day.date),
+        );
+        if ("error" in target) return outOfRange(target.error);
+        const saved = await ctx.runMutation(internal.nutrition.savePlan, {
+          weekStart: target.weekStart,
           days: days.map((day) => ({ date: day.date, meals: day.meals.map(toPlannedMeal) })),
-        }),
+        });
+        // Which week it went to, so the summary says so — the card reads `meals`.
+        return saved.result === "ok"
+          ? { ...saved, week: WEEK_LABEL[target.week], weekStart: target.weekStart }
+          : saved;
+      },
+    }),
+
+    read_plan: createTool({
+      description:
+        "Le plan enregistré d'une semaine (en cours ou prochaine), jour par jour : créneau, nom du plat, kcal, verrou. Appelle-le avant de modifier un jour que tu n'as pas écrit dans CETTE conversation, ou pour savoir ce qui est prévu un autre jour qu'aujourd'hui.",
+      inputSchema: zReadPlan,
+      execute: async (ctx: ToolCtx, { week: which }) => {
+        const monday = weeks[which];
+        const plan: Doc<"mealPlans"> | null = await ctx.runQuery(api.nutrition.plan, {
+          weekStart: monday,
+        });
+        if (!plan) {
+          return {
+            result: "empty" as const,
+            week: WEEK_LABEL[which],
+            weekStart: monday,
+            note: `Aucun plan pour la ${WEEK_LABEL[which]} (lundi ${monday}).`,
+          };
+        }
+        return {
+          result: "found" as const,
+          week: WEEK_LABEL[which],
+          weekStart: monday,
+          days: plan.days.map((day) => ({
+            date: day.date,
+            weekday: WEEKDAYS[weekdayOf(day.date)],
+            meals: day.meals.map((m) => ({
+              slot: m.slot,
+              name: m.name,
+              calories: m.macros.calories,
+              locked: m.locked === true,
+            })),
+          })),
+        };
+      },
     }),
 
     replace_meal: createTool({
       description:
-        "Remplace UN repas du plan de la semaine (il n'aime pas, il n'a pas les ingrédients, il veut autre chose).",
+        "Remplace UN repas du plan (il n'aime pas, il n'a pas les ingrédients, il veut autre chose). La date peut être dans la semaine en cours ou la prochaine.",
       inputSchema: zReplaceMeal,
-      execute: async (ctx: ToolCtx, { date, slot, meal }) =>
-        await ctx.runMutation(internal.nutrition.replaceMeal, {
-          ...week,
+      execute: async (ctx: ToolCtx, { date, slot, meal }) => {
+        const target = weekOfDates(today, [date]);
+        if ("error" in target) return outOfRange(target.error);
+        return await ctx.runMutation(internal.nutrition.replaceMeal, {
+          weekStart: target.weekStart,
           date,
           slot,
           meal: toPlannedMeal(meal),
-        }),
+        });
+      },
     }),
 
     move_meal: createTool({
       description:
-        "Déplace un repas prévu vers un autre jour ou créneau. Si la destination est occupée, les deux repas s'échangent.",
+        "Déplace un repas prévu vers un autre jour ou créneau DE LA MÊME SEMAINE. Si la destination est occupée, les deux repas s'échangent.",
       inputSchema: zMoveMeal,
-      execute: async (ctx: ToolCtx, { from, to }) =>
-        await ctx.runMutation(internal.nutrition.moveMeal, { ...week, from, to }),
+      execute: async (ctx: ToolCtx, { from, to }) => {
+        // One plan per week: a move across two of them has no single document
+        // to swap in, so it's refused rather than half done.
+        const target = weekOfDates(today, [from.date, to.date]);
+        if ("error" in target) return outOfRange(target.error);
+        return await ctx.runMutation(internal.nutrition.moveMeal, {
+          weekStart: target.weekStart,
+          from,
+          to,
+        });
+      },
     }),
 
     regenerate_day: createTool({
       description:
-        "Refait tous les repas NON verrouillés d'une journée. Les repas verrouillés par le user sont conservés : ne propose rien pour leurs créneaux.",
+        "Refait tous les repas NON verrouillés d'une journée, de la semaine en cours ou de la prochaine. Les repas verrouillés par le user sont conservés : ne propose rien pour leurs créneaux.",
       inputSchema: zRegenerateDay,
-      execute: async (ctx: ToolCtx, { date, meals }) =>
-        await ctx.runMutation(internal.nutrition.regenerateDay, {
-          ...week,
+      execute: async (ctx: ToolCtx, { date, meals }) => {
+        const target = weekOfDates(today, [date]);
+        if ("error" in target) return outOfRange(target.error);
+        return await ctx.runMutation(internal.nutrition.regenerateDay, {
+          weekStart: target.weekStart,
           date,
           meals: meals.map(toPlannedMeal),
-        }),
+        });
+      },
     }),
 
     shopping_list: createTool({
       description:
-        "La liste de courses de la semaine, consolidée depuis le plan. Rien à inventer : ça sort du plan enregistré.",
-      inputSchema: z.object({}),
-      execute: async (ctx: ToolCtx) => await ctx.runQuery(api.nutrition.shoppingList, { ...week }),
+        "La liste de courses d'une semaine (en cours ou prochaine), consolidée depuis son plan. Rien à inventer : ça sort du plan enregistré.",
+      inputSchema: zShoppingList,
+      execute: async (ctx: ToolCtx, { week: which }) => {
+        const monday = weeks[which];
+        const items: { name: string; quantities: string[] }[] = await ctx.runQuery(
+          api.nutrition.shoppingList,
+          { weekStart: monday },
+        );
+        // An object since #126 (it was the bare list): the model has to know
+        // WHICH week it got, and that an empty list means "no plan". The card
+        // reads both shapes — older threads hold the array.
+        return {
+          week: WEEK_LABEL[which],
+          weekStart: monday,
+          items,
+          note:
+            items.length === 0
+              ? `Pas de plan pour la ${WEEK_LABEL[which]} (lundi ${monday}), donc rien à acheter. Propose de le générer.`
+              : null,
+        };
+      },
     }),
 
     add_food_log_entry: createTool({
@@ -573,7 +664,8 @@ Une question dont tu connais déjà l'éventail des réponses (objectif, sexe, n
 
 CE PROMPT NE CONTIENT PAS SA JOURNÉE — TU VAS LA CHERCHER
 Ses repas prévus, ce qu'il a déjà mangé, ses totaux du jour, son hydratation et son frigo ne sont PAS écrits ici. Tu y as accès, mais par outil, et un outil qu'on n'appelle pas ne renvoie rien.
-- \`read_today\` : le niveau RÉEL d'aujourd'hui quand il a une semaine type (off, léger, dur — il a pu le changer à la main ou s'entraîner un jour off), repas prévus (avec leur verrou), journal du jour, totaux, ce qu'il reste sur la cible du jour, hydratation, et s'il existe un plan cette semaine. Appelle-le avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou de proposer un repas pour aujourd'hui — et avant \`generate_meal_plan\`, pour savoir si un plan existe déjà : générer ÉCRASE la semaine en cours, donc s'il en a un, dis-le et demande avant d'écraser.
+- \`read_today\` : le niveau RÉEL d'aujourd'hui quand il a une semaine type (off, léger, dur — il a pu le changer à la main ou s'entraîner un jour off), repas prévus (avec leur verrou), journal du jour, totaux, ce qu'il reste sur la cible du jour, hydratation, et s'il existe un plan cette semaine et la semaine prochaine. Appelle-le avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou de proposer un repas pour aujourd'hui — et avant \`generate_meal_plan\`, pour savoir si un plan existe déjà : générer ÉCRASE le plan de la semaine visée, donc s'il en a un, dis-le et demande avant d'écraser.
+- \`read_plan\` : le plan enregistré de la semaine en cours ou de la prochaine, jour par jour, avec les verrous. Appelle-le avant de modifier un jour que tu n'as pas écrit dans cette conversation.
 - \`read_inventory\` : son frigo et ses placards. Appelle-le avant de proposer de cuisiner avec ce qu'il a.
 - Les totaux et le restant arrivent DÉJÀ calculés : ne refais pas les additions ni les soustractions.
 - Ne dis JAMAIS que tu n'as pas accès à sa journée, et n'invente ni un repas prévu, ni un chiffre du journal : tout ça se lit.
@@ -586,8 +678,8 @@ RÈGLES NON NÉGOCIABLES
 - Tu ne fixes jamais un objectif de poids ni un déficit agressif de toi-même. Les cibles viennent du calcul ci-dessus.
 
 RÈGLES PLAN (quand tu appelles generate_meal_plan)
-- Les dates sont celles de la semaine en cours, entre le lundi et le dimanche donnés dans la section DATES en fin de prompt. Ne calcule aucune autre semaine.
-${
+- Un plan couvre UNE semaine, du lundi au dimanche : la semaine en cours ou la semaine prochaine, toutes deux datées dans la section DATES en fin de prompt. Recopie ces dates, ne calcule aucune autre semaine. La section DATES dit aussi laquelle choisir quand il ne le précise pas.
+- Enregistrer une semaine ne touche pas l'autre. Dans ton résumé, dis pour quelle semaine c'est (« ta semaine du lundi 16 »).${
   // The targets depend on the PROFILE, the training days on the WEEK: the Coach
   // can write the week before the Chef's onboarding, so all four cases exist.
   !p
@@ -614,9 +706,9 @@ ${secheCatalogueLines([...p.allergies, ...p.excluded]).join("\n")}
 }
 AUTRES OUTILS
 - \`lookup_food\` AVANT d'estimer un produit industriel, une marque ou un code-barres. Préfère toujours ces chiffres à ton estimation, et dis qu'ils viennent d'Open Food Facts. Jamais pour un plat maison : il n'y est pas. Si l'outil renvoie une erreur ou zéro résultat, estime et dis que c'est une estimation.
-- \`replace_meal\` dès qu'il n'aime pas un repas ou n'a pas les ingrédients. \`move_meal\` pour un imprévu d'agenda. \`regenerate_day\` pour refaire une journée entière — les repas verrouillés restent, ne propose rien pour leurs créneaux. Pour aujourd'hui, \`read_today\` te dit lesquels sont verrouillés ; pour un autre jour, tu ne le sais pas, alors demande-lui avant de tout refaire.
+- \`replace_meal\` dès qu'il n'aime pas un repas ou n'a pas les ingrédients. \`move_meal\` pour un imprévu d'agenda. \`regenerate_day\` pour refaire une journée entière — les repas verrouillés restent, ne propose rien pour leurs créneaux. Pour aujourd'hui, \`read_today\` te dit lesquels sont verrouillés ; pour un autre jour, \`read_plan\`. Ces trois outils marchent sur la semaine en cours comme sur la prochaine : la date suffit.
 - \`add_food_log_entry\` quand il te raconte ce qu'il a mangé hors plan. \`log_planned_meal\` quand il a mangé ce qui était prévu.
-- \`shopping_list\` pour ses courses, \`read_inventory\` pour voir ce qu'il a en stock, \`update_inventory\` pour le mettre à jour, \`suggest_recipes_from_ingredients\` pour cuisiner avec ce qui reste (lis l'inventaire d'abord).
+- \`shopping_list\` pour ses courses (de la semaine en cours ou de la prochaine, même règle que pour le plan), \`read_inventory\` pour voir ce qu'il a en stock, \`update_inventory\` pour le mettre à jour, \`suggest_recipes_from_ingredients\` pour cuisiner avec ce qui reste (lis l'inventaire d'abord).
 - Une PHOTO est jointe à son message : choisis l'outil selon ce qu'il décrit — une assiette ou un plat → \`analyze_plate\` ; un frigo ou un placard → \`analyze_fridge\` ; une étiquette ou un emballage → \`read_nutrition_label\` ; des courses ou un ticket → \`analyze_groceries\`. Si tu ne peux pas trancher, demande-lui ce que c'est plutôt que de deviner.
 - AUCUNE analyse de photo n'est enregistrée par toi. Dis-lui juste de vérifier et valider la fiche affichée. Si l'outil renvoie une liste vide, NE LUI PARLE PAS de fiche à valider : il n'y en a aucune à l'écran. Dis ce que tu vois, ce qui manque, et propose une meilleure photo ou les chiffres à la main.
 - \`ask_coach\` seulement pour un avis qui dépend vraiment de l'entraînement (ce qu'une séance demande, les muscles travaillés). JAMAIS pour savoir quels jours il s'entraîne, à quelle heure, ni si aujourd'hui est un jour de séance : c'est sa semaine type ci-dessus et \`read_today\`. Jamais pour son profil, qui est ci-dessus, ni pour sa journée ou son frigo, que \`read_today\` et \`read_inventory\` te donnent. Une seule question à la fois, avec le minimum de contexte : il ne voit pas votre conversation.
@@ -625,7 +717,8 @@ DATES
 Nous sommes le ${today}, un ${WEEKDAYS[weekdayOf(today)]}. La semaine en cours va du lundi ${monday} au dimanche ${shift(monday, 6)}.
 Jours de la semaine en cours : ${weekDates(monday)
     .map((date, i) => `${WEEKDAYS[i]} ${date}`)
-    .join(", ")}.`;
+    .join(", ")}.
+${nextWeekLine(today)}`;
   // ^ Deliberately the LAST lines of the prompt. They're the only values that
   // change from one turn to the next, and the provider's prompt cache matches on
   // a prefix: anything after the first differing byte is refused a cache hit. At

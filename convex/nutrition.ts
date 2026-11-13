@@ -8,6 +8,7 @@ import {
   mutation,
   query,
 } from "./_generated/server";
+import { datesOutsideWeek, planWeeks } from "./planWeeks";
 import { weekStart } from "./progress";
 import { loadDayLevel } from "./week";
 import type { DayLevel } from "./weekTemplate";
@@ -514,11 +515,15 @@ export const dashboard = query({
         hydrationMl: 0,
         weekStart: week,
         hasPlan: false,
+        hasPlanNextWeek: false,
         day: null,
       };
     }
 
     const plan = await planFor(ctx, user._id, week);
+    // #126: the Chef can prepare next week over the weekend. One indexed
+    // `unique()`, and only a yes/no leaves the query.
+    const nextPlan = await planFor(ctx, user._id, planWeeks(args.today).next);
     const log = await ctx.db
       .query("foodLog")
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.today))
@@ -539,6 +544,8 @@ export const dashboard = query({
       hydrationMl: water?.ml ?? 0,
       weekStart: week,
       hasPlan: plan !== null,
+      // Added in #126; an older bundle never reads it.
+      hasPlanNextWeek: nextPlan !== null,
       // Today's level and its targets (#118). Added, not swapped in: the
       // previous bundle keeps reading `profile.targets`. `targets` is null
       // without a profile — there's nothing to aim at yet.
@@ -566,6 +573,20 @@ export const savePlan = internalMutation({
     // a plan filed under a Tuesday would be invisible to every reader.
     if (weekStart(args.weekStart) !== args.weekStart) {
       throw new Error("weekStart must be a Monday");
+    }
+
+    // Every day inside that week (#126). Filed under the wrong Monday, a day is
+    // invisible: /nutrition and `read_today` look it up in `weekStart(today)`'s
+    // plan. The Chef's tool already checks; this is the backstop.
+    const outside = datesOutsideWeek(
+      args.weekStart,
+      args.days.map((day) => day.date),
+    );
+    if (outside.length > 0) {
+      return {
+        result: "refused" as const,
+        note: `Rien n'a été enregistré : ${outside.join(", ")} hors de la semaine du lundi ${args.weekStart}. Un plan couvre une seule semaine, du lundi au dimanche.`,
+      };
     }
 
     const days = args.days.map((day) => ({
