@@ -163,7 +163,7 @@ export function catalogueRow(entry: (typeof SECHE_CATALOGUE)[number]): RecipeFie
 // Writes
 // ---------------------------------------------------------------------------
 
-const byOwnerAndKey = (ctx: QueryCtx, userId: Id<"users"> | undefined, nameKey: string) =>
+export const byOwnerAndKey = (ctx: QueryCtx, userId: Id<"users"> | undefined, nameKey: string) =>
   ctx.db
     .query("recipes")
     .withIndex("by_user_and_name_key", (q) => q.eq("userId", userId).eq("nameKey", nameKey))
@@ -238,7 +238,7 @@ export const seed = internalMutation({
 const OWN_LIMIT = 400;
 const CATALOGUE_LIMIT = 100;
 
-async function forbiddenFor(ctx: QueryCtx, userId: Id<"users">): Promise<string[]> {
+export async function forbiddenFor(ctx: QueryCtx, userId: Id<"users">): Promise<string[]> {
   const profile = await ctx.db
     .query("nutritionProfiles")
     .withIndex("by_user", (q) => q.eq("userId", userId))
@@ -253,7 +253,7 @@ const ownedBy = (ctx: QueryCtx, userId: Id<"users"> | undefined, category?: Reci
         .withIndex("by_user_and_category", (q) => q.eq("userId", userId).eq("category", category))
     : ctx.db.query("recipes").withIndex("by_user", (q) => q.eq("userId", userId));
 
-const photoFor = (ctx: QueryCtx, nameKey: string) =>
+export const photoFor = (ctx: QueryCtx, nameKey: string) =>
   ctx.db
     .query("recipePhotos")
     .withIndex("by_name_key", (q) => q.eq("nameKey", nameKey))
@@ -279,45 +279,55 @@ export const library = query({
   handler: async (ctx, args) => {
     const user = await getCurrentUser(ctx);
     if (!user) return [];
-
-    const forbidden = await forbiddenFor(ctx, user._id);
-    // Both indexes end in `_creationTime`, so `desc` + `take` is the NEWEST 400,
-    // already in order — sorting after `take` would keep an arbitrary 400.
-    const own = await ownedBy(ctx, user._id, args.category).order("desc").take(OWN_LIMIT);
-    // The WHOLE catalogue, never one shelf: the Chef files its copy of a catalogue
-    // dish by the slot it chose (a « collation » mousse eaten at déjeuner lands in
-    // `repas`), and that copy only inherits the curated `allergens` if its twin is
-    // in the merge. Filtering the catalogue first made the health guard depend on
-    // the tab. 31 rows; the shelf filter applies AFTER the guard.
-    // Ascending `by_user` = insertion order = the seed's (diet's, by shelf).
-    const catalogue = await ownedBy(ctx, undefined).take(CATALOGUE_LIMIT);
-
-    const visible = mergeLibrary(own, catalogue).filter(
-      (r) => visibleTo(r, forbidden) && (!args.category || r.category === args.category),
-    );
-
-    return await Promise.all(
-      visible.map(async (r) => {
-        const cached = r.photoUrl ? null : await photoFor(ctx, r.nameKey);
-        return {
-          _id: r._id,
-          mine: r.userId !== undefined,
-          name: r.name,
-          category: r.category,
-          cheat: r.cheat === true,
-          tags: r.tags,
-          description: r.description ?? null,
-          ingredients: r.ingredients,
-          steps: r.steps,
-          prepMinutes: r.prepMinutes,
-          macros: r.macros,
-          photoUrl: r.photoUrl ?? cached?.photoUrl ?? null,
-          photoPending: !r.photoUrl && !cached,
-        };
-      }),
-    );
+    return await libraryFor(ctx, user._id, args.category);
   },
 });
+
+/**
+ * `library`'s answer for one user. Also what the week view's « Changer » picks
+ * from (#121), so both screens go through the same allergy guard.
+ */
+export async function libraryFor(ctx: QueryCtx, userId: Id<"users">, category?: RecipeCategory) {
+  const forbidden = await forbiddenFor(ctx, userId);
+  // Both indexes end in `_creationTime`, so `desc` + `take` is the NEWEST 400,
+  // already in order — sorting after `take` would keep an arbitrary 400.
+  const own = await ownedBy(ctx, userId, category).order("desc").take(OWN_LIMIT);
+  // The WHOLE catalogue, never one shelf: the Chef files its copy of a catalogue
+  // dish by the slot it chose (a « collation » mousse eaten at déjeuner lands in
+  // `repas`), and that copy only inherits the curated `allergens` if its twin is
+  // in the merge. Filtering the catalogue first made the health guard depend on
+  // the tab. 31 rows; the shelf filter applies AFTER the guard.
+  // Ascending `by_user` = insertion order = the seed's (diet's, by shelf).
+  const catalogue = await ownedBy(ctx, undefined).take(CATALOGUE_LIMIT);
+
+  const visible = mergeLibrary(own, catalogue).filter(
+    (r) => visibleTo(r, forbidden) && (!category || r.category === category),
+  );
+
+  return await Promise.all(
+    visible.map(async (r) => {
+      const cached = r.photoUrl ? null : await photoFor(ctx, r.nameKey);
+      return {
+        _id: r._id,
+        // Added for #121 (« Changer » never offers the meal itself); an older
+        // bundle ignores it.
+        nameKey: r.nameKey,
+        mine: r.userId !== undefined,
+        name: r.name,
+        category: r.category,
+        cheat: r.cheat === true,
+        tags: r.tags,
+        description: r.description ?? null,
+        ingredients: r.ingredients,
+        steps: r.steps,
+        prepMinutes: r.prepMinutes,
+        macros: r.macros,
+        photoUrl: r.photoUrl ?? cached?.photoUrl ?? null,
+        photoPending: !r.photoUrl && !cached,
+      };
+    }),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Photos: TheMealDB, looked up once per name at READ time, cached forever.
