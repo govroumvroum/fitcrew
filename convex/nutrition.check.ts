@@ -9,6 +9,7 @@ import {
   forbiddenHits,
   shoppingListFrom,
   sumMacros,
+  sumQuantities,
 } from "./nutrition";
 
 const base = { age: 30, sex: "h", heightCm: 180, weightKg: 80, activityLevel: "modere" } as const;
@@ -74,8 +75,7 @@ for (const goal of ["perte", "maintien", "prise"] as const) {
     // target, which already counted training in its factor. Otherwise a séance
     // would be counted twice — once in the factor, once in the level.
     assert.ok(
-      levels.off.calories < estimateTargets(input).calories ||
-        activityLevel === "sedentaire",
+      levels.off.calories < estimateTargets(input).calories || activityLevel === "sedentaire",
       `off (${levels.off.calories}) must not already include training`,
     );
   }
@@ -147,8 +147,8 @@ const days: PlanDay[] = [
 ];
 
 // One shopping line per ingredient, whatever the spelling and the plural: the
-// first spelling seen is the display name and every raw quantity is kept as
-// written — "200 g" + "3" has no sum.
+// first spelling seen is the display name, and quantities in different units
+// stay apart — "200 g" + "3" has no sum.
 assert.deepEqual(shoppingListFrom(days), [
   { name: "Tomate", quantities: ["200 g", "3"] },
   { name: "Huile d'olive", quantities: ["1 cuillère"] },
@@ -156,6 +156,21 @@ assert.deepEqual(shoppingListFrom(days), [
 
 // An empty week is an empty list.
 assert.deepEqual(shoppingListFrom([]), []);
+
+// Same unit is summed (plural and spacing aside); what can't be parsed is kept
+// as written, every occurrence, after the sums — two "1/2 citron" is a whole
+// lemon to buy, not half of one.
+assert.deepEqual(sumQuantities(["250 g", "250g", "1,5 g", "1 moyenne", "2 moyennes", "3", "6"]), [
+  "501,5 g",
+  "3 moyenne",
+  "9",
+]);
+assert.deepEqual(sumQuantities(["1/2 citron", "100 g", "1/2 citron", "2-3 tranches", "50 g"]), [
+  "150 g",
+  "1/2 citron",
+  "1/2 citron",
+  "2-3 tranches",
+]);
 
 // --- Allergy / exclusion guard ---------------------------------------------
 // The health-safety path: the prompt says allergies are hard constraints, this
@@ -266,9 +281,10 @@ assert.equal(forbiddenHits([dish("Poulet riz", ["poulet"])], [buried]).length, 1
 // A normal long-ish name is still scanned, not refused: the cap is for absurd
 // input, not for "filet de poulet fermier élevé en plein air label rouge".
 assert.deepEqual(
-  hitNames([dish("Plat", ["filet de poulet fermier élevé en plein air label rouge des Landes"])], [
-    "oeuf",
-  ]),
+  hitNames(
+    [dish("Plat", ["filet de poulet fermier élevé en plein air label rouge des Landes"])],
+    ["oeuf"],
+  ),
   [],
 );
 
