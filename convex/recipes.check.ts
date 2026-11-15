@@ -74,11 +74,11 @@ assert.equal(
 const peanutFree = secheCatalogueLines(["cacahuète"]).join("\n");
 assert.ok(!peanutFree.includes("Skyr cacahuète-cacao"));
 assert.ok(!peanutFree.includes("Bowl skyr granola"), "granola au beurre de cacahuète");
-assert.equal(secheCatalogueLines([]).length, 31);
+assert.equal(secheCatalogueLines([]).length, 80);
 
 // --- the catalogue itself ---------------------------------------------------
-assert.equal(SECHE_CATALOGUE.length, 31);
-assert.equal(new Set(SECHE_CATALOGUE.map((r) => recipeKey(r.name))).size, 31, "noms uniques");
+assert.equal(SECHE_CATALOGUE.length, 80);
+assert.equal(new Set(SECHE_CATALOGUE.map((r) => recipeKey(r.name))).size, 80, "noms uniques");
 for (const r of SECHE_CATALOGUE) {
   const { calories, protein, carbs, fat } = r.macros;
   // Estimated carbs and fat must add back up to diet's kcal, give or take.

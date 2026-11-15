@@ -8,7 +8,7 @@ export default function ShoppingPage() {
   // ph-mask: what someone buys says what they eat, like the rest of /nutrition.
   // Suspense: `?semaine=` is read with useSearchParams.
   return (
-    <main className="ph-mask mx-auto flex w-full max-w-md flex-1 flex-col pb-[var(--tab-bar)] md:max-w-xl">
+    <main className="ph-mask mx-auto flex w-full max-w-md flex-1 flex-col pb-[var(--tab-bar)] md:max-w-3xl lg:max-w-5xl">
       <Suspense fallback={<ShoppingListSkeleton />}>
         <Shopping />
       </Suspense>

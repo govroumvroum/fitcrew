@@ -73,6 +73,19 @@ export const seedRecipeCatalogue = migrations.define({
 });
 
 /**
+ * The same seed, run again: the catalogue's `steps` are now detailed enough to
+ * actually cook from (heat, times, quantities, doneness cues), and 49 recipes join
+ * the 31 (batch cooking, express, plaisir). Same idempotent
+ * upsert, so it rewrites only the changed rows and inserts the new ones.
+ */
+export const seedRecipeCatalogue2 = migrations.define({
+  table: "users",
+  migrateOne: async (ctx) => {
+    await seedCatalogue(ctx);
+  },
+});
+
+/**
  * #127: everyone who already has an account when the welcome screen ships has
  * already found their way around — they get the « Premiers pas » card, never the
  * welcome. Stamped with their creation time, not now: it is a backfill, not an
@@ -92,5 +105,6 @@ export const runAll = migrations.runner([
   internal.migrations.backfillLineage,
   internal.migrations.backfillTargetsByLevel,
   internal.migrations.seedRecipeCatalogue,
+  internal.migrations.seedRecipeCatalogue2,
   internal.migrations.markExistingUsersWelcomed,
 ]);

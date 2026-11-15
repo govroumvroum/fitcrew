@@ -44,7 +44,12 @@ export const zPlannedMeal = z.object({
     .describe(
       'Tels qu\'on les achète, poids CRU / SEC : "Riz" 80 g (sec), jamais "Riz cuit" 250 g. Pâtes, riz, semoule, quinoa, légumineuses sèches, viande et poisson : toujours le poids avant cuisson, et un nom sans "cuit" ni "sec" pour que la liste de courses les regroupe. Un même produit porte EXACTEMENT le même nom dans tous les repas de la semaine, avec le morceau précis : "Blanc de poulet" partout, jamais "Poulet" dans un repas et "Blanc de poulet" dans un autre. Avant d\'écrire un ingrédient, reprends le nom déjà utilisé dans le plan s\'il y est. Les macros restent celles de la portion mangée.',
     ),
-  steps: z.array(z.string()).min(1).describe("Étapes courtes, à l'impératif"),
+  steps: z
+    .array(z.string())
+    .min(1)
+    .describe(
+      "Étapes dans l'ordre, à l'infinitif, chacune exécutable seule : les quantités de la liste d'ingrédients, le feu (doux, moyen, vif), les temps en minutes, la température du four, et un repère de cuisson (« jusqu'à ce que… », « cuit à cœur »). 4 à 8 étapes, une à deux phrases chacune.",
+    ),
   prepMinutes: z.number().int().min(0).max(240),
   macros: zMacros,
   mealPrep: z
