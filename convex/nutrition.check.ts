@@ -171,6 +171,9 @@ assert.deepEqual(sumQuantities(["1/2 citron", "100 g", "1/2 citron", "2-3 tranch
   "1/2 citron",
   "2-3 tranches",
 ]);
+// A digit in the unit is an annotation ("~12 amandes"), not a unit: summing
+// would double the weight and leave the count behind.
+assert.deepEqual(sumQuantities(["20 g (~12)", "20 g (~12)"]), ["20 g (~12)", "20 g (~12)"]);
 
 // --- Allergy / exclusion guard ---------------------------------------------
 // The health-safety path: the prompt says allergies are hard constraints, this

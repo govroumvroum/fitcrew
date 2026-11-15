@@ -372,7 +372,7 @@ export function sumQuantities(quantities: string[]): string[] {
   const sums = new Map<string, { total: number; unit: string }>();
   const raw: string[] = [];
   for (const quantity of quantities) {
-    const match = quantity.match(/^(\d+(?:[.,]\d+)?)\s*(\p{L}.*)?$/u);
+    const match = quantity.match(/^(\d+(?:[.,]\d+)?)\s*(\p{L}[^\d]*)?$/u);
     if (!match) {
       raw.push(quantity);
       continue;
