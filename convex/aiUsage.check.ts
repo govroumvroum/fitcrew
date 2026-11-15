@@ -5,19 +5,57 @@ import { costUsdFrom, sumUsage } from "./aiUsage";
 // The point of the whole issue: two calls by the same user on the same day add up.
 assert.deepEqual(
   sumUsage([
-    { inputTokens: 1200, outputTokens: 300, reasoningTokens: 100, costUsd: 0.004 },
-    { inputTokens: 800, outputTokens: 150, reasoningTokens: 50, costUsd: 0.002 },
+    {
+      inputTokens: 1200,
+      outputTokens: 300,
+      reasoningTokens: 100,
+      cachedInputTokens: 1024,
+      costUsd: 0.004,
+    },
+    {
+      inputTokens: 800,
+      outputTokens: 150,
+      reasoningTokens: 50,
+      cachedInputTokens: 768,
+      costUsd: 0.002,
+    },
   ]),
-  { calls: 2, inputTokens: 2000, outputTokens: 450, reasoningTokens: 150, costUsd: 0.006 },
+  {
+    calls: 2,
+    inputTokens: 2000,
+    outputTokens: 450,
+    reasoningTokens: 150,
+    cachedInputTokens: 1792,
+    costUsd: 0.006,
+  },
 );
 
 // Optional fields are absent whenever the model or provider didn't report them.
 assert.deepEqual(
   sumUsage([
-    { inputTokens: 10, outputTokens: 5, reasoningTokens: undefined, costUsd: undefined },
-    { inputTokens: 1, outputTokens: 1, reasoningTokens: 2, costUsd: undefined },
+    {
+      inputTokens: 10,
+      outputTokens: 5,
+      reasoningTokens: undefined,
+      cachedInputTokens: undefined,
+      costUsd: undefined,
+    },
+    {
+      inputTokens: 1,
+      outputTokens: 1,
+      reasoningTokens: 2,
+      cachedInputTokens: 1,
+      costUsd: undefined,
+    },
   ]),
-  { calls: 2, inputTokens: 11, outputTokens: 6, reasoningTokens: 2, costUsd: 0 },
+  {
+    calls: 2,
+    inputTokens: 11,
+    outputTokens: 6,
+    reasoningTokens: 2,
+    cachedInputTokens: 1,
+    costUsd: 0,
+  },
 );
 
 // A user with no calls in the period is zero, not a crash.
@@ -26,6 +64,7 @@ assert.deepEqual(sumUsage([]), {
   inputTokens: 0,
   outputTokens: 0,
   reasoningTokens: 0,
+  cachedInputTokens: 0,
   costUsd: 0,
 });
 

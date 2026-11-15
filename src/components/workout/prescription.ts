@@ -1,6 +1,28 @@
 /** Pure helpers shared by the séance screen. No React, no Convex — see prescription.check.ts. */
 
-export type SetRow = { index: number; weight: number; reps: number; completed: boolean };
+import { groupCircuits, roundsOf } from "@/lib/circuits";
+
+export type SetRow = {
+  index: number;
+  weight: number;
+  reps: number;
+  completed: boolean;
+  seconds?: number;
+  skipped?: boolean;
+};
+
+/**
+ * Still to do: neither validated nor passed. Every "where's the séance at"
+ * question asks this, never `!completed` — a passed set must not hold the
+ * cursor, and it must not count as done either.
+ */
+export const isOpen = (row: { completed: boolean; skipped?: boolean }) =>
+  !row.completed && !row.skipped;
+
+/** What the séance screen needs of a day's exercise to walk it. */
+type Occurrence = { name: string; sets: number; circuit?: string; slot?: string };
+/** What it needs of a `sets` row. */
+type Row = { exerciseName: string; index: number; slot?: string };
 
 /**
  * A prescription's reps are free text: "8", "8-12", "AMRAP", "12 par jambe".
@@ -14,6 +36,13 @@ export function defaultReps(spec: string): number {
 }
 
 /**
+ * How a logged set reads anywhere it's shown. A timed set is stored 0 kg × 0, and
+ * "0×0" next to a minute of corde à sauter says the opposite of what happened.
+ */
+export const formatSet = (set: { weight: number; reps: number; seconds?: number }) =>
+  set.seconds !== undefined ? `${set.seconds} s` : `${set.weight}×${set.reps}`;
+
+/**
  * The set rows `workouts.start` writes for a day: one per prescribed set,
  * pre-loaded with what that exercise was last done at so a séance opens on real
  * numbers instead of 0 kg. Unmatched exercise (never trained) → 0 and the
@@ -23,17 +52,98 @@ export function defaultReps(spec: string): number {
  * these per program now, and two copies of the crossing would drift.
  */
 export function seedSets(
-  exercises: { name: string; sets: number; reps: string }[],
-  prefill: { name: string; weight: number; reps: number }[],
-): { exerciseName: string; index: number; weight: number; reps: number }[] {
+  exercises: {
+    name: string;
+    sets: number;
+    reps: string;
+    circuit?: string;
+    slot?: string;
+    durationSec?: number;
+  }[],
+  prefill: { name: string; weight: number; reps: number; seconds?: number }[],
+): {
+  exerciseName: string;
+  index: number;
+  weight: number;
+  reps: number;
+  circuit?: string;
+  slot?: string;
+  round?: number;
+  seconds?: number;
+}[] {
   return exercises.flatMap((exercise) => {
     const last = prefill.find((entry) => entry.name === exercise.name);
     return Array.from({ length: exercise.sets }, (_, index) => ({
       exerciseName: exercise.name,
       index,
-      weight: last?.weight ?? 0,
-      reps: last?.reps ?? defaultReps(exercise.reps),
+      // A timed exercise lifts and counts nothing: 0 × 0, and the work is in
+      // `seconds` — last time's if it was timed then too, else the prescription.
+      // `last.seconds` is absent when the exercise used to be done in reps, and
+      // "12" reps is no duration to run a clock on.
+      ...(exercise.durationSec !== undefined
+        ? { weight: 0, reps: 0, seconds: last?.seconds ?? exercise.durationSec }
+        : { weight: last?.weight ?? 0, reps: last?.reps ?? defaultReps(exercise.reps) }),
+      // Provenance only on a circuit set — `sets` IS the round count, so set
+      // `index` and round are the same number, 1-based here. A classic row keeps
+      // exactly the shape it has always had.
+      ...(exercise.circuit && {
+        circuit: exercise.circuit,
+        round: index + 1,
+        ...(exercise.slot && { slot: exercise.slot }),
+      }),
     }));
+  });
+}
+
+/**
+ * The rows of ONE occurrence of an exercise in the day, in set order.
+ *
+ * `slot` is the identity, not the name: a circuit can run pompes twice, and
+ * grouping those two occurrences by name would merge their rows into one.
+ */
+export function rowsOf<R extends Row>(
+  exercise: { name: string; slot?: string },
+  sets: readonly R[],
+): R[] {
+  const byIndex = (a: R, b: R) => a.index - b.index;
+  if (exercise.slot) {
+    const own = sets.filter((set) => set.slot === exercise.slot);
+    // No stamped row at all: a séance started on the bundle before provenance
+    // existed and resumed after the deploy. Falling back to the name is exactly
+    // how that séance behaved when it started.
+    if (own.length > 0) return own.sort(byIndex);
+  }
+  return sets.filter((set) => set.exerciseName === exercise.name).sort(byIndex);
+}
+
+/**
+ * The day in the order it's actually performed: one step per set row. A classic
+ * exercise runs set by set to completion; a circuit runs exercise 1 → 2 → 3 →
+ * next round. `at` is the occurrence's index in `exercises`, which is what the
+ * séance screen pages on.
+ *
+ * This is the whole ordering: the resume point is the first open step (see
+ * `isOpen` — a passed set is not open), and "next" is the first open step of
+ * another occurrence.
+ */
+export function sessionSteps<E extends Occurrence, R extends Row>(
+  exercises: readonly E[],
+  sets: readonly R[],
+): { at: number; row: R }[] {
+  return groupCircuits(exercises.map((exercise, at) => ({ ...exercise, at }))).flatMap((block) => {
+    if (block.kind === "exercise") {
+      return rowsOf(block.exercise, sets).map((row) => ({ at: block.exercise.at, row }));
+    }
+    const tracks = block.exercises.map((exercise) => ({
+      at: exercise.at,
+      rows: rowsOf(exercise, sets),
+    }));
+    // Rounds off the prescription, but never fewer than the rows on hand: a row
+    // left out of the walk is a set nothing can reach.
+    const rounds = Math.max(roundsOf(block), ...tracks.map((track) => track.rows.length));
+    return Array.from({ length: rounds }, (_, round) =>
+      tracks.flatMap(({ at, rows }) => (rows[round] ? [{ at, row: rows[round] }] : [])),
+    ).flat();
   });
 }
 
@@ -41,13 +151,51 @@ export function seedSets(
  * The weight × reps the next set of an exercise should default to: what was
  * just lifted this session, else what the rows were seeded with (last
  * session's values), else the prescription.
+ *
+ * A timed exercise (`durationSec` set) walks the same ladder for its seconds,
+ * which is what the work timer then runs. A row that has none — seeded by the
+ * previous bundle, which wrote reps — falls through to the prescription rather
+ * than handing the clock a rep count.
  */
-export function workingValues(rows: SetRow[], repsSpec: string): { weight: number; reps: number } {
+export function workingValues(
+  rows: SetRow[],
+  repsSpec: string,
+  durationSec?: number,
+): { weight: number; reps: number; seconds?: number } {
   const done = rows.filter((r) => r.completed);
   const source = done.length
     ? done.reduce((a, b) => (b.index > a.index ? b : a))
     : rows.reduce<SetRow | null>((a, b) => (a === null || b.index < a.index ? b : a), null);
+  if (durationSec !== undefined) {
+    return { weight: 0, reps: 0, seconds: source?.seconds ?? durationSec };
+  }
   return source
     ? { weight: source.weight, reps: source.reps }
     : { weight: 0, reps: defaultReps(repsSpec) };
+}
+
+/**
+ * The séance route with one day of one program picked, instead of the day the
+ * rotation proposes. 1-based in the URL, like « Jour 1 » on screen.
+ *
+ * The choice lives in the URL and nowhere else: routes stay mounted (hidden)
+ * between navigations, so a choice held in component state would still be there
+ * for the next séance. A plain `/seance` is always the proposed day.
+ */
+export const seanceHref = (lineageId: string, dayIndex: number) =>
+  `/seance?programme=${encodeURIComponent(lineageId)}&jour=${dayIndex + 1}`;
+
+/**
+ * Which day of `program` the séance screen offers: the one in the URL when it
+ * names THIS program and a day it has, the proposed one otherwise — a stale or
+ * hand-edited link falls back instead of failing.
+ */
+export function offeredDayIndex(
+  url: { programme: string | null; jour: string | null },
+  program: { lineageId: string; dayCount: number; nextDayIndex: number },
+): number {
+  if (url.programme !== program.lineageId || url.jour === null) return program.nextDayIndex;
+  if (!/^\d+$/.test(url.jour)) return program.nextDayIndex;
+  const index = Number(url.jour) - 1;
+  return index >= 0 && index < program.dayCount ? index : program.nextDayIndex;
 }

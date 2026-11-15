@@ -61,6 +61,23 @@ export function formatLoose(date: string) {
   return full.format(parsed);
 }
 
+const dayMonth = new Intl.DateTimeFormat("fr-FR", {
+  day: "numeric",
+  month: "long",
+  timeZone: "UTC",
+});
+
+/**
+ * "16 novembre", the Monday of `date`'s week — how a card names the week a plan
+ * or a shopping list is for (#126). Null for a date we can't read, same
+ * round-trip test as `formatLoose`: the date comes from a tool call.
+ */
+export function formatWeekOf(date: string): string | null {
+  const parsed = parse(date);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return null;
+  return dayMonth.format(parse(monday(date)));
+}
+
 const short = new Intl.DateTimeFormat("fr-FR", {
   weekday: "short",
   day: "numeric",

@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, mutation, query } from "./_generated/server";
 import { latestPerLineage, lineageOf, lineageRows, nextDayIndexFor, prefillFor } from "./programs";
-import { lastInLineage, recordPrs, statsByExercise } from "./progress";
+import { isDayIndex, lastInLineage, recordPrs, statsByExercise } from "./progress";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
 /** A set row belongs to exactly one user; every set mutation routes through this. */
@@ -161,12 +161,16 @@ export const history = query({
       for (const stat of statsByExercise(sets).values()) volume += stat.volume;
 
       let done = 0;
-      const byExercise = new Map<string, { weight: number; reps: number }[]>();
+      const byExercise = new Map<string, { weight: number; reps: number; seconds?: number }[]>();
       for (const set of sets) {
         if (!set.completed) continue;
         done += 1;
         const rows = byExercise.get(set.exerciseName) ?? [];
-        rows.push({ weight: set.weight, reps: set.reps });
+        rows.push({
+          weight: set.weight,
+          reps: set.reps,
+          ...(set.seconds !== undefined && { seconds: set.seconds }),
+        });
         byExercise.set(set.exerciseName, rows);
       }
 
@@ -199,9 +203,11 @@ export const history = query({
  * rows up front, so each check-off afterwards is a single small patch.
  *
  * The program is named explicitly — with programs running in parallel, nothing
- * on the user row could tell us which one this séance is. `dayIndex` is derived
- * here rather than trusted from the client: it's that program's own rotation,
- * and there's no reason for two answers to it.
+ * on the user row could tell us which one this séance is. `dayIndex` defaults to
+ * that program's own rotation, derived here. The user may pick another day
+ * (back to séance 1 after a break): it's then checked against the program, and
+ * the rotation carries on from it — `nextDayIndex` reads the last séance's day.
+ * Optional, so the previous bundle (and the coach) keep sending the old shape.
  *
  * `programId` absent = a séance attached to no program (a retroactive log, an
  * import). Those keep no day and don't move any rotation.
@@ -210,12 +216,23 @@ export const start = mutation({
   args: {
     date: v.string(),
     programId: v.optional(v.id("programs")),
+    // A day the user picked instead of the one the rotation proposes.
+    dayIndex: v.optional(v.number()),
     sets: v.array(
       v.object({
         exerciseName: v.string(),
         index: v.number(),
         weight: v.number(),
         reps: v.number(),
+        // Circuit provenance, all optional: a payload without it is a classic
+        // séance, which is also what every PWA tab still running the previous
+        // bundle sends. Requiring any of them here would break those tabs.
+        circuit: v.optional(v.string()),
+        slot: v.optional(v.string()),
+        round: v.optional(v.number()),
+        // A timed set's prescribed work. Optional for the same reason as the
+        // circuit fields: the previous bundle never sends it.
+        seconds: v.optional(v.number()),
       }),
     ),
   },
@@ -224,6 +241,11 @@ export const start = mutation({
 
     const program = args.programId ? await ctx.db.get("programs", args.programId) : null;
     if (args.programId && program?.userId !== user._id) throw new Error("Programme introuvable");
+    if (args.dayIndex !== undefined) {
+      if (!program) throw new Error("Un jour se choisit dans un programme");
+      if (!isDayIndex(program.days.length, args.dayIndex))
+        throw new Error("Ce jour n'existe pas dans le programme");
+    }
 
     // Same day AND same program: training musculation then boxing on a Tuesday
     // is two séances, not a duplicate.
@@ -258,7 +280,7 @@ export const start = mutation({
       userId: user._id,
       ...(program && {
         programId: program._id,
-        dayIndex: await nextDayIndexFor(ctx, program, args.date, lineage),
+        dayIndex: args.dayIndex ?? (await nextDayIndexFor(ctx, program, args.date, lineage)),
       }),
       date: args.date,
       startedAt: Date.now(),
@@ -290,20 +312,39 @@ export const start = mutation({
   },
 });
 
-/** One set check-off (or correction): the smallest write in the app. */
+/**
+ * One set check-off (or correction): the smallest write in the app.
+ *
+ * `seconds` is optional and only ever written when sent: the previous bundle
+ * doesn't know it exists, and a check-off from that tab must not wipe the
+ * duration of a timed set the current bundle wrote.
+ *
+ * `skipped` is optional for the same reason. `true` passes the set (it stays
+ * `completed: false`), `false` takes the pass back, absent leaves it alone —
+ * except that validating a set always clears it, so a check-off from the
+ * previous bundle can't leave a set both done and passed.
+ */
 export const logSet = mutation({
   args: {
     setId: v.id("sets"),
     completed: v.boolean(),
     weight: v.number(),
     reps: v.number(),
+    seconds: v.optional(v.number()),
+    skipped: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    if (args.completed && args.skipped) throw new Error("Une série passée n'est pas validée");
     const set = await ownSet(ctx, args.setId);
     await ctx.db.patch("sets", set._id, {
       completed: args.completed,
       weight: args.weight,
       reps: args.reps,
+      ...(args.seconds !== undefined && { seconds: args.seconds }),
+      // `undefined` removes the field: a passed set taken back is a plain one.
+      ...(args.skipped
+        ? { skipped: true }
+        : (args.completed || args.skipped === false) && { skipped: undefined }),
     });
     return null;
   },

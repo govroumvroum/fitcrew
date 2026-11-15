@@ -26,16 +26,40 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { betweenRoundsOf, groupCircuits, roundsOf } from "@/lib/circuits";
 import { formatShort } from "@/lib/dates";
 import { PR_LABELS, TROPHY } from "@/lib/prs";
 import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { ExerciseDemo, useExerciseDemos } from "./demo";
-import { seedSets, workingValues } from "./prescription";
+import {
+  formatSet,
+  isOpen,
+  offeredDayIndex,
+  rowsOf,
+  seedSets,
+  sessionSteps,
+  workingValues,
+} from "./prescription";
 import { REST_OPTIONS, RestTimerBar, useRestOutro, useRestTimer } from "./rest-timer";
 
-type Values = { weight: number; reps: number };
+type Values = { weight: number; reps: number; seconds?: number };
+
+/**
+ * The timed set on the clock, and everything its end has to do — decided at the
+ * tap that started it. Captured rather than read off the screen at zero, because
+ * the user can page elsewhere while the corde tourne, and the rest and the page
+ * turn belong to the set that was started, not the one in view.
+ */
+type Working = {
+  setId: Id<"sets">;
+  seconds: number;
+  rest: number;
+  tours: boolean;
+  /** Occurrence to page to once it's validated; -1 = stay. */
+  advanceTo: number;
+};
 
 const round = (n: number) => Math.round(n * 10) / 10;
 
@@ -48,7 +72,29 @@ const parseNum = (raw: string) => {
 
 const SPRING = { type: "spring", duration: 0.3, bounce: 0 } as const;
 
-export function Session({ date }: { date: string }) {
+/**
+ * One list, used both to render the options and as `items` on the `<Select>`:
+ * Base UI's `<SelectValue>` prints the value ("90"), not the option's text
+ * ("90 s"), because the options live in a portal that isn't mounted while the
+ * select is closed. An array, not a record — a record with numeric-looking keys
+ * would sort "auto" after them.
+ */
+const REST_ITEMS = [
+  { value: "auto", label: "Comme le programme" },
+  ...REST_OPTIONS.map((seconds) => ({
+    value: String(seconds),
+    label: seconds < 60 ? `${seconds} s` : `${seconds / 60} min`,
+  })),
+];
+
+export function Session({
+  date,
+  chosen,
+}: {
+  date: string;
+  /** A day picked on /programme, straight from the URL (see `offeredDayIndex`). */
+  chosen: { programme: string | null; jour: string | null };
+}) {
   const data = useQuery(api.workouts.today, { date });
   // Every program, each with its own next day and its own prefill: the picker
   // below is one card per active one.
@@ -68,7 +114,19 @@ export function Session({ date }: { date: string }) {
         ...current,
         sets: current.sets.map((set) =>
           set._id === args.setId
-            ? { ...set, completed: args.completed, weight: args.weight, reps: args.reps }
+            ? {
+                ...set,
+                completed: args.completed,
+                weight: args.weight,
+                reps: args.reps,
+                // Mirrors the mutation: absent means "leave it", not "clear it".
+                ...(args.seconds !== undefined && { seconds: args.seconds }),
+                // …and so does the pass: set, taken back, or cleared by a
+                // validation.
+                ...(args.skipped
+                  ? { skipped: true }
+                  : (args.completed || args.skipped === false) && { skipped: undefined }),
+              }
             : set,
         ),
       },
@@ -78,10 +136,17 @@ export function Session({ date }: { date: string }) {
   // Every check-off and correction goes through here: the optimistic tick makes
   // a failed write look like a saved one, then it reverts with nothing said. On
   // gym wifi that's the app losing the only data it exists to keep.
-  const write = (args: { setId: Id<"sets">; completed: boolean; weight: number; reps: number }) => {
+  const write = (args: {
+    setId: Id<"sets">;
+    completed: boolean;
+    weight: number;
+    reps: number;
+    seconds?: number;
+    skipped?: boolean;
+  }) => {
     void logSet(args).catch(() =>
       toast.error(
-        args.completed
+        args.completed || args.skipped
           ? "Série pas enregistrée, réessaie."
           : "Correction pas enregistrée, réessaie.",
       ),
@@ -102,6 +167,28 @@ export function Session({ date }: { date: string }) {
   // finished exercise).
   const [pick, setPick] = useState<number | null>(null);
   const [rest, setRest] = useState<number | null>(null);
+  // Which kind of rest is currently running. Captured at validation, because the
+  // séance pages to the next exercise of the tour on that very tap — reading it
+  // off the exercise on screen would rename a between-tours rest one frame after
+  // it started.
+  const [restingTours, setRestingTours] = useState(false);
+  // A timed set's work runs on the same countdown as the rest — same deadline,
+  // same drain, same cues — and validates itself at zero, then hands over to the
+  // rest. Two instances rather than one switching modes: the rest's outro and
+  // the work's end are different events, and they never overlap.
+  const [working, setWorking] = useState<Working | null>(null);
+  const completeWork = (target: Working, seconds: number) => {
+    write({ setId: target.setId, completed: true, weight: 0, reps: 0, seconds });
+    setWorking(null);
+    setRestingTours(target.tours);
+    timer.start(target.rest);
+    if (target.advanceTo !== -1) setPick(target.advanceTo);
+  };
+  const work = useRestTimer(() => {
+    if (working) completeWork(working, working.seconds);
+  });
+  // Work is on the clock: counting down or paused, and not yet validated.
+  const workBusy = working !== null && work.endAt !== 0 && work.remaining > 0;
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -135,26 +222,38 @@ export function Session({ date }: { date: string }) {
         {/* The cards carry the program names, so a visible page title would only
             repeat them. */}
         <h1 className="sr-only">Séance</h1>
-        {active.map((program) => (
-          <ProgramPick
-            key={program.lineageId}
-            date={date}
-            program={program}
-            open={active.length === 1}
-          />
-        ))}
+        {/* The program a day was picked for comes first: that card is what the
+            tap on /programme came here for. */}
+        {[...active]
+          .sort(
+            (a, b) =>
+              Number(b.lineageId === chosen.programme) - Number(a.lineageId === chosen.programme),
+          )
+          .map((program) => (
+            <ProgramPick
+              key={program.lineageId}
+              date={date}
+              program={program}
+              chosen={chosen}
+              open={active.length === 1}
+            />
+          ))}
         <History date={date} />
       </div>
     );
   }
 
-  const rowsFor = (name: string) =>
-    sets.filter((set) => set.exerciseName === name).sort((a, b) => a.index - b.index);
+  // Per *occurrence*: a circuit can run the same exercise twice in a day, and
+  // those two occurrences have their own rows.
+  const rowsFor = (exercise: { name: string; slot?: string }) => rowsOf(exercise, sets);
 
-  const valuesFor = (name: string, repsSpec: string) =>
-    edits[name] ?? workingValues(rowsFor(name), repsSpec);
+  // Keyed on the NAME, unlike the rows: the working load is a property of the
+  // exercise's history, not of a slot or of a tour.
+  const valuesFor = (name: string, repsSpec: string, durationSec?: number) =>
+    edits[name] ?? workingValues(rowsOf({ name }, sets), repsSpec, durationSec);
 
   const done = sets.filter((set) => set.completed);
+  const passed = sets.filter((set) => set.skipped).length;
 
   // Guard, not a state the app produces: `workouts.today` only hands back a
   // séance that has a program, and a program row is never deleted. It stays
@@ -182,8 +281,12 @@ export function Session({ date }: { date: string }) {
             <h1 className="font-heading text-2xl font-bold sm:text-3xl">{day.name}</h1>
             <p className="text-sm text-muted-foreground">
               {done.length === 0
-                ? "Rien de coché. On ne juge pas, mais on ne compte pas non plus."
-                : "À demain."}
+                ? passed > 0
+                  ? `Tout passé, rien de coché (${passed} série${passed > 1 ? "s" : ""}). Repose-toi, on remet ça.`
+                  : "Rien de coché. On ne juge pas, mais on ne compte pas non plus."
+                : passed > 0
+                  ? `À demain. ${passed} série${passed > 1 ? "s" : ""} passée${passed > 1 ? "s" : ""}, c'est noté aussi.`
+                  : "À demain."}
             </p>
           </div>
           {/* One run of numbers split by hairlines, where three bordered tiles
@@ -247,13 +350,49 @@ export function Session({ date }: { date: string }) {
           </section>
         ) : null}
 
+        {/* What was actually fait, exercice par exercice — and tour par tour for
+            a circuit, otherwise three lines of "0×12" say nothing about the
+            order they were done in. Nothing unchecked shows up. */}
+        {done.length > 0 ? (
+          <section className="rounded-lg border bg-card/55 p-3.5">
+            <p className="eyebrow">Le détail</p>
+            <ul className="mt-1 divide-y text-sm">
+              {groupCircuits(day.exercises).map((item) =>
+                item.kind === "exercise" ? (
+                  <RecapLine
+                    key={item.key}
+                    name={item.exercise.name}
+                    rows={rowsFor(item.exercise)}
+                  />
+                ) : (
+                  <li key={item.key} className="py-2.5">
+                    <p className="eyebrow">
+                      Circuit {item.label} — {roundsOf(item)} tours
+                    </p>
+                    <ul className="divide-y">
+                      {item.exercises.map((exercise, i) => (
+                        <RecapLine
+                          key={exercise.slot ?? `${exercise.name}-${i}`}
+                          name={exercise.name}
+                          rows={rowsFor(exercise)}
+                          tours
+                        />
+                      ))}
+                    </ul>
+                  </li>
+                ),
+              )}
+            </ul>
+          </section>
+        ) : null}
+
         {workout.notes ? <p className="text-sm text-muted-foreground">{workout.notes}</p> : null}
 
         {left.length > 0 ? (
           <section className="flex flex-col gap-4">
             <p className="eyebrow">Il te reste</p>
             {left.map((program) => (
-              <ProgramPick key={program.lineageId} date={date} program={program} />
+              <ProgramPick key={program.lineageId} date={date} program={program} chosen={chosen} />
             ))}
           </section>
         ) : null}
@@ -277,28 +416,60 @@ export function Session({ date }: { date: string }) {
 
   // ── Live séance: one exercise at a time ──────────────────────────────────
   const exercises = day.exercises;
-  const firstOpen = exercises.findIndex((item) => rowsFor(item.name).some((r) => !r.completed));
-  const current = Math.min(pick ?? Math.max(firstOpen, 0), exercises.length - 1);
+  // The day in performed order — one step per set row, circuits rotating
+  // exercice 1 → 2 → 3 → tour suivant. Resuming is "first open step", so a
+  // reload mid-circuit lands on the right tour and not on the first exercise.
+  const steps = sessionSteps(exercises, sets);
+  const firstOpen = steps.find((step) => isOpen(step.row));
+  const current = Math.min(pick ?? firstOpen?.at ?? 0, exercises.length - 1);
+  // First open step belonging to another occurrence — the next thing to do.
+  const nextOpen = () => steps.find((s) => isOpen(s.row) && s.at !== current)?.at ?? -1;
   const exercise = exercises[current];
-  const rows = rowsFor(exercise.name);
-  const values = valuesFor(exercise.name, exercise.reps);
+  const rows = rowsFor(exercise);
+  // `at` rides along so a block can be matched back to the paged index.
+  const blocks = groupCircuits(exercises.map((item, at) => ({ ...item, at })));
+  const block = blocks.flatMap((candidate) =>
+    candidate.kind === "circuit" && candidate.exercises.some((item) => item.at === current)
+      ? [candidate]
+      : [],
+  )[0];
+  // Timed = the prescription carries a duration. Then there's no load and no
+  // reps to enter: the work timer runs `values.seconds` and logs it.
+  const timed = exercise.durationSec !== undefined;
+  const values = valuesFor(exercise.name, exercise.reps, exercise.durationSec);
+  const seconds = values.seconds ?? exercise.durationSec ?? 0;
   const setValues = (next: Values) => setEdits((prev) => ({ ...prev, [exercise.name]: next }));
-  const restSeconds = rest ?? exercise.restSeconds;
+  // A tour ends on the block's LAST exercise: that's where the between-rounds
+  // rest goes, everywhere else it's the plain rest before the next exercise.
+  const betweenRounds =
+    block && block.exercises.at(-1)?.at === current ? betweenRoundsOf(block) : 0;
+  const restSeconds = rest ?? (betweenRounds > 0 ? betweenRounds : exercise.restSeconds);
   // No match (or not resolved yet) → no affordance at all.
   const demoUrl = demoUrlFor(exercise.name);
   const lastTime = data.prefill.find((p) => p.name === exercise.name);
-  // The set the commit button will write. -1 when this exercise is done.
-  const nextAt = rows.findIndex((row) => !row.completed);
+  // The set the commit button will write. -1 when this exercise is done (every
+  // set validated or passed).
+  const nextAt = rows.findIndex(isOpen);
   const activeId = nextAt === -1 ? null : rows[nextAt]._id;
-  // First exercise other than this one that still has work left.
-  const otherOpen = () =>
-    exercises.findIndex((item, i) => i !== current && rowsFor(item.name).some((r) => !r.completed));
+  // Tour of the row on screen; once bouclé it's the last one done. `round` is
+  // missing on rows seeded before provenance existed — index + 1 is the same
+  // number for a circuit, one set per tour.
+  const shown = nextAt === -1 ? rows.at(-1) : rows[nextAt];
+  const tour = shown ? (shown.round ?? shown.index + 1) : 1;
 
   // Nothing in the schema says an exercise is bodyweight, so the only honest
   // signal is the history: an exercise you've already loaded isn't a pull-up, so
   // 0 kg there is a slip on the way to the plate count. Never logged, or always
   // logged at 0, stays loggable — blocking tractions would be the worse bug.
-  const zeroLoad = values.weight === 0 && (lastTime?.weight ?? 0) > 0;
+  // A timed exercise has no load to forget.
+  const zeroLoad = !timed && values.weight === 0 && (lastTime?.weight ?? 0) > 0;
+
+  // Whether validating the set on screen should page away: a circuit rotates on
+  // EVERY validated set — that's the tour — and a classic exercise only once this
+  // set bouclé it. Read off the rows we already hold: the optimistic write lands
+  // after the tap returns.
+  const advance = () =>
+    block || rows.filter(isOpen).length === 1 ? nextOpen() : -1;
 
   const validate = (row: Doc<"sets">) => {
     // The chips log too, so the gate lives here and not only on the dock button.
@@ -306,9 +477,60 @@ export function Session({ date }: { date: string }) {
       toast.error("Mets la charge avant de valider.");
       return;
     }
-    write({ setId: row._id, completed: true, weight: values.weight, reps: values.reps });
+    // A chip tapped mid-work logs by hand, and the clock that was running for it
+    // has nothing left to validate.
+    if (working) {
+      work.stop();
+      setWorking(null);
+    }
+    write({
+      setId: row._id,
+      completed: true,
+      weight: values.weight,
+      reps: values.reps,
+      ...(timed && { seconds }),
+    });
     navigator.vibrate?.(15);
+    setRestingTours(betweenRounds > 0);
     timer.start(restSeconds);
+  };
+
+  // The tap that starts a timed set. It skips whatever rest is left — you're
+  // going, so the rest is over — and silently: a skip never beeps.
+  const startWork = (row: Doc<"sets">) => {
+    timer.stop();
+    work.start(seconds);
+    setWorking({
+      setId: row._id,
+      seconds,
+      rest: restSeconds,
+      tours: betweenRounds > 0,
+      advanceTo: advance(),
+    });
+  };
+
+  // The bar's X stops the work without logging it: an abandoned set is an open
+  // set, same as never starting it.
+  const workTimer = {
+    ...work,
+    stop: () => {
+      work.stop();
+      setWorking(null);
+    },
+  };
+
+  // « J'étais cuit » — pass the set on screen and move on, the same page turn a
+  // validation makes. A running rest keeps running: it's recovery from the set
+  // that WAS done, and the next set still wants it. No new rest either — a
+  // passed set cost nothing to recover from. A timed set mid-work is dropped
+  // unlogged, like the bar's X — but only if it IS the set being passed: the
+  // work clock is séance-wide and keeps running while you page elsewhere, and
+  // passing some other set must not throw that one away.
+  const skip = (row: Doc<"sets">) => {
+    const upcoming = advance();
+    if (working?.setId === row._id) workTimer.stop();
+    write({ setId: row._id, completed: false, weight: row.weight, reps: row.reps, skipped: true });
+    if (upcoming !== -1) setPick(upcoming);
   };
 
   return (
@@ -331,6 +553,7 @@ export function Session({ date }: { date: string }) {
           <div className="flex shrink-0 flex-col items-end gap-1">
             <Badge variant="secondary" className="tabular-nums">
               {done.length}/{sets.length} séries
+              {passed > 0 ? ` · ${passed} passée${passed > 1 ? "s" : ""}` : ""}
             </Badge>
             {/* Up here, not in the dock: a started séance you can't get rid of is
                 a dead end, but the way out must not sit under the thumb that
@@ -350,6 +573,7 @@ export function Session({ date }: { date: string }) {
                   try {
                     await cancel({ workoutId: workout._id });
                     timer.stop();
+                    workTimer.stop();
                     router.push("/");
                   } catch {
                     toast.error("Séance pas annulée, réessaie.");
@@ -387,10 +611,10 @@ export function Session({ date }: { date: string }) {
                 what you read, the button is what a thumb hits. */}
             <div className="flex min-w-0 flex-1 gap-1.5">
               {exercises.map((item, i) => {
-                const itemRows = rowsFor(item.name);
+                const itemRows = rowsFor(item);
                 return (
                   <button
-                    key={item.name}
+                    key={item.slot ?? `${item.name}-${i}`}
                     type="button"
                     className={cn(PRESS, "grid h-12 min-w-0 place-items-center active:scale-[0.9]")}
                     // Weighted by set count so every tick in the strip is the
@@ -409,9 +633,11 @@ export function Session({ date }: { date: string }) {
                             i === current ? "h-1.5" : "h-1",
                             row.completed
                               ? "bg-chart-1"
-                              : row._id === activeId
-                                ? "bg-accent-text"
-                                : "bg-accent",
+                              : row.skipped
+                                ? "bg-muted-foreground/35"
+                                : row._id === activeId
+                                  ? "bg-accent-text"
+                                  : "bg-accent",
                           )}
                         />
                       ))}
@@ -436,14 +662,22 @@ export function Session({ date }: { date: string }) {
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <p className="eyebrow">
-                  Exercice {current + 1} sur {exercises.length}
+                  {block
+                    ? `Circuit ${block.label} · Tour ${tour}/${roundsOf(block)} · Exercice ${
+                        block.exercises.findIndex((item) => item.at === current) + 1
+                      }/${block.exercises.length}`
+                    : `Exercice ${current + 1} sur ${exercises.length}`}
                 </p>
                 {/* The page's <h1> now that the day name is an eyebrow, and the
                     largest *text* on the screen — but ~3.6:1 under the load
                     numeral, which is what makes the hierarchy read on a squint. */}
                 <h1 className="font-heading text-lg font-bold">{exercise.name}</h1>
+                {/* No set count inside a circuit: "4 × 10" would read as four
+                    straight séries when it's one set per tour. */}
                 <p className="text-sm text-muted-foreground">
-                  {exercise.sets} × {exercise.reps} · repos {restSeconds} s
+                  {block ? "" : `${exercise.sets} × `}
+                  {exercise.reps} · repos {betweenRounds > 0 ? "entre tours " : ""}
+                  {restSeconds} s
                 </p>
               </div>
               {demoUrl ? <ExerciseDemo name={exercise.name} gifUrl={demoUrl} /> : null}
@@ -456,38 +690,83 @@ export function Session({ date }: { date: string }) {
             <div className="flex flex-col gap-3">
               <p className="eyebrow">
                 {nextAt === -1
-                  ? `${rows.length} séries validées · exercice bouclé`
-                  : `Prochaine série · ${nextAt + 1} sur ${rows.length}`}
+                  ? `${closedLabel(rows, block ? "tour" : "série")} · exercice bouclé`
+                  : block
+                    ? `Tour ${tour} sur ${rows.length}`
+                    : `Prochaine série · ${nextAt + 1} sur ${rows.length}`}
               </p>
-              <LoadField
-                label="kg"
-                ariaLabel="Charge en kilos"
-                mode="decimal"
-                size="clamp(3.5rem, 17vw, 5.25rem)"
-                value={values.weight}
-                onChange={(weight) => setValues({ ...values, weight: Math.max(0, round(weight)) })}
-                onStep={(sign) =>
-                  setValues({ ...values, weight: Math.max(0, round(values.weight + sign * 2.5)) })
-                }
-              />
-              <LoadField
-                label="reps"
-                ariaLabel="Répétitions"
-                mode="numeric"
-                size="clamp(2.25rem, 10vw, 3.25rem)"
-                value={values.reps}
-                onChange={(reps) => setValues({ ...values, reps: Math.max(1, Math.round(reps)) })}
-                onStep={(sign) => setValues({ ...values, reps: Math.max(1, values.reps + sign) })}
-              />
+              {timed ? (
+                // The one number a timed set has, in the load's slot and at the
+                // load's size. It's what the next « Lancer » runs, and how a
+                // done set gets corrected: un-check its chip, fix this, re-check.
+                // Steps of 5 s — nobody prescribes a 47 s plank.
+                <LoadField
+                  label="secondes"
+                  ariaLabel="Durée en secondes"
+                  mode="numeric"
+                  size="clamp(3.5rem, 17vw, 5.25rem)"
+                  value={seconds}
+                  onChange={(next) =>
+                    setValues({ ...values, seconds: Math.max(5, Math.round(next)) })
+                  }
+                  onStep={(sign) => setValues({ ...values, seconds: Math.max(5, seconds + sign * 5) })}
+                />
+              ) : (
+                <>
+                  <LoadField
+                    label="kg"
+                    ariaLabel="Charge en kilos"
+                    mode="decimal"
+                    size="clamp(3.5rem, 17vw, 5.25rem)"
+                    value={values.weight}
+                    onChange={(weight) =>
+                      setValues({ ...values, weight: Math.max(0, round(weight)) })
+                    }
+                    onStep={(sign) =>
+                      setValues({ ...values, weight: Math.max(0, round(values.weight + sign)) })
+                    }
+                  />
+                  <LoadField
+                    label="reps"
+                    ariaLabel="Répétitions"
+                    mode="numeric"
+                    size="clamp(2.25rem, 10vw, 3.25rem)"
+                    value={values.reps}
+                    onChange={(reps) =>
+                      setValues({ ...values, reps: Math.max(1, Math.round(reps)) })
+                    }
+                    onStep={(sign) =>
+                      setValues({ ...values, reps: Math.max(1, values.reps + sign) })
+                    }
+                  />
+                </>
+              )}
               <p className="text-sm text-muted-foreground">
-                {lastTime
-                  ? `La dernière fois : ${fmt(lastTime.weight)} kg × ${lastTime.reps}`
-                  : "Première fois sur cet exercice. On note la référence."}
+                {timed
+                  ? lastTime?.seconds !== undefined
+                    ? `La dernière fois : ${lastTime.seconds} s`
+                    : "Première fois au chrono sur cet exercice."
+                  : lastTime
+                    ? `La dernière fois : ${fmt(lastTime.weight)} kg × ${lastTime.reps}`
+                    : "Première fois sur cet exercice. On note la référence."}
               </p>
             </div>
 
             <div>
-              <p className="eyebrow mb-2">Séries</p>
+              <div className="mb-2 flex min-h-11 items-center justify-between gap-3">
+                <p className="eyebrow">Séries</p>
+                {/* Ghost and up here, away from the dock: passing a set is the
+                    exception, and it must never sit where the thumb validates. */}
+                {nextAt === -1 ? null : (
+                  <Button
+                    variant="ghost"
+                    className="-mr-2 h-11 px-2 text-muted-foreground active:scale-[0.98]"
+                    onClick={() => skip(rows[nextAt])}
+                  >
+                    Passer cette série
+                  </Button>
+                )}
+              </div>
               <div className="flex flex-wrap gap-2">
                 {rows.map((row) => (
                   <SetChip
@@ -495,9 +774,22 @@ export function Session({ date }: { date: string }) {
                     row={row}
                     next={row._id === activeId}
                     onToggle={() => {
+                      // Tapping a passed set takes the pass back: it's open
+                      // again, and the séance's cursor returns to it.
+                      if (row.skipped) {
+                        write({
+                          setId: row._id,
+                          completed: false,
+                          weight: row.weight,
+                          reps: row.reps,
+                          skipped: false,
+                        });
+                        return;
+                      }
                       // Tapping a chip corrects a set: un-checking is a fix, so
                       // no rest and no buzz.
                       if (row.completed) {
+                        // `seconds` isn't sent, so a timed set keeps its duration.
                         write({
                           setId: row._id,
                           completed: false,
@@ -517,8 +809,13 @@ export function Session({ date }: { date: string }) {
 
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-3 rounded-lg border bg-card/55 p-3.5">
-            <span className="text-sm text-muted-foreground">Repos</span>
+            {/* Between two tours is a different rest from between two exercises,
+                and the timer that runs after this set is the one named here. */}
+            <span className="text-sm text-muted-foreground">
+              {betweenRounds > 0 ? "Repos entre tours" : "Repos"}
+            </span>
             <Select
+              items={REST_ITEMS}
               value={rest === null ? "auto" : String(rest)}
               onValueChange={(value) => setRest(value === "auto" ? null : Number(value))}
             >
@@ -526,10 +823,9 @@ export function Session({ date }: { date: string }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="auto">Comme le programme</SelectItem>
-                {REST_OPTIONS.map((seconds) => (
-                  <SelectItem key={seconds} value={String(seconds)}>
-                    {seconds < 60 ? `${seconds} s` : `${seconds / 60} min`}
+                {REST_ITEMS.map(({ value, label }) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -542,9 +838,10 @@ export function Session({ date }: { date: string }) {
             <p className="eyebrow">Ce qui reste</p>
             <ul className="mt-1 divide-y">
               {exercises.map((item, i) => {
-                const left = rowsFor(item.name).filter((row) => !row.completed).length;
+                const left = rowsFor(item).filter(isOpen).length;
+                const unit = item.circuit ? "tour" : "série";
                 return (
-                  <li key={item.name}>
+                  <li key={item.slot ?? `${item.name}-${i}`}>
                     <button
                       type="button"
                       onClick={() => setPick(i)}
@@ -556,7 +853,7 @@ export function Session({ date }: { date: string }) {
                     >
                       <span className="min-w-0 flex-1 truncate">{item.name}</span>
                       <span className="shrink-0 text-sm tabular-nums">
-                        {left === 0 ? "bouclé" : `${left} série${left > 1 ? "s" : ""}`}
+                        {left === 0 ? "bouclé" : `${left} ${unit}${left > 1 ? "s" : ""}`}
                       </span>
                     </button>
                   </li>
@@ -592,15 +889,26 @@ export function Session({ date }: { date: string }) {
             button never slides out from under a thumb when rest ends mid-set.
             Reserved from the first check-off rather than always, so a séance
             doesn't open with an empty 4rem band above the button. */}
-        {timer.total > 0 ? (
+        {timer.total > 0 || work.total > 0 ? (
           <div className="min-h-16">
             {/* The jarring part of the bar arriving is the reflow that shoves the
                 commit button down 4rem, so it comes in with it rather than after.
                 The outro's fade runs on a 1.5 s animation-delay and the hook
-                unmounts once it's played. */}
-            {outro.show ? (
+                unmounts once it's played.
+
+                Work takes the slot while it runs. At zero the set validates and
+                the rest starts in the same frame, so the slot goes straight from
+                one bar to the other. */}
+            {workBusy ? (
+              <RestTimerBar
+                kind="work"
+                timer={workTimer}
+                className="animate-in fade-in slide-in-from-bottom-1 duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none"
+              />
+            ) : outro.show ? (
               <RestTimerBar
                 timer={timer}
+                label={restingTours ? "Repos entre les tours" : undefined}
                 className={
                   outro.tail
                     ? "animate-out fade-out delay-[1500ms] duration-[140ms] ease-out fill-mode-forwards motion-reduce:animate-none"
@@ -615,29 +923,45 @@ export function Session({ date }: { date: string }) {
             base variant. */}
         <Button
           className="h-14 w-full text-base active:scale-[0.97]"
-          disabled={(nextAt === -1 && otherOpen() === -1) || zeroLoad}
+          disabled={!workBusy && ((nextAt === -1 && nextOpen() === -1) || zeroLoad)}
           onClick={() => {
+            // Mid-work, the button ends the set early and logs what was actually
+            // done — a plank that gave out at 42 s is a 42 s plank, not a 60.
+            if (workBusy && working) {
+              const elapsed = Math.max(1, work.total - work.remaining);
+              work.stop();
+              completeWork(working, elapsed);
+              return;
+            }
             if (nextAt === -1) {
-              const upcoming = otherOpen();
+              const upcoming = nextOpen();
               if (upcoming !== -1) setPick(upcoming);
               return;
             }
-            validate(rows[nextAt]);
-            // Bouclé by this very set → page forward. Read off the rows we
-            // already hold: the optimistic write lands after this returns.
-            if (rows.filter((row) => !row.completed).length === 1) {
-              const upcoming = otherOpen();
-              if (upcoming !== -1) setPick(upcoming);
+            // A timed set doesn't validate on the tap, it starts: the page turn
+            // waits for the clock, and is decided now, in `startWork`.
+            if (timed) {
+              startWork(rows[nextAt]);
+              return;
             }
+            const upcoming = advance();
+            validate(rows[nextAt]);
+            if (upcoming !== -1) setPick(upcoming);
           }}
         >
-          {nextAt === -1
-            ? otherOpen() === -1
-              ? "Tout est validé, termine la séance"
-              : "Passer à l'exercice suivant"
-            : zeroLoad
-              ? "Mets la charge pour valider"
-              : `Valider la série ${nextAt + 1} · ${fmt(values.weight)} kg × ${values.reps}`}
+          {workBusy
+            ? `Valider maintenant · ${work.total - work.remaining} s`
+            : nextAt === -1
+              ? nextOpen() === -1
+                ? passed > 0
+                  ? "Plus rien à faire, termine la séance"
+                  : "Tout est validé, termine la séance"
+                : "Passer à l'exercice suivant"
+              : zeroLoad
+                ? "Mets la charge pour valider"
+                : timed
+                  ? `Lancer la série ${nextAt + 1} · ${seconds} s`
+                  : `Valider la série ${nextAt + 1} · ${fmt(values.weight)} kg × ${values.reps}`}
         </Button>
         <Button
           variant="ghost"
@@ -658,6 +982,7 @@ export function Session({ date }: { date: string }) {
             try {
               await finish({ workoutId: workout._id, notes: notes.trim() || undefined });
               timer.stop();
+              workTimer.stop();
             } catch {
               toast.error("Séance pas terminée, réessaie.");
             } finally {
@@ -669,6 +994,53 @@ export function Session({ date }: { date: string }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * "3 séries validées" · "2 tours validés, 1 passé" — how an exercise ended once
+ * nothing is left open on it.
+ */
+function closedLabel(rows: Doc<"sets">[], unit: "série" | "tour") {
+  const plural = (n: number) => (n > 1 ? "s" : "");
+  const agree = unit === "série" ? "e" : "";
+  const done = rows.filter((row) => row.completed).length;
+  const passed = rows.filter((row) => row.skipped).length;
+  const head = `${done} ${unit}${plural(done)} validé${agree}${plural(done)}`;
+  return passed > 0 ? `${head}, ${passed} passé${agree}${plural(passed)}` : head;
+}
+
+/**
+ * One line of the récap: the sets that were actually validated. Renders nothing
+ * when none were — an exercise skipped is an exercise absent, not a zero.
+ */
+function RecapLine({
+  name,
+  rows,
+  tours,
+}: {
+  name: string;
+  rows: Doc<"sets">[];
+  tours?: boolean;
+}) {
+  const done = rows.filter((row) => row.completed);
+  if (done.length === 0) return null;
+  return (
+    // Two lines for a circuit, one for a classic exercise: four tours of
+    // "T1 0×15" leave 390px nothing for the name, and « Abdomina… » is not a
+    // récap. Same call History makes on its day names.
+    <li className={cn("min-h-11 py-2.5", !tours && "flex items-center gap-3")}>
+      <span className={cn("min-w-0 flex-1 truncate", tours && "block")}>{name}</span>
+      <span className={cn("shrink-0 text-muted-foreground tabular-nums", tours && "block")}>
+        {done
+          .map(
+            (row) =>
+              // `round` is absent on rows seeded before provenance existed.
+              `${tours ? `T${row.round ?? row.index + 1} ` : ""}${formatSet(row)}`,
+          )
+          .join(" · ")}
+      </span>
+    </li>
   );
 }
 
@@ -687,15 +1059,28 @@ type ProgramEntry = (typeof api.programs.list)["_returnType"][number];
 function ProgramPick({
   date,
   program,
+  chosen,
   open,
 }: {
   date: string;
   program: ProgramEntry;
+  chosen: { programme: string | null; jour: string | null };
   open?: boolean;
 }) {
   const start = useMutation(api.workouts.start);
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const exercises = program.days[program.nextDayIndex]?.exercises ?? [];
+  // The proposed day, unless /programme sent another one for THIS program.
+  const dayIndex = offeredDayIndex(chosen, program);
+  const picked = dayIndex !== program.nextDayIndex;
+  // `list` only prefills the proposed day; a picked one fetches its own, so it
+  // doesn't open on 0 kg. Start waits for it.
+  const pickedPrefill = useQuery(
+    api.programs.dayPrefill,
+    picked ? { programId: program.id, dayIndex } : "skip",
+  );
+  const prefill = picked ? pickedPrefill : program.prefill;
+  const exercises = program.days[dayIndex]?.exercises ?? [];
   const total = exercises.reduce((sum, exercise) => sum + exercise.sets, 0);
 
   return (
@@ -705,7 +1090,7 @@ function ProgramPick({
             programs live, "Jour 2" alone doesn't say which séance this is. */}
         <p className="eyebrow">{program.name}</p>
         <h2 className="font-heading text-2xl font-bold sm:text-3xl">
-          {program.nextDayName ?? "Prochaine séance"}
+          {program.days[dayIndex]?.name ?? "Prochaine séance"}
         </h2>
         <p className="text-sm text-muted-foreground">
           {exercises.length} exercice{exercises.length > 1 ? "s" : ""} ·{" "}
@@ -716,20 +1101,58 @@ function ProgramPick({
       {/* ponytail: native <details>, like everywhere else here. Open when it's
           the only program — with several, the whole prescription of each is a
           wall before the first button. */}
-      <details open={open} className="group">
+      {picked ? (
+        <div className="-mt-2 flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
+          <span>
+            À la place du jour <span className="tabular-nums">{program.nextDayIndex + 1}</span>.
+          </span>
+          <Link
+            href="/seance"
+            replace
+            className="inline-flex min-h-11 items-center font-medium text-foreground underline underline-offset-4"
+          >
+            Revenir au jour proposé
+          </Link>
+        </div>
+      ) : null}
+
+      <details open={open || picked} className="group">
         <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium marker:hidden">
           <ChevronDownIcon className="chevron" />
           Le détail
         </summary>
-        <ul className="divide-y">
-          {exercises.map((exercise) => (
-            <li key={exercise.name} className="flex min-h-11 items-center gap-3 py-2.5 text-sm">
-              <span className="min-w-0 flex-1 truncate">{exercise.name}</span>
-              <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
-                {exercise.sets} × {exercise.reps}
-              </span>
-            </li>
-          ))}
+        <ul className="divide-y text-sm">
+          {/* A circuit reads as one block: its exercises are done in order, one
+              set per tour, so a per-exercise "4 × 10" would be four séries. */}
+          {groupCircuits(exercises).map((block) =>
+            block.kind === "exercise" ? (
+              <li key={block.key} className="flex min-h-11 items-center gap-3 py-2.5">
+                <span className="min-w-0 flex-1 truncate">{block.exercise.name}</span>
+                <span className="shrink-0 text-muted-foreground tabular-nums">
+                  {block.exercise.sets} × {block.exercise.reps}
+                </span>
+              </li>
+            ) : (
+              <li key={block.key} className="py-2.5">
+                <p className="eyebrow">
+                  Circuit {block.label} — {roundsOf(block)} tours
+                </p>
+                <ul className="divide-y">
+                  {block.exercises.map((exercise, i) => (
+                    <li
+                      key={exercise.slot ?? `${exercise.name}-${i}`}
+                      className="flex min-h-11 items-center gap-3"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{exercise.name}</span>
+                      <span className="shrink-0 text-muted-foreground tabular-nums">
+                        {exercise.reps}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ),
+          )}
         </ul>
       </details>
 
@@ -739,15 +1162,22 @@ function ProgramPick({
           two red buttons competing inside ONE surface. */}
       <Button
         className="h-14 w-full text-base active:scale-[0.97]"
-        disabled={busy || exercises.length === 0}
+        disabled={busy || exercises.length === 0 || prefill === undefined}
         onClick={async () => {
+          if (prefill === undefined) return;
           setBusy(true);
           try {
             await start({
               date,
               programId: program.id,
-              sets: seedSets(exercises, program.prefill),
+              // Only a picked day is sent: the proposed one stays the server's
+              // call, exactly as before.
+              ...(picked && { dayIndex }),
+              sets: seedSets(exercises, prefill),
             });
+            // The choice is spent: drop it from the URL so this tab, left open
+            // until tomorrow, offers the rotation's day again.
+            if (picked) router.replace("/seance");
           } catch {
             toast.error("Séance pas démarrée, réessaie.");
           } finally {
@@ -822,7 +1252,7 @@ function History({ date }: { date: string }) {
                         <li key={exercise.name} className="flex gap-3 py-0.5">
                           <span className="min-w-0 truncate">{exercise.name}</span>
                           <span className="ml-auto shrink-0 tabular-nums">
-                            {exercise.sets.map((set) => `${set.weight}×${set.reps}`).join(" · ")}
+                            {exercise.sets.map(formatSet).join(" · ")}
                           </span>
                         </li>
                       ))
@@ -937,22 +1367,25 @@ function SetChip({
         // pointer-fine:, not bare hover:: this is a touch-first PWA, and an
         // ungated hover state stays lit under the finger after every tap.
         row.completed && "border-chart-1/70 bg-chart-1/20 pointer-fine:hover:bg-chart-1/30",
+        // Passed: neither the done tint nor an open chip — dashed and dimmed, the
+        // number struck through. A tap takes the pass back.
+        row.skipped && "border-dashed text-muted-foreground",
         next && "border-accent-text",
         // Only the check-off dips: un-checking is a correction, not an achievement.
         !row.completed && "active:scale-[0.96]",
       )}
       onClick={onToggle}
       aria-pressed={row.completed}
-      aria-label={`Série ${row.index + 1}`}
+      aria-label={`Série ${row.index + 1}${row.skipped ? ", passée" : ""}`}
     >
       <span className="flex items-center gap-1 text-sm font-semibold">
         {/* Always in the flow: mounting the check on validation shoved the set
             number 20px sideways, a hundred times a séance. */}
         <CheckIcon className={row.completed ? "text-chart-1" : "invisible"} />
-        {row.index + 1}
+        <span className={cn(row.skipped && "line-through")}>{row.index + 1}</span>
       </span>
       <span className="text-[10px] opacity-80 tabular-nums">
-        {row.completed ? `${row.weight}×${row.reps}` : "—"}
+        {row.completed ? formatSet(row) : row.skipped ? "passée" : "—"}
       </span>
     </Button>
   );

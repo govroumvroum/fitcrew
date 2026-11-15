@@ -1,12 +1,20 @@
 "use client";
 
 import {
+  ActivityIcon,
+  ArchiveIcon,
   ArrowLeftRightIcon,
+  BookOpenIcon,
+  CalendarDaysIcon,
   CheckIcon,
+  ClipboardListIcon,
   DumbbellIcon,
+  HistoryIcon,
   ImageIcon,
   InfoIcon,
+  LinkIcon,
   NotebookPenIcon,
+  PencilIcon,
   SearchIcon,
   UtensilsCrossedIcon,
 } from "lucide-react";
@@ -15,19 +23,26 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { Entry } from "../../../convex/screenshots";
 import { AgentChat, type AgentConfig } from "@/components/chat/agent-chat";
+import { ChoicesCard } from "@/components/chat/choices-card";
 import {
+  EditCard,
   LoggedCard,
   ProfileCard,
   ProgramCard,
   SourcesCard,
+  StatusCard,
   SwapCard,
+  type EditInput,
   type LoggedInput,
   type ProfileInput,
   type ProgramInput,
   type SearchOutput,
+  type StatusInput,
   type SwapInput,
 } from "@/components/chat/tool-cards";
+import { WeekCard } from "@/components/chat/week-card";
 import { ExtractedReview } from "@/components/import/extracted-review";
+import type { ShownEntry } from "@/components/week/week-rows";
 
 /**
  * The Coach, as a configuration of the shared chat shell. Everything structural —
@@ -54,10 +69,26 @@ export const COACH: AgentConfig = {
   thinking: "Le coach réfléchit…",
   unreachable: "Le coach ne répond pas.",
   sidebarEmpty: "Pas encore de conversation. Écris au coach, elle apparaîtra ici.",
-  // The screenshot review and the sources list are the two cards that read the
-  // output rather than the input.
-  outputOnly: ["tool-extract_screenshot", "tool-search_web"],
+  // The screenshot review, the sources list and the chips read the output rather
+  // than the input — the chips because their id is in it, and their input streams
+  // in piece by piece, which the guard would read as "not landed yet".
+  outputOnly: [
+    "tool-extract_screenshot",
+    "tool-search_web",
+    "tool-fetch_url",
+    "tool-ask_choices",
+    // Its card draws the week as SAVED (normalised times, program names from the
+    // database), never the input.
+    "tool-set_week_template",
+  ],
   toolLabels: {
+    "tool-ask_choices": {
+      icon: ClipboardListIcon,
+      pending: "Je prépare mes questions…",
+      running: "Je te pose mes questions…",
+      done: "Questions du coach",
+      failed: "Les questions n'ont pas pu s'afficher.",
+    },
     "tool-save_onboarding": {
       icon: CheckIcon,
       pending: "Je récapitule…",
@@ -77,6 +108,50 @@ export const COACH: AgentConfig = {
       running: "Je change l'exercice…",
       done: "Exercice remplacé",
       failed: "L'exercice n'a pas pu être remplacé.",
+    },
+    // "n'a pas été", not "n'a pas pu être": the commonest refusal is an
+    // ambiguous name, where nothing failed — the coach just has to ask.
+    "tool-edit_program": {
+      icon: PencilIcon,
+      pending: "Je prépare la modification…",
+      running: "Je modifie ton programme…",
+      done: "Programme modifié",
+      failed: "Le programme n'a pas été modifié.",
+    },
+    "tool-set_week_template": {
+      icon: CalendarDaysIcon,
+      pending: "Je prépare ta semaine…",
+      running: "J'écris ta semaine type…",
+      done: "Semaine type enregistrée",
+      failed: "La semaine type n'a pas été enregistrée.",
+    },
+    "tool-set_program_status": {
+      icon: ArchiveIcon,
+      pending: "Je retrouve le programme…",
+      running: "Je change le statut du programme…",
+      done: "Statut du programme changé",
+      failed: "Le statut du programme n'a pas changé.",
+    },
+    // The reads. Without an entry they fall back to FALLBACK's « C'est fait. »,
+    // which lands right above every edit and status change (read_programs comes
+    // first) and reads as the coach claiming a write it didn't make.
+    "tool-read_programs": {
+      icon: BookOpenIcon,
+      pending: "Je relis tes programmes…",
+      done: "J'ai relu tes programmes",
+      failed: "Je n'ai pas pu relire tes programmes.",
+    },
+    "tool-lookup_program_history": {
+      icon: HistoryIcon,
+      pending: "Je cherche dans tes anciens programmes…",
+      done: "J'ai regardé l'historique du programme",
+      failed: "Je n'ai pas pu lire l'historique du programme.",
+    },
+    "tool-read_cardio_and_bodyweight": {
+      icon: ActivityIcon,
+      pending: "Je regarde ton cardio et ta pesée…",
+      done: "J'ai regardé ton cardio et ta pesée",
+      failed: "Je n'ai pas pu lire ton cardio et ta pesée.",
     },
     "tool-explain_exercise": {
       icon: InfoIcon,
@@ -104,6 +179,13 @@ export const COACH: AgentConfig = {
       done: "Recherche web",
       failed: "La recherche n'a rien donné.",
     },
+    "tool-fetch_url": {
+      icon: LinkIcon,
+      pending: "J'ouvre la page…",
+      running: "Je lis la page…",
+      done: "Page lue",
+      failed: "La page n'a pas pu être ouverte.",
+    },
     // The Chef's own icon, not a generic arrow: the row says WHO was asked.
     "tool-ask_chef": {
       icon: UtensilsCrossedIcon,
@@ -112,9 +194,10 @@ export const COACH: AgentConfig = {
       failed: "Le Chef n'a pas répondu.",
     },
   },
-  // Only the screenshot review: nothing lands in the profile until the user
-  // confirms inside it, so it must not open behind a click.
-  needsValidation: ["tool-extract_screenshot"],
+  // The screenshot review, because nothing lands in the profile until the user
+  // confirms inside it; and the chips, because chips nobody can see are chips
+  // nobody taps. Neither may open behind a click.
+  needsValidation: ["tool-extract_screenshot", "tool-ask_choices"],
   renderTool: (tool, isNew) => {
     // Cards read the tool's input, which carries the whole program/profile; the
     // output only holds the resulting version number.
@@ -130,6 +213,17 @@ export const COACH: AgentConfig = {
         const done = output as { screenshotId: Id<"screenshots">; entries: Entry[] };
         return <ExtractedReview screenshotId={done.screenshotId} entries={done.entries} />;
       }
+      // The tappable answers. Their state lives in Convex, so the card only needs
+      // the id — everything else comes from `api.choices.status`. `send` is passed
+      // because the card is shared with the Chef and the echo has to land in THIS
+      // agent's thread.
+      case "tool-ask_choices":
+        return (
+          <ChoicesCard
+            choicesId={(output as { choicesId?: Id<"choices"> } | undefined)?.choicesId}
+            send={api.coach.send}
+          />
+        );
       case "tool-generate_program":
         return (
           <ProgramCard
@@ -151,9 +245,51 @@ export const COACH: AgentConfig = {
           />
         );
       }
+      // A refusal never reaches here: it carries an `error`, and the shell
+      // renders the failed line before asking for a card.
+      case "tool-edit_program": {
+        const done = output as { program?: string; dayName?: string; version?: number };
+        return (
+          <EditCard
+            input={input as EditInput}
+            program={done?.program}
+            dayName={done?.dayName}
+            version={done?.version}
+            isNew={isNew}
+          />
+        );
+      }
+      case "tool-set_week_template": {
+        const saved = (output as { entries?: ShownEntry[] })?.entries;
+        return saved ? <WeekCard entries={saved} isNew={isNew} /> : null;
+      }
+      case "tool-set_program_status":
+        return (
+          <StatusCard
+            input={input as StatusInput}
+            program={(output as { program?: string })?.program}
+            isNew={isNew}
+          />
+        );
       // The one card that reads the output: the links are the result.
       case "tool-search_web":
         return <SourcesCard output={output as SearchOutput} isNew={isNew} />;
+      // Une page lue est une source d'une seule ligne : la même carte, avec un
+      // seul résultat, plutôt qu'un composant de plus.
+      case "tool-fetch_url": {
+        const done = output as { url?: string; title?: string; error?: string };
+        if (!done?.url || done.error) return null;
+        const label = done.title || done.url;
+        return (
+          <SourcesCard
+            output={{
+              query: new URL(done.url).hostname.replace(/^www\./, ""),
+              results: [{ title: label, url: done.url, snippet: "" }],
+            }}
+            isNew={isNew}
+          />
+        );
+      }
       case "tool-log_workout":
         return (
           <LoggedCard

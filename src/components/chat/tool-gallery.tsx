@@ -1,13 +1,12 @@
 "use client";
 
-import { ChevronDownIcon } from "lucide-react";
 import { Component, type ReactNode } from "react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { Entry } from "../../../convex/screenshots";
-import type { AgentConfig, AgentToolLabel, ToolPart } from "@/components/chat/agent-chat";
+import type { AgentConfig } from "@/components/chat/agent-chat";
 import { CHEF } from "@/components/chat/chef-chat";
 import { COACH } from "@/components/chat/coach-chat";
-import { ToolLine } from "@/components/chat/tool-cards";
+import { ToolPartView, type ToolPart } from "@/components/chat/tool-part";
 
 /**
  * The design harness behind /demo: every chat tool card, both agents, all four
@@ -18,8 +17,8 @@ import { ToolLine } from "@/components/chat/tool-cards";
  * so a tool added to an agent shows up here on its own (with "pas de fixture"
  * until someone writes one). Nothing is re-listed by hand.
  *
- * All four states go through the same `ToolLine` and `renderTool` the chat uses,
- * so there is nothing here to keep in sync by hand.
+ * All four states go through `ToolPartView`, the very component the chat renders
+ * each tool part with — so there is nothing here to keep in sync by hand.
  */
 
 /** One completed-state fixture. `note` is printed under it, as-is. */
@@ -87,6 +86,39 @@ const done = (type: string, input: unknown, output?: unknown): ToolPart => ({
 });
 
 export const COACH_FIXTURES: Record<string, Fixture[]> = {
+  "tool-ask_choices": [
+    {
+      label: "Deux questions d'entraînement",
+      tool: done(
+        "tool-ask_choices",
+        {
+          questions: [
+            {
+              label: "Combien de séances par semaine ?",
+              multiple: false,
+              options: [
+                { label: "2", hint: "Le minimum qui progresse" },
+                { label: "3", hint: null },
+                { label: "4", hint: "Push/pull" },
+                { label: "5 ou plus", hint: null },
+              ],
+            },
+            {
+              label: "En salle ou à la maison ?",
+              multiple: false,
+              options: [
+                { label: "En salle", hint: "Barres, machines, poulies" },
+                { label: "À la maison", hint: "Haltères et élastiques" },
+                { label: "Les deux", hint: null },
+              ],
+            },
+          ],
+        },
+        { choicesId: "demo_fake_choices_id" as Id<"choices"> },
+      ),
+      note: "État live, dépend d'une vraie ligne Convex : l'id est faux, la carte s'abonne à `api.choices.status`.",
+    },
+  ],
   "tool-save_onboarding": [
     {
       label: "Profil complet",
@@ -167,14 +199,125 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
                   restSeconds: 180,
                   notes: null,
                 },
-                { name: "Rowing barre", sets: 4, reps: "8", restSeconds: 150, notes: "Dos à 45°" },
-                { name: "Curl haltères", sets: 3, reps: "10-12", restSeconds: 60, notes: null },
+                {
+                  name: "Rowing barre",
+                  sets: 4,
+                  reps: "8",
+                  restSeconds: 150,
+                  notes: "Dos à 45°",
+                },
+                {
+                  name: "Curl haltères",
+                  sets: 3,
+                  reps: "10-12",
+                  restSeconds: 60,
+                  notes: null,
+                },
               ],
             },
           ],
           progressionRules:
             "Ajoute 2,5 kg dès que tu tiens le haut de la fourchette sur toutes les séries. Si tu rates le bas de la fourchette deux séances de suite, retire 5 % et remonte.",
           deloadEveryWeeks: 6,
+        },
+        { version: 1 },
+      ),
+    },
+    {
+      // The circuit case, end to end: two blocks in one day, the same exercise
+      // twice inside one of them (distinct `slot`s), a classic exercise before
+      // and after, and both rest kinds.
+      label: "Programme en circuits",
+      tool: done(
+        "tool-generate_program",
+        {
+          name: "Circuits poids du corps — 3 jours",
+          days: [
+            {
+              name: "Jour 1 — Circuits full body",
+              exercises: [
+                {
+                  name: "Rameur",
+                  sets: 1,
+                  reps: "5 min",
+                  restSeconds: 60,
+                  notes: "Échauffement, allure facile",
+                },
+                {
+                  name: "Pompes",
+                  sets: 4,
+                  reps: "10",
+                  restSeconds: 20,
+                  notes: null,
+                  circuit: "A",
+                  slot: "A1",
+                  restBetweenRoundsSeconds: 90,
+                },
+                {
+                  name: "Abdos crunch",
+                  sets: 4,
+                  reps: "15",
+                  restSeconds: 20,
+                  notes: null,
+                  circuit: "A",
+                  slot: "A2",
+                  restBetweenRoundsSeconds: 90,
+                },
+                {
+                  name: "Pompes",
+                  sets: 4,
+                  reps: "AMRAP",
+                  restSeconds: 20,
+                  notes: "Deuxième passage, jusqu'à l'échec propre",
+                  circuit: "A",
+                  slot: "A3",
+                  restBetweenRoundsSeconds: 90,
+                },
+                {
+                  name: "Tractions",
+                  sets: 4,
+                  reps: "5",
+                  restSeconds: 30,
+                  notes: null,
+                  circuit: "A",
+                  slot: "A4",
+                  restBetweenRoundsSeconds: 90,
+                },
+                {
+                  name: "Fentes marchées",
+                  sets: 3,
+                  reps: "12 par jambe",
+                  restSeconds: 15,
+                  notes: null,
+                  circuit: "B",
+                  slot: "B1",
+                  restBetweenRoundsSeconds: 60,
+                },
+                {
+                  name: "Gainage planche",
+                  sets: 3,
+                  reps: "45 s",
+                  restSeconds: 15,
+                  notes: null,
+                  circuit: "B",
+                  slot: "B2",
+                  restBetweenRoundsSeconds: 60,
+                  // Timed: the séance runs a 45 s clock. `reps` is its label.
+                  durationSec: 45,
+                },
+                {
+                  name: "Étirements",
+                  sets: 1,
+                  reps: "5 min",
+                  restSeconds: 0,
+                  notes: null,
+                },
+              ],
+            },
+          ],
+          progressionRules:
+            "Ajoute un tour quand tu boucles les 4 sans t'arrêter. Ensuite, monte les répétitions d'une unité par exercice.",
+          deloadEveryWeeks: null,
         },
         { version: 1 },
       ),
@@ -198,6 +341,194 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
         },
         { version: 4, dayName: "Jour 1 — Push (pectoraux, épaules, triceps)" },
       ),
+    },
+    {
+      label: "Remplacement dans un circuit",
+      tool: done(
+        "tool-swap_exercise",
+        {
+          dayIndex: 0,
+          from: "Tractions",
+          to: {
+            name: "Tirage horizontal élastique",
+            sets: 4,
+            reps: "12",
+            restSeconds: 30,
+            notes: "Même place dans le circuit, épaule ménagée",
+            circuit: "A",
+            slot: "A4",
+            restBetweenRoundsSeconds: 90,
+          },
+        },
+        { version: 2, dayName: "Jour 1 — Circuits full body" },
+      ),
+      note: "`sets` vaut 4 TOURS : la carte ne doit jamais afficher « 4×12 ».",
+    },
+  ],
+  "tool-edit_program": [
+    {
+      label: "Ajout dans un programme qui n'est pas le dernier travaillé",
+      tool: done(
+        "tool-edit_program",
+        {
+          lineageId: "demo_boxe",
+          name: null,
+          dayIndex: 1,
+          operations: [
+            {
+              op: "add",
+              exercise: {
+                name: "Corde à sauter",
+                sets: 3,
+                reps: "3 min",
+                restSeconds: 60,
+                notes: null,
+              },
+              position: null,
+            },
+          ],
+        },
+        {
+          result: "edited",
+          program: "Boxe — explosivité et gainage",
+          version: 3,
+          dayName: "Jour 2 — Explosivité (jambes, gainage)",
+        },
+      ),
+      note: "« 3 min » passe par `reps` : les exercices chronométrés, c'est #104.",
+    },
+    {
+      label: "Trois opérations sur un même jour",
+      tool: done(
+        "tool-edit_program",
+        {
+          lineageId: "demo_fullbody",
+          name: null,
+          dayIndex: 0,
+          operations: [
+            { op: "remove", name: "Développé militaire à la barre" },
+            {
+              op: "update",
+              name: "Développé couché",
+              changes: { sets: 4, reps: "6-8", restSeconds: 150, notes: null },
+            },
+            {
+              op: "add",
+              exercise: {
+                name: "Face pull",
+                sets: 3,
+                reps: "15",
+                restSeconds: 60,
+                notes: "Coudes hauts, pour l'épaule droite",
+              },
+              position: 2,
+            },
+          ],
+        },
+        {
+          result: "edited",
+          program: "Full Body 3 jours",
+          version: 5,
+          dayName: "Jour 1 — Push (pectoraux, épaules, triceps)",
+        },
+      ),
+    },
+  ],
+  "tool-set_week_template": [
+    {
+      label: "Muscu + boxe en club, un programme archivé",
+      tool: done(
+        "tool-set_week_template",
+        {
+          days: [
+            {
+              day: "lundi",
+              sessions: [{ kind: "muscu", lineageId: "demo_muscu", level: "dur", time: "18h30" }],
+            },
+            {
+              day: "mercredi",
+              sessions: [{ kind: "boxe", lineageId: null, level: "dur", time: "soir" }],
+            },
+            {
+              day: "vendredi",
+              sessions: [{ kind: "muscu", lineageId: "demo_muscu", level: "leger", time: null }],
+            },
+            {
+              day: "samedi",
+              sessions: [{ kind: "course", lineageId: "demo_old", level: "leger", time: "matin" }],
+            },
+          ],
+        },
+        {
+          result: "saved",
+          entries: [
+            {
+              weekday: 0,
+              kind: "muscu",
+              lineageId: "demo_muscu",
+              level: "dur",
+              time: "18:30",
+              program: { name: "Full body 3 jours", status: "active" },
+            },
+            { weekday: 2, kind: "boxe", level: "dur", time: "soir", program: null },
+            {
+              weekday: 4,
+              kind: "muscu",
+              lineageId: "demo_muscu",
+              level: "leger",
+              program: { name: "Full body 3 jours", status: "active" },
+            },
+            {
+              weekday: 5,
+              kind: "course",
+              lineageId: "demo_old",
+              level: "leger",
+              time: "matin",
+              program: { name: "Prépa 10 km", status: "archived" },
+            },
+          ],
+        },
+      ),
+      note: "La carte lit la sortie : l'heure normalisée et le nom du programme viennent de la base.",
+    },
+  ],
+  "tool-set_program_status": [
+    {
+      label: "« Supprime-le » : archivé, rien d'effacé",
+      tool: done(
+        "tool-set_program_status",
+        { lineageId: null, name: "Réveil musculaire", status: "archived" },
+        { result: "updated", program: "Réveil musculaire — 3 jours", status: "archived" },
+      ),
+    },
+    {
+      label: "Réactivé",
+      tool: done(
+        "tool-set_program_status",
+        { lineageId: "demo_boxe", name: null, status: "active" },
+        { result: "updated", program: "Boxe — explosivité et gainage", status: "active" },
+      ),
+    },
+  ],
+  "tool-read_programs": [
+    {
+      label: "Lecture sans carte",
+      tool: done("tool-read_programs", {}),
+      note: "Lecture seule : pas de carte, la ligne dit juste ce que le coach a lu.",
+    },
+  ],
+  "tool-lookup_program_history": [
+    {
+      label: "Lecture sans carte",
+      tool: done("tool-lookup_program_history", { name: "Boxe" }),
+      note: "Lecture seule : pas de carte.",
+    },
+  ],
+  "tool-read_cardio_and_bodyweight": [
+    {
+      label: "Lecture sans carte",
+      tool: done("tool-read_cardio_and_bodyweight", {}),
+      note: "Lecture seule : pas de carte.",
     },
   ],
   "tool-explain_exercise": [
@@ -277,8 +608,31 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
     },
     {
       label: "Zéro résultat",
-      tool: done("tool-search_web", null, { query: "cardio à jeun 2026", results: [] }),
+      tool: done("tool-search_web", null, {
+        query: "cardio à jeun 2026",
+        results: [],
+      }),
       note: "`SourcesCard` renvoie null quand la liste est vide — rien ne s'affiche, c'est voulu.",
+    },
+  ],
+  "tool-fetch_url": [
+    {
+      label: "Une page ouverte",
+      tool: done("tool-fetch_url", null, {
+        url: "https://examine.com/supplements/creatine/",
+        title: "Créatine : 3 à 5 g par jour, sans phase de charge",
+        text: "La dose d'entretien couvre la saturation musculaire en 3 à 4 semaines.\n\nLa phase de charge accélère la saturation de quelques jours, sans bénéfice à moyen terme.",
+      }),
+    },
+    {
+      label: "Page injoignable",
+      tool: done("tool-fetch_url", null, {
+        url: "https://exemple.invalide/article",
+        title: "",
+        text: "",
+        error: "La page a répondu 403. Elle est peut-être hors ligne, ou elle bloque les robots.",
+      }),
+      note: "Erreur renvoyée et non levée : le tour du coach continue. La carte ne s'affiche pas, et la ligne d'outil prend son libellé d'échec — un `error` dans l'output vaut `output-error`.",
     },
   ],
   "tool-ask_chef": [
@@ -293,6 +647,48 @@ export const COACH_FIXTURES: Record<string, Fixture[]> = {
 };
 
 export const CHEF_FIXTURES: Record<string, Fixture[]> = {
+  "tool-ask_choices": [
+    {
+      label: "Trois questions, dont une à choix multiple",
+      tool: done(
+        "tool-ask_choices",
+        {
+          questions: [
+            {
+              label: "Ton objectif ?",
+              multiple: false,
+              options: [
+                { label: "Prise de masse", hint: "Gagner du muscle" },
+                { label: "Perte de gras", hint: "Sécher sans perdre de force" },
+                { label: "Maintien", hint: null },
+              ],
+            },
+            {
+              label: "Des allergies ?",
+              multiple: true,
+              options: [
+                { label: "Arachides", hint: null },
+                { label: "Fruits de mer", hint: null },
+                { label: "Gluten", hint: null },
+                { label: "Lactose", hint: null },
+              ],
+            },
+            {
+              label: "Tu cuisines combien de temps par repas ?",
+              multiple: false,
+              options: [
+                { label: "10 min", hint: "Le strict minimum" },
+                { label: "25 min", hint: null },
+                { label: "45 min", hint: "J'aime cuisiner" },
+              ],
+            },
+          ],
+        },
+        { choicesId: "demo_fake_choices_id" as Id<"choices"> },
+      ),
+      note: "État live, dépend d'une vraie ligne Convex : l'id est faux, la carte s'abonne à `api.choices.status`.",
+    },
+  ],
   "tool-save_nutrition_profile": [
     {
       label: "Profil complet, cibles 2220 kcal",
@@ -399,6 +795,18 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
         meal: OMELETTE,
       }),
     },
+    {
+      label: "Refusé : pas de plan pour cette semaine (#126)",
+      tool: done(
+        "tool-replace_meal",
+        { date: "2026-11-17", slot: "diner", meal: OMELETTE },
+        {
+          result: "refused",
+          note: "Rien n'a été modifié : il n'a pas encore de plan pour la semaine du lundi 2026-11-16.",
+        },
+      ),
+      note: "Un refus retourné (`result: \"refused\"`) s'affiche comme un échec : rien n'a été écrit, la carte ne doit pas montrer le repas.",
+    },
   ],
   "tool-move_meal": [
     {
@@ -432,7 +840,16 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
   ],
   "tool-shopping_list": [
     {
-      label: "Ingrédient à plusieurs quantités",
+      label: "Semaine prochaine (#126)",
+      tool: done("tool-shopping_list", { week: "next" }, [
+        { name: "Filet de poulet", quantities: ["180 g", "180 g"] },
+        { name: "Riz basmati", quantities: ["80 g", "80 g", "60 g", "100 g", "100 g", "110 g", "60 g"] },
+        { name: "Courgettes", quantities: ["2"] },
+      ]),
+      note: "Le résultat reste un tableau (un vieil onglet le lit) ; le titre vient de l'input `week`. Les quantités longues passent à la ligne.",
+    },
+    {
+      label: "Sans input (fil d'avant #126) : ingrédient à plusieurs quantités",
       tool: done("tool-shopping_list", null, [
         { name: "Filet de poulet", quantities: ["180 g", "180 g", "2 filets"] },
         { name: "Flocons d'avoine", quantities: ["80 g", "80 g"] },
@@ -655,12 +1072,6 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
   ],
 };
 
-/* -------------------------------------------------------------------------- */
-/* Mirrors of `agent-chat.tsx`. Keep in sync — see the file header.           */
-/* -------------------------------------------------------------------------- */
-
-/* -------------------------------------------------------------------------- */
-
 /**
  * The two Convex-backed cards throw when handed a fake id — `v.id()` rejects a
  * string that isn't a real document id, and `useQuery` rethrows that in render.
@@ -686,42 +1097,23 @@ class CardBoundary extends Component<{ children: ReactNode }, { error: string | 
   }
 }
 
-/**
- * Mirrors `AgentMessage`'s completed branch: the same input guard, the same
- * "no card means render the one-line marker", and the same collapse rule. The
- * gallery is only useful if it shows what the thread shows — including the
- * disclosure, which is how most cards are actually first seen.
- */
-function Completed({
-  config,
-  tool,
-  label,
-}: {
-  config: AgentConfig;
-  tool: ToolPart;
-  label: AgentToolLabel;
-}) {
-  if (!tool.input && !config.outputOnly.includes(tool.type)) {
-    return (
-      <p className="text-[11px] text-muted-foreground">
-        Input absent : la coquille masquerait cette carte.
-      </p>
-    );
-  }
-  const card = config.renderTool(tool, false);
-  if (!card) return <ToolLine Icon={label.icon} text={label.done} tone="done" />;
-  if (config.needsValidation.includes(tool.type)) return <CardBoundary>{card}</CardBoundary>;
+/** What the thread would hide, said out loud: a card whose input hasn't landed. */
+const INPUT_MISSING = (
+  <p className="text-[11px] text-muted-foreground">
+    Input absent : la coquille masquerait cette carte.
+  </p>
+);
+
+/** One tool part, drawn exactly as the thread draws it. */
+function Part({ config, tool }: { config: AgentConfig; tool: ToolPart }) {
   return (
-    <details className="group w-full">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] text-success-text marker:hidden hover:brightness-110">
-        <label.icon className="size-3.5 shrink-0" aria-hidden />
-        <span className="min-w-0 flex-1">{label.done}</span>
-        <ChevronDownIcon className="chevron size-3.5 shrink-0" aria-hidden />
-      </summary>
-      <div className="mt-1.5">
-        <CardBoundary>{card}</CardBoundary>
-      </div>
-    </details>
+    <ToolPartView
+      tool={tool}
+      config={config}
+      isNew={false}
+      Boundary={CardBoundary}
+      inputMissing={INPUT_MISSING}
+    />
   );
 }
 
@@ -743,8 +1135,6 @@ function ToolBlock({
   type: string;
   fixtures: Fixture[];
 }) {
-  const label = config.toolLabels[type];
-
   return (
     <section className="space-y-3 rounded-xl border bg-background p-3">
       <h3 className="font-heading text-sm font-semibold tracking-[-0.01em]">
@@ -752,17 +1142,13 @@ function ToolBlock({
       </h3>
 
       <State name="pending — input-streaming">
-        <ToolLine Icon={label.icon} text={label.pending} shimmer />
+        <Part config={config} tool={{ type, state: "input-streaming" }} />
       </State>
       <State name="running — input-available">
-        <ToolLine Icon={label.icon} text={label.running ?? label.pending} shimmer />
+        <Part config={config} tool={{ type, state: "input-available", input: {} }} />
       </State>
       <State name="failed — output-error">
-        <ToolLine
-          Icon={label.icon}
-          text={label.failed ?? "Une action n'a pas marché."}
-          tone="failed"
-        />
+        <Part config={config} tool={{ type, state: "output-error" }} />
       </State>
 
       {fixtures.length === 0 ? (
@@ -774,7 +1160,7 @@ function ToolBlock({
       ) : (
         fixtures.map((fixture) => (
           <State key={fixture.label} name={`completed — ${fixture.label}`}>
-            <Completed config={config} tool={fixture.tool} label={label} />
+            <Part config={config} tool={fixture.tool} />
             {fixture.note ? (
               <p className="text-[11px] text-muted-foreground">{fixture.note}</p>
             ) : null}

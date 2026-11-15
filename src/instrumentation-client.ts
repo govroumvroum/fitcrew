@@ -1,8 +1,31 @@
+import * as Sentry from "@sentry/nextjs";
+// Named, not `Sentry.captureRouterTransitionStart`: oxlint's `import(namespace)`
+// rule can't follow the SDK's `export * from "./client"`, so the namespace form
+// is a false-positive lint error.
+import { captureRouterTransitionStart } from "@sentry/nextjs";
 import posthog from "posthog-js";
 
 // Runs before React hydrates, which is the point: an exception thrown during
 // hydration is exactly the one we'd otherwise never see.
 //
+// Same gate as the server (src/instrumentation.ts): a missing DSN means no
+// init, rather than a console full of failed requests on a local build. React
+// catches render errors in a boundary before they reach here, hence the
+// explicit capture in src/app/error.tsx and src/app/global-error.tsx.
+if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+    // Inlined by next.config.ts at build time; an untagged build sends none.
+    release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
+  });
+}
+
+// `withSentryConfig` (next.config.ts) looks for this export and prints an
+// "ACTION REQUIRED" warning at build time without it. Navigation spans need
+// tracing, which is off, so the hook is inert today — it is the hook the SDK
+// wants, nothing more.
+export const onRouterTransitionStart = captureRouterTransitionStart;
+
 // The key is absent in local dev unless you put it in .env.local — no key means
 // no init, rather than a console full of failed requests.
 if (process.env.NEXT_PUBLIC_POSTHOG_KEY) {

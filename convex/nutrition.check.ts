@@ -2,7 +2,11 @@
 import assert from "node:assert/strict";
 import {
   type PlanDay,
+  dayTargets,
+  estimateLevelTargets,
   estimateTargets,
+  levelTargetsOf,
+  forbiddenHits,
   shoppingListFrom,
   sumMacros,
   sumQuantities,
@@ -48,6 +52,64 @@ assert.ok(
     activityLevel: "sedentaire",
   }).carbs >= 0,
 );
+
+// --- Targets per day level (#118) --------------------------------------------
+for (const goal of ["perte", "maintien", "prise"] as const) {
+  for (const activityLevel of ["sedentaire", "modere", "tres_actif"] as const) {
+    const input = { ...base, goal, activityLevel };
+    const levels = estimateLevelTargets(input);
+    // Protein (and fat) are the same every day; carbs absorb the gap.
+    assert.equal(levels.off.protein, levels.leger.protein);
+    assert.equal(levels.off.protein, levels.dur.protein);
+    assert.equal(levels.off.fat, levels.dur.fat);
+    assert.ok(levels.off.calories < levels.leger.calories, "léger au-dessus de off");
+    assert.ok(levels.leger.calories < levels.dur.calories, "dur au-dessus de léger");
+    assert.ok(levels.off.carbs < levels.dur.carbs, "les glucides suivent l'entraînement");
+    for (const t of Object.values(levels)) {
+      assert.ok(t.carbs >= 0, "glucides jamais négatifs");
+      for (const value of Object.values(t)) assert.ok(Number.isInteger(value));
+      const fromMacros = t.protein * 4 + t.carbs * 4 + t.fat * 9;
+      assert.ok(Math.abs(fromMacros - t.calories) <= 4, `${fromMacros} vs ${t.calories}`);
+    }
+    // The off day starts from the activity WITHOUT sport: below the flat
+    // target, which already counted training in its factor. Otherwise a séance
+    // would be counted twice — once in the factor, once in the level.
+    assert.ok(
+      levels.off.calories < estimateTargets(input).calories || activityLevel === "sedentaire",
+      `off (${levels.off.calories}) must not already include training`,
+    );
+  }
+}
+// Gaps proportional to weight: 80 kg → +240 léger, +480 dur.
+const eighty = estimateLevelTargets({ ...base, goal: "maintien" });
+assert.equal(eighty.leger.calories - eighty.off.calories, 240);
+assert.equal(eighty.dur.calories - eighty.off.calories, 480);
+assert.equal(eighty.dur.carbs - eighty.off.carbs, 120);
+// Carbs floor survives the absurd input too.
+const absurd = estimateLevelTargets({
+  goal: "perte",
+  age: 100,
+  sex: "f",
+  heightCm: 100,
+  weightKg: 300,
+  activityLevel: "sedentaire",
+});
+assert.ok(absurd.off.carbs >= 0 && absurd.dur.carbs >= absurd.off.carbs);
+
+// A profile saved before #118 reads its flat target for all three levels.
+const flat = { calories: 2300, protein: 160, carbs: 240, fat: 70 };
+assert.deepEqual(levelTargetsOf({ targets: flat }), { off: flat, leger: flat, dur: flat });
+assert.deepEqual(levelTargetsOf({ targets: flat, targetsByLevel: eighty }), eighty);
+
+// The day's targets: the level's own, null without a profile.
+const withLevels = { targets: flat, targetsByLevel: eighty };
+assert.deepEqual(dayTargets(withLevels, { level: "dur" }), eighty.dur);
+assert.deepEqual(dayTargets(withLevels, { level: "off" }), eighty.off);
+assert.equal(dayTargets(null, { level: "dur" }), null);
+// No semaine type → no level → the flat target, an average that already
+// includes sport. Never the off target: that would count training twice.
+assert.deepEqual(dayTargets(withLevels, { level: null }), flat);
+assert.equal(dayTargets(null, { level: null }), null);
 
 // A day with nothing logged is zeros, not a crash.
 assert.deepEqual(sumMacros([]), { calories: 0, protein: 0, carbs: 0, fat: 0 });
@@ -107,5 +169,120 @@ assert.deepEqual(sumQuantities(["1/2 citron", "une pincée", "Une pincée", "2-3
   "Une pincée",
   "2-3 tranches",
 ]);
+// --- Allergy / exclusion guard ---------------------------------------------
+// The health-safety path: the prompt says allergies are hard constraints, this
+// is what makes it true. Under-matching hurts the user, over-matching makes the
+// guard useless — both directions are checked.
 
-console.log("nutrition targets + shopping list ok");
+const dish = (name: string, ingredients: string[]) =>
+  meal(
+    name,
+    ingredients.map((i) => ({ name: i, quantity: "1" })),
+  );
+
+const hitNames = (meals: ReturnType<typeof dish>[], forbidden: string[]) =>
+  forbiddenHits(meals, forbidden).map((h) => `${h.ingredient}/${h.forbidden}`);
+
+// A real hit, and the meal name travels with it so the model knows what to redo.
+assert.deepEqual(
+  forbiddenHits([dish("Poulet cajou", ["blanc de poulet", "noix de cajou"])], ["noix"]),
+  [{ meal: "Poulet cajou", ingredient: "noix de cajou", forbidden: "noix" }],
+);
+
+// Word boundaries, both ways round. These are the false positives a naive
+// `includes` produces, and the false negative a naive `===` produces.
+assert.deepEqual(hitNames([dish("Mousse", ["chocolat noir", "sucre"])], ["lait"]), []);
+assert.deepEqual(hitNames([dish("Bizarre", ["travail", "ailes de poulet"])], ["ail"]), []);
+assert.deepEqual(hitNames([dish("Aïoli", ["ail", "huile"])], ["ail"]), ["ail/ail"]);
+// Multi-word exclusions match as a run of whole words, not as loose keywords.
+assert.deepEqual(hitNames([dish("Paella", ["fruits de mer surgelés"])], ["fruits de mer"]), [
+  "fruits de mer surgelés/fruits de mer",
+]);
+assert.deepEqual(hitNames([dish("Sorbet", ["citron amer"])], ["mer"]), []);
+
+// Accents, case and the "œ" ligature: the user typed one spelling, the model
+// wrote another.
+assert.deepEqual(hitNames([dish("Omelette", ["Œufs frais"])], ["oeuf"]), ["Œufs frais/oeuf"]);
+assert.deepEqual(hitNames([dish("Omelette", ["oeuf"])], ["ŒUFS"]), ["oeuf/ŒUFS"]);
+assert.deepEqual(hitNames([dish("Gratin", ["crème fraîche"])], ["creme"]), ["crème fraîche/creme"]);
+// Plural on either side, and a short word that must NOT be singularised away.
+assert.deepEqual(hitNames([dish("Salade", ["tomates cerises"])], ["tomate"]), [
+  "tomates cerises/tomate",
+]);
+assert.deepEqual(hitNames([dish("Riz", ["riz basmati"])], ["riz"]), ["riz basmati/riz"]);
+
+// Empty or blank lists change nothing — a profile with no restrictions must
+// behave exactly as it did before this guard existed.
+assert.deepEqual(forbiddenHits([dish("Omelette", ["oeuf"])], []), []);
+assert.deepEqual(forbiddenHits([dish("Omelette", ["oeuf"])], ["", "   "]), []);
+// A clean meal against a real list.
+assert.deepEqual(
+  hitNames([dish("Poulet riz", ["poulet", "riz", "courgette"])], ["oeuf", "lait"]),
+  [],
+);
+
+// Every hit is reported, so the model can fix a whole plan in one turn.
+assert.equal(
+  forbiddenHits(
+    [dish("Omelette", ["oeufs", "lait entier"]), dish("Salade", ["tomate"])],
+    ["oeuf", "lait"],
+  ).length,
+  2,
+);
+
+// The bounds fail CLOSED. A guard that quietly stops scanning at its cap would
+// report "clear" on exactly the payload big enough to hide an allergen, and
+// nothing upstream caps ingredient count — `clampMeal` only clamps macros.
+const manyIngredients = dish("Buffet", [
+  ...Array.from({ length: 80 }, (_, i) => `ingredient ${i}`),
+  "oeuf", // past the cap: would be unscanned if the guard sliced instead of refusing
+]);
+assert.equal(
+  forbiddenHits([manyIngredients], ["oeuf"]).length,
+  1,
+  "une recette plus longue que la limite doit être refusée, pas scannée à moitié",
+);
+// And the refusal names the reason rather than pretending to have found the egg.
+assert.match(forbiddenHits([manyIngredients], ["oeuf"])[0].forbidden, /trop longue/);
+
+// Same for a forbidden list longer than we can check: no meal can be called safe.
+const tooManyForbidden = Array.from({ length: 41 }, (_, i) => `interdit${i}`);
+assert.equal(
+  forbiddenHits([dish("Poulet riz", ["poulet", "riz"])], tooManyForbidden).length,
+  1,
+  "plus d'interdits que vérifiables doit refuser, pas ignorer les derniers",
+);
+
+// Fouine on #76: the count check used to run AFTER the needles were built, so a
+// list of 41 where the first 40 are blank tokenised to nothing, hit the
+// empty-needle exit, and reported "clear" — the exact case the bound exists for.
+const blankThenReal = [...Array.from({ length: 40 }, () => "  "), "oeuf"];
+assert.equal(
+  forbiddenHits([dish("Omelette", ["oeufs"])], blankThenReal).length,
+  1,
+  "40 entrées vides puis un vrai interdit doit refuser, pas passer par la sortie 'aucun interdit'",
+);
+
+// Same fail-open one level down: `foodTokens` used to slice long names, so an
+// allergen past the cap was reported clear. Now an unverifiable name refuses.
+const buried = `${"x ".repeat(70)}oeuf`; // > 120 chars, allergen at the end
+assert.equal(
+  forbiddenHits([dish("Mystère", [buried])], ["oeuf"]).length,
+  1,
+  "un nom trop long doit refuser plutôt que d'être scanné en partie",
+);
+assert.match(forbiddenHits([dish("Mystère", [buried])], ["oeuf"])[0].forbidden, /trop long/);
+// An unverifiable FORBIDDEN entry refuses too — same reasoning, other side.
+assert.equal(forbiddenHits([dish("Poulet riz", ["poulet"])], [buried]).length, 1);
+
+// A normal long-ish name is still scanned, not refused: the cap is for absurd
+// input, not for "filet de poulet fermier élevé en plein air label rouge".
+assert.deepEqual(
+  hitNames(
+    [dish("Plat", ["filet de poulet fermier élevé en plein air label rouge des Landes"])],
+    ["oeuf"],
+  ),
+  [],
+);
+
+console.log("nutrition targets + shopping list + allergy guard ok");

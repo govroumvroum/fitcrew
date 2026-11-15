@@ -516,6 +516,7 @@ export const generateWeekly = internalAction({
       inputTokens: usage.inputTokens ?? 0,
       outputTokens: usage.outputTokens ?? 0,
       reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+      cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens,
       costUsd: costUsdFrom(providerMetadata),
     });
 

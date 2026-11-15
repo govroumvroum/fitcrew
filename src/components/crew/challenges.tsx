@@ -37,6 +37,15 @@ export const METRICS = {
   est_1rm: { label: "Force (1RM est.)", unit: "kg" },
 } as const satisfies Record<ChallengeMetric, { label: string; unit: string }>;
 
+/**
+ * Base UI's `<SelectValue>` prints the *value*, not the selected option's text —
+ * the options live in a portal that isn't mounted while the select is closed, so
+ * nothing can recover "Volume" from `volume`. Hence `items` on `<Select>`.
+ */
+const METRIC_LABELS = Object.fromEntries(
+  Object.entries(METRICS).map(([key, { label }]) => [key, label])
+) as Record<ChallengeMetric, string>;
+
 export function Challenges({ today }: { today: string }) {
   const weekStart = monday(today);
   const rows = useQuery(api.crew.challenges, { weekStart });
@@ -144,13 +153,11 @@ function CreateDialog({ weekStart }: { weekStart: string }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {/* h-11 like the other trailing outline buttons: the default h-9 is under
-            the 44px touch target on a phone. */}
-        <Button variant="outline" className="h-11 w-full">
-          <PlusIcon aria-hidden />
-          Nouveau défi
-        </Button>
+      {/* h-11 like the other trailing outline buttons: the default h-9 is under
+          the 44px touch target on a phone. */}
+      <DialogTrigger render={<Button variant="outline" className="h-11 w-full" />}>
+        <PlusIcon aria-hidden />
+        Nouveau défi
       </DialogTrigger>
       <DialogContent>
         {/* Mounted only while open, so the form state resets by itself and
@@ -213,7 +220,11 @@ function CreateForm({ weekStart, onDone }: { weekStart: string; onDone: () => vo
 
       <div className="space-y-2">
         <Label>Ce qu&apos;on mesure</Label>
-        <Select value={metric} onValueChange={(value) => setMetric(value as ChallengeMetric)}>
+        <Select
+          items={METRIC_LABELS}
+          value={metric}
+          onValueChange={(value) => setMetric(value as ChallengeMetric)}
+        >
           <SelectTrigger className="h-12 w-full text-base sm:text-sm">
             <SelectValue />
           </SelectTrigger>
@@ -232,7 +243,11 @@ function CreateForm({ weekStart, onDone }: { weekStart: string; onDone: () => vo
       {needsExercise ? (
         <div className="space-y-2">
           <Label>Exercice</Label>
-          <Select value={exerciseName} onValueChange={setExerciseName}>
+          {/* Values are the exercise names, so no `items` needed. */}
+          <Select
+            value={exerciseName}
+            onValueChange={(value) => setExerciseName(value ?? "")}
+          >
             <SelectTrigger className="h-12 w-full text-base sm:text-sm">
               <SelectValue placeholder="Choisis un exercice" />
             </SelectTrigger>

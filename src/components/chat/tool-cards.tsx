@@ -1,22 +1,30 @@
 "use client";
 
 import {
+  ArchiveIcon,
   ArrowRightIcon,
   CheckIcon,
   ChevronDownIcon,
   DumbbellIcon,
+  MinusIcon,
+  PencilIcon,
+  PlusIcon,
   SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import type { z } from "zod";
 import type {
+  zEditProgram,
   zExercise,
   zGenerateProgram,
   zLogWorkout,
   zSaveOnboarding,
+  zSetProgramStatus,
   zSwapExercise,
 } from "../../../convex/toolSchemas";
 import { Badge } from "@/components/ui/badge";
+import type { Block } from "@/lib/circuits";
+import { betweenRoundsOf, groupCircuits, roundsOf } from "@/lib/circuits";
 import { formatLoose } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +45,8 @@ export type ProgramInput = z.infer<typeof zGenerateProgram>;
 export type ProfileInput = z.infer<typeof zSaveOnboarding>;
 export type SwapInput = z.infer<typeof zSwapExercise>;
 export type LoggedInput = z.infer<typeof zLogWorkout>;
+export type EditInput = z.infer<typeof zEditProgram>;
+export type StatusInput = z.infer<typeof zSetProgramStatus>;
 
 const TONE: Record<ProfileInput["tone"], string> = {
   motivant: "Motivant",
@@ -122,12 +132,54 @@ function ExerciseRow({ exercise }: { exercise: Exercise }) {
   return (
     <li className="flex items-baseline gap-2 border-b px-1 py-2 last:border-b-0">
       <span className="min-w-0 flex-1 text-sm">{exercise.name}</span>
+      {/* `sets` on a circuit exercise is a ROUND count, not straight sets:
+          printing "4×10" here would say the exact opposite of what the circuit
+          prescribes. The rounds are stated once, by the block header above. */}
       <span className="shrink-0 text-sm font-semibold tabular-nums">
-        {exercise.sets}×{exercise.reps}
+        {exercise.circuit ? exercise.reps : `${exercise.sets}×${exercise.reps}`}
       </span>
       <span className="w-14 shrink-0 text-right text-sm text-muted-foreground tabular-nums">
         {rest(exercise.restSeconds)}
       </span>
+    </li>
+  );
+}
+
+/** The same block as /programme, at card density: rounds up top, order in the
+ *  rows, the between-rounds rest on its own line so it can't be read as one more
+ *  between-exercises rest. */
+function CircuitRow({ block }: { block: Extract<Block<Exercise>, { kind: "circuit" }> }) {
+  const rounds = roundsOf(block);
+  const betweenRounds = betweenRoundsOf(block);
+
+  return (
+    <li className="border-b px-1 py-2 last:border-b-0">
+      <div className="flex items-baseline gap-2">
+        <span className="min-w-0 flex-1 text-sm font-medium">Circuit {block.label}</span>
+        <span className="shrink-0 text-sm font-semibold tabular-nums">
+          {rounds} tour{rounds > 1 ? "s" : ""}
+        </span>
+      </div>
+      <ol className="mt-1 border-l pl-2.5">
+        {block.exercises.map((exercise, index) => (
+          // The slot tells two occurrences of the same exercise apart.
+          <li
+            key={exercise.slot ?? `${exercise.name}-${index}`}
+            className="flex items-baseline gap-2 py-0.5"
+          >
+            <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{index + 1}</span>
+            <span className="min-w-0 flex-1 text-sm">{exercise.name}</span>
+            <span className="shrink-0 text-sm font-semibold tabular-nums">{exercise.reps}</span>
+            <span className="w-14 shrink-0 text-right text-sm text-muted-foreground tabular-nums">
+              {index === block.exercises.length - 1 ? "—" : rest(exercise.restSeconds)}
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Entre deux tours&#8239;:{" "}
+        <span className="tabular-nums">{betweenRounds > 0 ? rest(betweenRounds) : "enchaîné"}</span>
+      </p>
     </li>
   );
 }
@@ -171,9 +223,13 @@ export function ProgramCard({
             </span>
           </summary>
           <ul className="mt-1 mb-2">
-            {day.exercises.map((exercise) => (
-              <ExerciseRow key={exercise.name} exercise={exercise} />
-            ))}
+            {groupCircuits(day.exercises).map((block) =>
+              block.kind === "circuit" ? (
+                <CircuitRow key={block.key} block={block} />
+              ) : (
+                <ExerciseRow key={block.key} exercise={block.exercise} />
+              ),
+            )}
           </ul>
         </details>
       ))}
@@ -345,10 +401,159 @@ export function SwapCard({
         <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 font-medium">{input.to.name}</span>
       </div>
+      {/* The swap carries one exercise and no day, so the block header the row
+          relies on doesn't exist here — this line is it. */}
+      {input.to.circuit ? (
+        <p className="text-sm text-muted-foreground">
+          Dans le circuit {input.to.circuit}
+          {" · "}
+          <span className="tabular-nums">{input.to.sets}</span> tour
+          {input.to.sets > 1 ? "s" : ""}
+          {input.to.restBetweenRoundsSeconds
+            ? ` · entre deux tours ${rest(input.to.restBetweenRoundsSeconds)}`
+            : ""}
+        </p>
+      ) : null}
       <ul>
         <ExerciseRow exercise={input.to} />
       </ul>
       {input.to.notes ? <p className="text-sm text-muted-foreground">{input.to.notes}</p> : null}
+    </Surface>
+  );
+}
+
+type EditOperation = EditInput["operations"][number];
+type Changes = Extract<EditOperation, { op: "update" }>["changes"];
+
+/** What an update touched, in the order a prescription reads. Nulls untouched. */
+function changesOf(changes: Changes) {
+  const out: string[] = [];
+  if (changes.sets != null) out.push(`${changes.sets} séries`);
+  if (changes.reps != null) out.push(`${changes.reps} reps`);
+  if (changes.restSeconds != null) out.push(`repos ${rest(changes.restSeconds)}`);
+  if (changes.restBetweenRoundsSeconds != null)
+    out.push(`entre deux tours ${rest(changes.restBetweenRoundsSeconds)}`);
+  if (changes.notes === "") out.push("consigne retirée");
+  else if (changes.notes != null) out.push(changes.notes);
+  return out.join(" · ");
+}
+
+/** One operation, led by what it did — the icon carries it, not only the colour. */
+function OperationRow({ operation }: { operation: EditOperation }) {
+  switch (operation.op) {
+    case "add":
+      return (
+        <li className="flex items-baseline gap-2 border-b px-1 py-2 last:border-b-0">
+          <PlusIcon
+            className="size-3.5 shrink-0 self-center text-success-text"
+            aria-label="Ajouté"
+          />
+          <span className="min-w-0 flex-1 text-sm font-medium">{operation.exercise.name}</span>
+          {/* A circuit exercise's `sets` is a round count: reps only, as in ExerciseRow. */}
+          <span className="shrink-0 text-sm font-semibold tabular-nums">
+            {operation.exercise.circuit
+              ? operation.exercise.reps
+              : `${operation.exercise.sets}×${operation.exercise.reps}`}
+          </span>
+          <span className="w-14 shrink-0 text-right text-sm text-muted-foreground tabular-nums">
+            {rest(operation.exercise.restSeconds)}
+          </span>
+        </li>
+      );
+    case "remove":
+      return (
+        <li className="flex items-baseline gap-2 border-b px-1 py-2 last:border-b-0">
+          <MinusIcon
+            className="size-3.5 shrink-0 self-center text-danger-text"
+            aria-label="Retiré"
+          />
+          <span className="min-w-0 flex-1 text-sm text-muted-foreground line-through">
+            {operation.name}
+          </span>
+        </li>
+      );
+    case "update":
+      return (
+        <li className="flex items-baseline gap-2 border-b px-1 py-2 last:border-b-0">
+          <PencilIcon
+            className="size-3.5 shrink-0 self-center text-muted-foreground"
+            aria-label="Modifié"
+          />
+          <span className="min-w-0 flex-1 text-sm">{operation.name}</span>
+          <span className="min-w-0 shrink text-right text-sm text-muted-foreground tabular-nums">
+            {changesOf(operation.changes)}
+          </span>
+        </li>
+      );
+  }
+}
+
+/**
+ * `edit_program`. Reads the input for the operations and the output for the
+ * names — the input only carries a lineageId or a fragment of name, the output
+ * the program as the database knows it. Only rendered on success: a refusal
+ * returns an `error`, and the shell draws the failed line instead.
+ */
+export function EditCard({
+  input,
+  program,
+  dayName,
+  version,
+  isNew,
+}: {
+  input: EditInput;
+  program?: string;
+  dayName?: string;
+  version?: number;
+  isNew?: boolean;
+}) {
+  return (
+    <Surface isNew={isNew}>
+      <Header
+        icon={<PencilIcon className="size-4 text-muted-foreground" />}
+        title={program ?? input.name ?? "Programme modifié"}
+        aside={version ? `v${version}` : undefined}
+      />
+      {dayName ? <p className="text-sm text-muted-foreground">{dayName}</p> : null}
+      <ul>
+        {/* The index is the identity: the list is the model's input, fixed once
+            the call lands, and two updates of one exercise share every field. */}
+        {input.operations.map((operation, i) => (
+          <OperationRow key={i} operation={operation} />
+        ))}
+      </ul>
+    </Surface>
+  );
+}
+
+const STATUS: Record<StatusInput["status"], string> = {
+  active: "En cours",
+  archived: "Archivé",
+  completed: "Terminé",
+};
+
+/** `set_program_status`. Says what did NOT happen too: archiving deletes nothing. */
+export function StatusCard({
+  input,
+  program,
+  isNew,
+}: {
+  input: StatusInput;
+  program?: string;
+  isNew?: boolean;
+}) {
+  return (
+    <Surface isNew={isNew}>
+      <Header
+        icon={<ArchiveIcon className="size-4 text-muted-foreground" />}
+        title={program ?? input.name ?? "Programme"}
+        aside={STATUS[input.status]}
+      />
+      <p className="text-sm text-muted-foreground">
+        {input.status === "active"
+          ? "De retour dans tes programmes en cours, sa rotation reprend où elle en était."
+          : "Rangé sous « Archivés et terminés » sur la page Programme. Rien n’est supprimé\u202f: tes séances passées restent dans ton historique."}
+      </p>
     </Surface>
   );
 }

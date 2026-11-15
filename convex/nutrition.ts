@@ -1,4 +1,5 @@
 import { type Infer, v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   type MutationCtx,
@@ -7,7 +8,10 @@ import {
   mutation,
   query,
 } from "./_generated/server";
+import { datesOutsideWeek, planWeeks } from "./planWeeks";
 import { weekStart } from "./progress";
+import { loadDayLevel } from "./week";
+import type { DayLevel } from "./weekTemplate";
 import {
   activityLevel,
   macros,
@@ -49,6 +53,15 @@ const PROTEIN_PER_KG = { perte: 2.0, maintien: 1.6, prise: 1.6 } as const;
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
+type TargetInput = {
+  goal: NutritionGoal;
+  age: number;
+  sex: "h" | "f";
+  heightCm: number;
+  weightKg: number;
+  activityLevel: ActivityLevel;
+};
+
 /**
  * Mifflin-St Jeor -> activity factor -> goal delta, then macros by the usual
  * rules of thumb: protein per kilo, fat at a quarter of the calories, carbs take
@@ -56,19 +69,78 @@ const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(mi
  *
  * These are ESTIMATES, not a prescription. Every surface showing them says so.
  */
-export function estimateTargets(input: {
-  goal: NutritionGoal;
-  age: number;
-  sex: "h" | "f";
-  heightCm: number;
-  weightKg: number;
-  activityLevel: ActivityLevel;
-}): Macros {
+export function estimateTargets(input: TargetInput): Macros {
+  return targetsWithFactor(input, ACTIVITY_FACTOR[input.activityLevel]);
+}
+
+/**
+ * The activity factor WITHOUT training. The Chef asks for the activity « hors
+ * sport », but `ACTIVITY_FACTOR` holds the textbook values, which already
+ * include exercise (1.55 is "3-5 sessions a week"). With day levels the
+ * training is added per day on top, so the off day must start from a factor
+ * that leaves it out — otherwise every séance is counted twice.
+ */
+const NON_EXERCISE_FACTOR = {
+  sedentaire: 1.2,
+  leger: 1.3,
+  modere: 1.4,
+  actif: 1.5,
+  tres_actif: 1.6,
+} as const;
+
+/**
+ * What a level adds to the off day, in kcal per kilo (option (a) of #118: fixed
+ * gaps, proportional to weight — a session costs a 90 kg boxer more than a 60 kg
+ * one). 80 kg → léger +240, dur +480, close to the +250 / +500 the issue sketched.
+ */
+const LEVEL_KCAL_PER_KG: Record<DayLevel, number> = { off: 0, leger: 3, dur: 6 };
+
+/**
+ * One target per day level. Protein and fat stay the same every day; the carbs
+ * absorb the gap — the training is what they fuel. Carbs never go negative: the
+ * off day's are floored at 0 and the levels only add.
+ */
+export function estimateLevelTargets(input: TargetInput): Record<DayLevel, Macros> {
+  const off = targetsWithFactor(input, NON_EXERCISE_FACTOR[input.activityLevel]);
+  const at = (level: DayLevel): Macros => {
+    const extra = Math.round(LEVEL_KCAL_PER_KG[level] * input.weightKg);
+    return { ...off, calories: off.calories + extra, carbs: off.carbs + Math.round(extra / 4) };
+  };
+  return { off, leger: at("leger"), dur: at("dur") };
+}
+
+/**
+ * A profile's three targets. One saved before #118 has no `targetsByLevel` until
+ * the migration runs: it reads its single `targets` for all three, so the code
+ * works before the backfill does.
+ */
+export function levelTargetsOf(profile: {
+  targets: Macros;
+  targetsByLevel?: Record<DayLevel, Macros>;
+}): Record<DayLevel, Macros> {
+  return (
+    profile.targetsByLevel ?? { off: profile.targets, leger: profile.targets, dur: profile.targets }
+  );
+}
+
+/**
+ * Today's targets for /nutrition and the Chef's `read_today` — both read them
+ * from here. No level (no semaine type) → the flat `targets`, an average that
+ * already includes sport (decided with Basile). Null without a profile.
+ */
+export function dayTargets(
+  profile: { targets: Macros; targetsByLevel?: Record<DayLevel, Macros> } | null,
+  day: { level: DayLevel | null },
+): Macros | null {
+  if (!profile) return null;
+  if (day.level === null) return profile.targets;
+  return levelTargetsOf(profile)[day.level];
+}
+
+function targetsWithFactor(input: TargetInput, factor: number): Macros {
   const bmr =
     10 * input.weightKg + 6.25 * input.heightCm - 5 * input.age + (input.sex === "h" ? 5 : -161);
-  const calories = Math.round(
-    bmr * ACTIVITY_FACTOR[input.activityLevel] * (1 + GOAL_DELTA[input.goal]),
-  );
+  const calories = Math.round(bmr * factor * (1 + GOAL_DELTA[input.goal]));
   const protein = Math.round(PROTEIN_PER_KG[input.goal] * input.weightKg);
   const fat = Math.round((calories * 0.25) / 9);
   // Carbs are the remainder, so the three macros add back up to the calories.
@@ -106,6 +178,158 @@ export function normalizeName(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "")
     .replace(/s$/, "");
+}
+
+// --- Allergy / exclusion guard --------------------------------------------
+//
+// The system prompt calls allergies and excluded foods hard constraints, but a
+// prompt is not an enforcement mechanism: until this guard, the only thing
+// stopping a plan with peanuts in it from reaching the database was the model
+// reading its own instructions. This is the one health-safety path in the app,
+// so it gets a server-side backstop on the WRITE mutations (see `savePlan`,
+// `replaceMeal`, `regenerateDay`).
+//
+// Deliberately NOT attempted: hidden-ingredient inference (butter → lactose,
+// soy sauce → wheat, surimi → egg). The prompt asks the model for that, and a
+// server-side food-science table we'd have to keep correct would give false
+// confidence in the half of the space it doesn't know. This guard checks what
+// the model actually wrote down, nothing more.
+
+/**
+ * Ingredient lists and exclusion lists are user/model data — everything is
+ * bounded. Every one of these is a SCAN cap, not a truncation: past any of them
+ * the guard refuses instead of checking a prefix and calling it clear. A name is
+ * usually 2-4 words, so a 24-word one is a model gone strange, not a recipe.
+ */
+const MAX_NAME_CHARS = 120;
+const MAX_TOKENS = 24;
+const MAX_INGREDIENTS = 60;
+const MAX_FORBIDDEN = 40;
+
+/**
+ * A food name as comparable word tokens: accents stripped, "œ"/"æ" spelled out,
+ * lowercased, split on anything that isn't a letter or a digit, and a naive
+ * singular — a trailing "s" is dropped from words of 4 letters or more, so
+ * "Œufs" and "oeuf" meet in the middle while "noix", "riz" and "ail" are left
+ * alone.
+ *
+ * Tokens, not a substring, because substring matching is wrong in both
+ * directions here: `"chocolat".includes("lait")` is false but
+ * `"travail".includes("ail")` is true, and an allergy guard that fires on
+ * "travail" gets muted by its user.
+ */
+function foodTokens(name: string): string[] {
+  return name
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/œ/g, "oe")
+    .replace(/æ/g, "ae")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map((word) => (word.length >= 4 && word.endsWith("s") ? word.slice(0, -1) : word));
+}
+
+/**
+ * A name we cannot honestly claim to have checked. `foodTokens` used to slice
+ * here, which meant an allergen past the cap was silently reported clear — the
+ * same fail-open the count checks below were written to prevent, one level down.
+ * The length test comes first and `||` short-circuits, so tokenising only ever
+ * runs on a name already under 120 chars: bounded work, no truncation.
+ */
+const unscannable = (name: string): boolean =>
+  name.length > MAX_NAME_CHARS || foodTokens(name).length > MAX_TOKENS;
+
+/** `needle` as a contiguous run of whole words in `haystack` — so "fruits de mer" matches
+ *  "Fruits de mer surgelés" but "mer" alone never matches "amer". */
+function containsWords(haystack: string[], needle: string[]): boolean {
+  if (needle.length === 0 || needle.length > haystack.length) return false;
+  return haystack.some((_, i) => needle.every((word, j) => haystack[i + j] === word));
+}
+
+export type ForbiddenHit = { meal: string; ingredient: string; forbidden: string };
+
+/**
+ * Every (ingredient, forbidden item) pair a set of meals hits. Empty means the
+ * meals are clear — which is also what an empty `allergies` + `excluded` gives,
+ * so a profile with no restrictions behaves exactly as before.
+ *
+ * Pure and exported so `nutrition.check.ts` can hammer it without a Convex
+ * runtime. Matching is on the ingredient names the model wrote; a forbidden
+ * item named inside a recipe STEP but absent from the ingredients is not
+ * caught, and neither is a dish name that implies it ("tiramisu" with no egg
+ * listed).
+ *
+ * Known and accepted over-match: an exclusion of "lait" flags "lait de coco",
+ * which contains no dairy. Over-refusing a meal costs the model one retry;
+ * under-refusing costs the user an allergic reaction.
+ *
+ * The bounds below fail CLOSED for the same reason. Reads here stay bounded like
+ * every read in this codebase, but a guard that silently stops scanning at the
+ * cap is worse than no guard: it reports "clear" on the one payload big enough to
+ * hide something. Past the cap it refuses instead of shrugging. Nothing clamps
+ * ingredient COUNT upstream — `clampMeal` only clamps macros — so this is the
+ * only thing standing between a 200-ingredient meal and the database.
+ */
+export function forbiddenHits(
+  meals: { name: string; ingredients: { name: string }[] }[],
+  forbidden: string[],
+): ForbiddenHit[] {
+  // Counted BEFORE the needles are built, and before the empty-needle exit: with
+  // the order reversed, 40 blank entries followed by one real allergy tokenised to
+  // nothing, returned "clear", and never reached this refusal.
+  if (forbidden.length > MAX_FORBIDDEN) {
+    return meals.map((meal) => ({
+      meal: meal.name,
+      ingredient: `${forbidden.length} interdits déclarés`,
+      forbidden: `plus de ${MAX_FORBIDDEN} interdits : liste trop longue pour être vérifiée`,
+    }));
+  }
+  const unscannableNeedle = forbidden.find(unscannable);
+  if (unscannableNeedle !== undefined) {
+    return meals.map((meal) => ({
+      meal: meal.name,
+      ingredient: `interdit de ${unscannableNeedle.length} caractères`,
+      forbidden: "un interdit trop long pour être vérifié",
+    }));
+  }
+  const needles = forbidden
+    .map((item) => ({ label: item.trim(), tokens: foodTokens(item) }))
+    .filter((needle) => needle.tokens.length > 0);
+  if (needles.length === 0) return [];
+
+  const hits: ForbiddenHit[] = [];
+  for (const meal of meals) {
+    if (meal.ingredients.length > MAX_INGREDIENTS) {
+      hits.push({
+        meal: meal.name,
+        ingredient: `${meal.ingredients.length} ingrédients`,
+        forbidden: `plus de ${MAX_INGREDIENTS} ingrédients : recette trop longue pour être vérifiée`,
+      });
+      continue;
+    }
+    for (const ingredient of meal.ingredients) {
+      if (unscannable(ingredient.name)) {
+        hits.push({
+          meal: meal.name,
+          ingredient: ingredient.name.slice(0, 40).trim(),
+          forbidden: "nom d'ingrédient trop long pour être vérifié",
+        });
+        continue;
+      }
+      const words = foodTokens(ingredient.name);
+      for (const needle of needles) {
+        if (containsWords(words, needle.tokens)) {
+          hits.push({
+            meal: meal.name,
+            ingredient: ingredient.name.trim(),
+            forbidden: needle.label,
+          });
+        }
+      }
+    }
+  }
+  return hits;
 }
 
 /**
@@ -169,7 +393,7 @@ export function sumQuantities(quantities: string[]): string[] {
 const SLOT_ORDER: MealSlot[] = ["petit_dejeuner", "dejeuner", "collation", "diner"];
 
 /** Chronological, so a regenerated day doesn't read out of order. */
-const bySlot = (a: PlannedMeal, b: PlannedMeal) =>
+export const bySlot = (a: PlannedMeal, b: PlannedMeal) =>
   SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot);
 
 /**
@@ -185,7 +409,7 @@ export function clampMacros(m: Macros): Macros {
   };
 }
 
-const clampMeal = (meal: PlannedMeal): PlannedMeal => ({
+export const clampMeal = (meal: PlannedMeal): PlannedMeal => ({
   ...meal,
   macros: clampMacros(meal.macros),
 });
@@ -194,23 +418,85 @@ const clampMeal = (meal: PlannedMeal): PlannedMeal => ({
 // Convex
 // ---------------------------------------------------------------------------
 
-const profileFor = (ctx: QueryCtx, userId: Id<"users">) =>
+export const profileFor = (ctx: QueryCtx, userId: Id<"users">) =>
   ctx.db
     .query("nutritionProfiles")
     .withIndex("by_user", (q) => q.eq("userId", userId))
     .unique();
 
-const planFor = (ctx: QueryCtx, userId: Id<"users">, week: string) =>
+export const planFor = (ctx: QueryCtx, userId: Id<"users">, week: string) =>
   ctx.db
     .query("mealPlans")
     .withIndex("by_user_and_week", (q) => q.eq("userId", userId).eq("weekStart", week))
     .unique();
 
+/**
+ * The backstop, on every path that persists a meal. Returns the hits; the caller
+ * MUST return before writing when the list isn't empty.
+ *
+ * A refusal is RETURNED, not thrown: these mutations are called from a chef tool
+ * mid-conversation, and a thrown error surfaces to the user as a broken turn
+ * while telling the model nothing it can act on. A structured refusal (same
+ * spirit as the discriminated results in `convex/coach.ts`) lands in the tool
+ * result, so the model reads which ingredient it must drop and calls the tool
+ * again. Silent persistence is impossible either way: nothing is written on the
+ * refusal branch.
+ */
+async function forbiddenIn(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  meals: PlannedMeal[],
+): Promise<ForbiddenHit[]> {
+  const profile = await profileFor(ctx, userId);
+  if (!profile) return [];
+  return forbiddenHits(meals, [...profile.allergies, ...profile.excluded]);
+}
+
+const refused = (violations: ForbiddenHit[]) =>
+  ({
+    result: "refused" as const,
+    violations,
+    note: "Rien n'a été enregistré : ces ingrédients sont dans les ALLERGIES ou les ALIMENTS EXCLUS du user. Remplace-les et rappelle l'outil. Dis-lui ce que tu as changé.",
+  }) as const;
+
 async function requirePlan(ctx: MutationCtx, week: string) {
   const user = await requireCurrentUser(ctx);
   const plan = await planFor(ctx, user._id, week);
-  if (!plan) throw new Error("Aucun plan pour cette semaine");
+  if (!plan) throw new Error(`Aucun plan pour la semaine du lundi ${week}`);
   return plan;
+}
+
+/**
+ * The Chef's edits (`replaceMeal`, `moveMeal`, `regenerateDay`) on a week with no
+ * plan. Since #126 they can target next week, which is usually still empty on the
+ * weekend — exactly when he asks. Returned, not thrown, like `refused`: a throw
+ * is a broken turn that tells the model nothing.
+ */
+async function planOrRefusal(ctx: MutationCtx, week: string, dates: string[]) {
+  const user = await requireCurrentUser(ctx);
+  const plan = await planFor(ctx, user._id, week);
+  const refusal = (note: string) => ({
+    refusal: { result: "refused" as const, note: `Rien n'a été modifié : ${note}` },
+  });
+  if (!plan) {
+    return refusal(
+      `il n'a pas encore de plan pour la semaine du lundi ${week}. Propose-lui de la générer avec generate_meal_plan.`,
+    );
+  }
+  const outside = datesOutsideWeek(week, dates);
+  if (outside.length > 0) {
+    return refusal(`${outside.join(", ")} n'est pas dans la semaine du lundi ${week}.`);
+  }
+  // A partial week is allowed (1 to 7 days), so a day can be missing from a plan
+  // that exists. It's created empty, in place — the same way `replaceMeal` adds
+  // a missing slot. Rebuilding the week through `savePlan` instead would rewrite
+  // every other day from what the model remembers of them. In memory only: the
+  // caller's patch writes it, and a refusal after this point writes nothing.
+  for (const date of dates) {
+    if (!plan.days.some((day) => day.date === date)) plan.days.push({ date, meals: [] });
+  }
+  plan.days.sort((a, b) => a.date.localeCompare(b.date));
+  return { plan };
 }
 
 /** The day's meals, mutable in place — the caller patches `plan.days` back. */
@@ -221,7 +507,9 @@ function requireDay(plan: Doc<"mealPlans">, date: string) {
 }
 
 export const saveProfile = mutation({
-  args: nutritionProfile.omit("userId", "targets").fields,
+  // `targetsByLevel` is left out like `targets`: both are computed here, never
+  // sent by the client or the model.
+  args: nutritionProfile.omit("userId", "targets", "targetsByLevel").fields,
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
     const measurements = {
@@ -230,6 +518,7 @@ export const saveProfile = mutation({
       weightKg: clamp(args.weightKg, 30, 300),
     };
     const targets = estimateTargets({ ...args, ...measurements });
+    const targetsByLevel = estimateLevelTargets({ ...args, ...measurements });
 
     // Convex `patch` DELETES a key set to `undefined`, so spreading the optional
     // fields blindly would erase the diet the user gave last turn just because
@@ -247,6 +536,7 @@ export const saveProfile = mutation({
       ...(args.cookMinutes !== undefined && { cookMinutes: args.cookMinutes }),
       ...(args.people !== undefined && { people: args.people }),
       targets,
+      targetsByLevel,
     };
 
     const existing = await profileFor(ctx, user._id);
@@ -255,7 +545,8 @@ export const saveProfile = mutation({
     } else {
       await ctx.db.insert("nutritionProfiles", { userId: user._id, ...fields });
     }
-    return { targets };
+    // `targets` as before — the chat card reads it — plus the three levels.
+    return { targets, targetsByLevel };
   },
 });
 
@@ -288,10 +579,15 @@ export const dashboard = query({
         hydrationMl: 0,
         weekStart: week,
         hasPlan: false,
+        hasPlanNextWeek: false,
+        day: null,
       };
     }
 
     const plan = await planFor(ctx, user._id, week);
+    // #126: the Chef can prepare next week over the weekend. One indexed
+    // `unique()`, and only a yes/no leaves the query.
+    const nextPlan = await planFor(ctx, user._id, planWeeks(args.today).next);
     const log = await ctx.db
       .query("foodLog")
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.today))
@@ -301,14 +597,26 @@ export const dashboard = query({
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.today))
       .unique();
 
+    const profile = await profileFor(ctx, user._id);
+    const day = await loadDayLevel(ctx, user._id, args.today);
+
     return {
-      profile: await profileFor(ctx, user._id),
+      profile,
       todayMeals: plan?.days.find((d) => d.date === args.today)?.meals ?? [],
       log,
       consumed: sumMacros(log),
       hydrationMl: water?.ml ?? 0,
       weekStart: week,
       hasPlan: plan !== null,
+      // Added in #126; an older bundle never reads it.
+      hasPlanNextWeek: nextPlan !== null,
+      // Today's level and its targets (#118). Added, not swapped in: the
+      // previous bundle keeps reading `profile.targets`. `targets` is null
+      // without a profile — there's nothing to aim at yet.
+      day: {
+        ...day,
+        targets: dayTargets(profile, day),
+      },
     };
   },
 });
@@ -331,26 +639,61 @@ export const savePlan = internalMutation({
       throw new Error("weekStart must be a Monday");
     }
 
+    // Every day inside that week (#126). Filed under the wrong Monday, a day is
+    // invisible: /nutrition and `read_today` look it up in `weekStart(today)`'s
+    // plan. The Chef's tool already checks; this is the backstop.
+    const outside = datesOutsideWeek(
+      args.weekStart,
+      args.days.map((day) => day.date),
+    );
+    if (outside.length > 0) {
+      return {
+        result: "refused" as const,
+        note: `Rien n'a été enregistré : ${outside.join(", ")} hors de la semaine du lundi ${args.weekStart}. Un plan couvre une seule semaine, du lundi au dimanche.`,
+      };
+    }
+
     const days = args.days.map((day) => ({
       date: day.date,
       meals: day.meals.map(clampMeal).sort(bySlot),
     }));
+
+    // Checked across the WHOLE week before anything is written: a half-saved
+    // plan is worse than a refused one.
+    const violations = await forbiddenIn(
+      ctx,
+      user._id,
+      days.flatMap((day) => day.meals),
+    );
+    if (violations.length > 0) return refused(violations);
+
     const existing = await planFor(ctx, user._id, args.weekStart);
     if (existing) {
       await ctx.db.patch("mealPlans", existing._id, { days });
     } else {
       await ctx.db.insert("mealPlans", { userId: user._id, weekStart: args.weekStart, days });
     }
-    return { meals: days.reduce((n, day) => n + day.meals.length, 0) };
+    // Same transaction as the plan, after the allergy check: a refused plan
+    // adds no recipe (#119).
+    await ctx.runMutation(internal.recipes.upsertFromMeals, {
+      userId: user._id,
+      meals: days.flatMap((day) => day.meals),
+    });
+    return { result: "ok" as const, meals: days.reduce((n, day) => n + day.meals.length, 0) };
   },
 });
 
 export const replaceMeal = internalMutation({
   args: { weekStart: v.string(), date: v.string(), slot: mealSlot, meal: plannedMeal },
   handler: async (ctx, args) => {
-    const plan = await requirePlan(ctx, args.weekStart);
+    const found = await planOrRefusal(ctx, args.weekStart, [args.date]);
+    if ("refusal" in found) return found.refusal;
+    const { plan } = found;
     const day = requireDay(plan, args.date);
     const meal = clampMeal({ ...args.meal, slot: args.slot });
+
+    const violations = await forbiddenIn(ctx, plan.userId, [meal]);
+    if (violations.length > 0) return refused(violations);
 
     const index = day.meals.findIndex((m) => m.slot === args.slot);
     if (index >= 0) day.meals[index] = meal;
@@ -358,7 +701,8 @@ export const replaceMeal = internalMutation({
     day.meals.sort(bySlot);
 
     await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
-    return { name: meal.name };
+    await ctx.runMutation(internal.recipes.upsertFromMeals, { userId: plan.userId, meals: [meal] });
+    return { result: "ok" as const, name: meal.name };
   },
 });
 
@@ -367,12 +711,19 @@ const slotRef = v.object({ date: v.string(), slot: mealSlot });
 export const moveMeal = internalMutation({
   args: { weekStart: v.string(), from: slotRef, to: slotRef },
   handler: async (ctx, args) => {
-    const plan = await requirePlan(ctx, args.weekStart);
+    const found = await planOrRefusal(ctx, args.weekStart, [args.from.date, args.to.date]);
+    if ("refusal" in found) return found.refusal;
+    const { plan } = found;
     const from = requireDay(plan, args.from.date);
     const to = requireDay(plan, args.to.date);
 
     const index = from.meals.findIndex((m) => m.slot === args.from.slot);
-    if (index < 0) throw new Error("Aucun repas à déplacer sur ce créneau");
+    if (index < 0) {
+      return {
+        result: "refused" as const,
+        note: `Rien n'a été modifié : aucun repas prévu le ${args.from.date} sur ce créneau. Vérifie avec read_plan.`,
+      };
+    }
     const moved = { ...from.meals[index], slot: args.to.slot };
 
     // An occupied destination swaps instead of overwriting: dropping a planned
@@ -399,16 +750,25 @@ export const moveMeal = internalMutation({
 export const regenerateDay = internalMutation({
   args: { weekStart: v.string(), date: v.string(), meals: v.array(plannedMeal) },
   handler: async (ctx, args) => {
-    const plan = await requirePlan(ctx, args.weekStart);
+    const found = await planOrRefusal(ctx, args.weekStart, [args.date]);
+    if ("refusal" in found) return found.refusal;
+    const { plan } = found;
     const day = requireDay(plan, args.date);
 
     const kept = day.meals.filter((meal) => meal.locked === true);
     const locked = new Set(kept.map((meal) => meal.slot));
     const added = args.meals.filter((meal) => !locked.has(meal.slot)).map(clampMeal);
 
+    // Only the incoming meals are checked. The kept ones are already in the plan
+    // and locked BY THE USER — refusing the whole day over one of those would
+    // leave the model unable to regenerate anything, with no way to fix it.
+    const violations = await forbiddenIn(ctx, plan.userId, added);
+    if (violations.length > 0) return refused(violations);
+
     day.meals = [...kept, ...added].sort(bySlot);
     await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
-    return { kept: kept.length, added: added.length };
+    await ctx.runMutation(internal.recipes.upsertFromMeals, { userId: plan.userId, meals: added });
+    return { result: "ok" as const, kept: kept.length, added: added.length };
   },
 });
 

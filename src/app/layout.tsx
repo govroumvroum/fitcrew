@@ -3,10 +3,12 @@ import { frFR } from "@clerk/localizations";
 import { shadcn } from "@clerk/ui/themes";
 import type { Metadata, Viewport } from "next";
 import { Big_Shoulders, Instrument_Sans } from "next/font/google";
+import { ChangelogBadge } from "@/components/changelog-badge";
 import { ConvexClientProvider } from "@/components/convex-client-provider";
 import { StoreUser } from "@/components/store-user";
 import { SignedInNav } from "@/components/nav";
 import { Toaster } from "@/components/ui/sonner";
+import { readEntries } from "@/lib/changelog";
 import "./globals.css";
 
 // Carries every number that has to line up: Instrument Sans ships `tnum`,
@@ -69,6 +71,11 @@ export default function RootLayout({
             <StoreUser />
             {children}
             <SignedInNav />
+            {/* Read at build time, like /changelog itself. The home page is a
+                client component and can't touch the filesystem, so the newest
+                entry's name comes down from here; the badge hides itself
+                everywhere but "/". */}
+            <ChangelogBadge latest={readEntries()[0]?.name ?? null} />
             {/* Lifted clear of the tab bar: toasts render bottom-anchored at a
                 higher z-index and would otherwise sit on top of it. */}
             <Toaster offset={{ bottom: "calc(var(--tab-bar) + 0.5rem)" }} />

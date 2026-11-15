@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WEEKDAYS } from "./weekTemplate";
 
 /**
  * The coach's tool inputSchemas, zod only — no Convex server imports, so the
@@ -8,10 +9,123 @@ import { z } from "zod";
 export const zExercise = z.object({
   name: z.string().describe("Nom français de l'exercice, sans le nombre de séries"),
   sets: z.number().int().min(1).max(10),
-  reps: z.string().describe('"8", "8-12", "AMRAP", "12 par jambe"…'),
+  reps: z
+    .string()
+    .describe(
+      '"8", "8-12", "AMRAP", "12 par jambe"… Pour un exercice au temps, la même durée écrite pour le user : "60 s".',
+    ),
   restSeconds: z.number().int().min(0).max(600),
   notes: z.string().nullable().describe("Tempo ou consigne courte, null si rien à dire"),
+  circuit: z
+    .string()
+    .nullish()
+    .describe(
+      'Label du circuit dans le jour ("A", "B"). Les exercices d\'un même circuit se suivent dans la liste. null pour un exercice classique.',
+    ),
+  slot: z
+    .string()
+    .nullish()
+    .describe(
+      'Identifiant unique de cette occurrence dans le jour ("A1", "A2"…). Obligatoire dès que `circuit` est renseigné, y compris si le même exercice revient deux fois.',
+    ),
+  restBetweenRoundsSeconds: z
+    .number()
+    .int()
+    .min(0)
+    .max(600)
+    .nullish()
+    .describe(
+      "Repos entre deux tours du circuit, en secondes. Même valeur sur tous les exercices du circuit. null hors circuit.",
+    ),
+  // nullish like the circuit fields: a program the model wrote before this field
+  // existed still parses, and so does a card replayed from an old thread.
+  durationSec: z
+    .number()
+    .int()
+    .min(5)
+    .max(3600)
+    .nullish()
+    .describe(
+      "Durée d'UNE série en secondes, pour un exercice au temps (corde à sauter, gainage, rameur, vélo…) : la séance lance un chrono au lieu de compter des reps. null pour un exercice en répétitions.",
+    ),
 });
+
+/** The only fields the circuit rules read. A zod input and a Convex row both fit. */
+type CircuitFields = { sets: number; circuit?: string | null; slot?: string | null };
+
+/**
+ * The circuit invariants of ONE day, as model-facing French messages (empty =
+ * valid). Pure and shape-agnostic on purpose: `zGenerateProgram` is not the only
+ * write path — `coach.swapExercise` and `coach.editProgram` rewrite a day too,
+ * and an edit that steals a slot or breaks a 2-exercise circuit is just as
+ * unrunnable. All three call this.
+ */
+export function circuitErrors(exercises: readonly CircuitFields[]): string[] {
+  const errors: string[] = [];
+  const issue = (message: string) => errors.push(message);
+
+  const seen = new Set<string>();
+  for (const e of exercises) {
+    if (!e.slot) continue;
+    if (seen.has(e.slot))
+      issue(
+        `Deux exercices du jour portent le slot « ${e.slot} ». Chaque occurrence doit avoir un slot unique dans le jour.`,
+      );
+    seen.add(e.slot);
+  }
+
+  const circuits = new Map<string, number[]>();
+  exercises.forEach((e, i) => {
+    if (e.circuit) circuits.set(e.circuit, [...(circuits.get(e.circuit) ?? []), i]);
+  });
+
+  for (const [label, at] of circuits) {
+    if (at.length < 2)
+      issue(
+        `Le circuit « ${label} » ne contient qu'un exercice : un circuit en enchaîne au moins 2, sinon c'est un exercice classique (circuit: null).`,
+      );
+    if (at[at.length - 1] - at[0] !== at.length - 1)
+      issue(
+        `Le circuit « ${label} » est interrompu par un autre exercice : les exercices d'un circuit doivent se suivre dans la liste du jour.`,
+      );
+    const rounds = exercises[at[0]].sets;
+    if (at.some((i) => exercises[i].sets !== rounds))
+      issue(
+        `Les exercices du circuit « ${label} » n'ont pas le même \`sets\`. \`sets\` est le nombre de TOURS du circuit : il doit être identique pour tous ses exercices.`,
+      );
+    if (at.some((i) => !exercises[i].slot?.trim()))
+      issue(`Chaque exercice du circuit « ${label} » doit porter un \`slot\` non vide.`);
+  }
+  return errors;
+}
+
+/**
+ * A circuit the model got subtly wrong produces an unrunnable séance, so it is
+ * rejected here rather than in a downstream check: the model sees the message
+ * and retries. Messages are addressed to it, in French.
+ */
+export function checkDayCircuits(exercises: readonly CircuitFields[], ctx: z.RefinementCtx) {
+  for (const message of circuitErrors(exercises)) ctx.addIssue({ code: "custom", message });
+}
+
+/**
+ * The day's exercises cut into runs: consecutive exercises sharing a `circuit`
+ * label are one circuit, everything else is a run of classic exercises. That
+ * grouping IS the data model — there is no circuit object anywhere. Lives here,
+ * with no Convex import, so both the backend render and `src/lib/circuits.ts`
+ * read the rule from one place.
+ */
+export function circuitRuns<E extends { circuit?: string | null }>(exercises: readonly E[]) {
+  const runs: { circuit?: string; items: E[] }[] = [];
+  for (const e of exercises) {
+    // `null` (zod input) and `undefined` (Convex row) are the same "no circuit".
+    const circuit = e.circuit || undefined;
+    const last = runs.at(-1);
+    if (last && last.circuit === circuit) last.items.push(e);
+    else runs.push({ ...(circuit ? { circuit } : {}), items: [e] });
+  }
+  return runs;
+}
 
 export const zSaveOnboarding = z.object({
   experience: z.enum(["debutant", "intermediaire", "avance"]),
@@ -28,10 +142,12 @@ export const zGenerateProgram = z.object({
   name: z.string().describe('Ex: "Push/Pull/Legs 4 jours — boxe"'),
   days: z
     .array(
-      z.object({
-        name: z.string().describe('Ex: "Jour 1 — Push (pectoraux, épaules, triceps)"'),
-        exercises: z.array(zExercise).min(3).max(10),
-      }),
+      z
+        .object({
+          name: z.string().describe('Ex: "Jour 1 — Push (pectoraux, épaules, triceps)"'),
+          exercises: z.array(zExercise).min(3).max(10),
+        })
+        .superRefine((day, ctx) => checkDayCircuits(day.exercises, ctx)),
     )
     .min(1)
     .max(7),
@@ -44,7 +160,105 @@ export const zGenerateProgram = z.object({
 export const zSwapExercise = z.object({
   dayIndex: z.number().int().min(0).describe("Index du jour, 0 = premier jour"),
   from: z.string().describe("Nom exact de l'exercice à retirer"),
-  to: zExercise,
+  // Only `circuit` ⇒ `slot` is checkable here: a swap carries one exercise and
+  // no day, so slot uniqueness, order, size and the shared `sets` can't be seen.
+  // The rest is enforced where the day exists, in `zGenerateProgram`.
+  to: zExercise.refine((e) => !e.circuit || !!e.slot?.trim(), {
+    message: "Un exercice qui appartient à un circuit doit porter un `slot` non vide.",
+  }),
+});
+
+/**
+ * How the coach names the program it acts on. Both nullish: strict structured
+ * output sends null for "not given". The mutation refuses when neither is set —
+ * it never picks a program on the model's behalf.
+ */
+const zProgramTarget = {
+  lineageId: z
+    .string()
+    .nullish()
+    .describe(
+      "lineageId renvoyé par read_programs — le moyen le plus sûr de viser le bon programme",
+    ),
+  name: z
+    .string()
+    .nullish()
+    .describe("Nom (ou morceau de nom) du programme, si tu n'as pas son lineageId"),
+};
+
+/**
+ * `edit_program`: operations, not the rewritten day. A whole day retyped by the
+ * model can drop an exercise nobody asked to drop, or rename one — and loads and
+ * records are keyed by the exact exercise name (#103), so a rename wipes its
+ * history. An operation touches only what was asked.
+ *
+ * No `move`: `add` takes a position, and reordering is remove + add. No day ops
+ * either — adding or removing a day shifts the rotation (`nextDayIndex`).
+ */
+// z.union, not z.discriminatedUnion: the latter serialises to `oneOf`, which
+// some providers' function calling refuses; `anyOf` is accepted everywhere, and
+// TypeScript narrows on `op` all the same.
+export const zEditOperation = z.union([
+  z.object({
+    op: z.literal("add"),
+    // Same guard as `zSwapExercise.to`: circuit ⇒ slot is all one exercise can
+    // prove. The rest is checked on the resulting day by `circuitErrors`.
+    exercise: zExercise.refine((e) => !e.circuit || !!e.slot?.trim(), {
+      message: "Un exercice qui appartient à un circuit doit porter un `slot` non vide.",
+    }),
+    position: z
+      .number()
+      .int()
+      .min(0)
+      .nullish()
+      .describe(
+        "Où l'insérer dans la liste du jour, 0 = en premier. null = à la fin. Dans un circuit, place-le au milieu du bloc, jamais juste après.",
+      ),
+  }),
+  z.object({
+    op: z.literal("remove"),
+    name: z.string().describe("Nom exact de l'exercice à retirer, tel que read_programs l'écrit"),
+  }),
+  z.object({
+    op: z.literal("update"),
+    name: z
+      .string()
+      .describe("Nom exact de l'exercice à modifier. Il garde ce nom : update ne renomme jamais"),
+    // No `name` in here on purpose: see `editInDays`, which refuses a rename.
+    changes: z.object({
+      sets: z.number().int().min(1).max(10).nullish(),
+      reps: z.string().nullish(),
+      restSeconds: z.number().int().min(0).max(600).nullish(),
+      notes: z
+        .string()
+        .nullish()
+        .describe('"" pour effacer la consigne, null pour ne pas y toucher'),
+      restBetweenRoundsSeconds: z.number().int().min(0).max(600).nullish(),
+    }),
+  }),
+]);
+
+export const zEditProgram = z.object({
+  ...zProgramTarget,
+  dayIndex: z
+    .number()
+    .int()
+    .min(0)
+    .describe("Index du jour tel que read_programs l'écrit ([jour 0] = premier jour)"),
+  operations: z
+    .array(zEditOperation)
+    .min(1)
+    .max(10)
+    .describe("Appliquées dans l'ordre, sur ce seul jour"),
+});
+
+export const zSetProgramStatus = z.object({
+  ...zProgramTarget,
+  status: z
+    .enum(["active", "archived", "completed"])
+    .describe(
+      "archived pour « supprime-le » ou « je ne le fais plus », completed quand il l'a fini, active pour le reprendre",
+    ),
 });
 
 /** `date`'s description needs today's date — the call site `.extend()`s it in. */
@@ -61,4 +275,45 @@ export const zLogWorkout = z.object({
     )
     .min(1),
   notes: z.string().nullable(),
+});
+
+/**
+ * `set_week_template` (#118). The WHOLE week, replacing the previous one — a
+ * partial update would leave the model guessing what's still there. Days by
+ * name, not index: « lundi » can't be off by one.
+ */
+export const zWeekSession = z.object({
+  kind: z
+    .string()
+    .describe(`Ce qu'il fait ce jour-là, en 1 à 3 mots, dans ses mots : "boxe", "muscu", "course"`),
+  lineageId: z
+    .string()
+    .nullable()
+    .describe(
+      "Le lineageId du programme quand c'est une séance d'un de SES programmes (read_programs, ou le retour de generate_program). null pour une activité hors app : club, course, foot.",
+    ),
+  level: z
+    .enum(["off", "leger", "dur"])
+    .describe(
+      "dur = séance exigeante (muscu lourde, sparring, fractionné, match) ; leger = séance facile (technique, mobilité, footing tranquille) ; off = rien qui fatigue (marche)",
+    ),
+  time: z
+    .string()
+    .nullable()
+    .describe(
+      `"matin", "midi", "soir", ou une heure "18:30". null s'il ne l'a pas dit : n'invente pas d'heure`,
+    ),
+});
+
+export const zSetWeekTemplate = z.object({
+  days: z
+    .array(
+      z.object({
+        day: z.enum(WEEKDAYS),
+        sessions: z.array(zWeekSession).describe("0 à 3 séances ce jour-là"),
+      }),
+    )
+    .describe(
+      "Sa semaine ENTIÈRE : elle remplace la précédente. Un jour absent, ou sans séance, est un jour off.",
+    ),
 });

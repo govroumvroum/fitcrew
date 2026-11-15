@@ -21,6 +21,28 @@ export const programExercise = v.object({
   reps: v.string(), // "8" or "8-12" or "AMRAP"
   restSeconds: v.number(),
   notes: v.optional(v.string()),
+  // Circuit metadata, all optional and all absent on a classic exercise: a day
+  // without them IS a classic day, so no program ever needs migrating.
+  //
+  // `circuit` is a label local to the day ("A", "B"). Exercises sharing it AND
+  // consecutive in `exercises` form one circuit, in array order.
+  circuit: v.optional(v.string()),
+  // The identity of THIS occurrence in the day, unique across the day. An array
+  // index isn't enough: the same exercise can appear twice in one circuit.
+  slot: v.optional(v.string()),
+  // Rest after the last exercise of a round, as opposed to `restSeconds` which
+  // is the rest before the circuit's NEXT exercise. Carried on every exercise of
+  // the circuit; readers take the first one's.
+  restBetweenRoundsSeconds: v.optional(v.number()),
+  // No `rounds` field on purpose: `sets` is the round count (one set per round),
+  // identical across the circuit. A second source of truth would drift, and
+  // totalSets/duration arithmetic keeps working untouched.
+  //
+  // Set = the exercise is done against the clock (corde à sauter, gainage,
+  // rameur): one set is `durationSec` of work, the séance runs it on a timer, and
+  // `reps` degrades to display text ("60 s") that no code parses. Absent = reps,
+  // which is every exercise written before this field existed.
+  durationSec: v.optional(v.number()),
 });
 
 export const challengeMetric = v.union(
@@ -97,6 +119,26 @@ export const nutritionProfile = v.object({
   // numbers and they must not silently drift under an existing plan when the
   // user logs a new weight.
   targets: macros,
+  // One target per day level (#118). Optional: a profile saved before it has
+  // none until `backfillTargetsByLevel` runs, and every reader falls back to
+  // `targets` for the three. `targets` itself stays written — the previous
+  // bundle's /nutrition reads `profile.targets.calories`.
+  targetsByLevel: v.optional(v.object({ off: macros, leger: macros, dur: macros })),
+});
+
+// How hard a day is, for the Chef: no training, a light one, a hard one.
+export const dayLevel = v.union(v.literal("off"), v.literal("leger"), v.literal("dur"));
+
+// One planned thing on one weekday of the semaine type. `lineageId` when it is
+// one of the user's programs — always the lineage, never a row id, which changes
+// on every edit. `time` is "matin" | "midi" | "soir" or an "HH:MM", normalised
+// by `normalizeTime` in convex/week.ts.
+export const weekEntry = v.object({
+  weekday: v.number(), // 0 = lundi … 6 = dimanche
+  kind: v.string(), // "boxe", "muscu"… the user's words
+  lineageId: v.optional(v.id("programs")),
+  level: dayLevel,
+  time: v.optional(v.string()),
 });
 
 export const visionIntent = v.union(
@@ -116,7 +158,44 @@ export const aiFeature = v.union(
   v.literal("chef"),
   v.literal("vision"),
   v.literal("consult"),
+  v.literal("photos"),
 );
+
+// --- Recettes (#119) -------------------------------------------------------
+
+// The library's three shelves. Coarser than `mealSlot` on purpose: a déjeuner
+// recipe is a dîner recipe too. See `categoryForSlot` in recipes.ts.
+export const recipeCategory = v.union(
+  v.literal("petit_dej"),
+  v.literal("repas"),
+  v.literal("collation"),
+);
+
+export const recipe = v.object({
+  // Absent = the shared catalogue (the « sèche » recipes, seeded by migration).
+  // Present = one user's own library, written from the Chef's plans. A user's
+  // recipe NEVER becomes shared: it carries their preferences and their diet.
+  userId: v.optional(v.id("users")),
+  name: v.string(),
+  nameKey: v.string(), // `normalizeName(name)`, the dedup key within one owner
+  category: recipeCategory,
+  cheat: v.optional(v.boolean()),
+  tags: v.array(v.string()), // "seche" on the catalogue
+  description: v.optional(v.string()),
+  // Same shape as `plannedMeal`: an array, because French names aren't valid
+  // Convex field names.
+  ingredients: v.array(v.object({ name: v.string(), quantity: v.string() })),
+  steps: v.array(v.string()),
+  prepMinutes: v.number(),
+  macros,
+  // Hand-picked on the catalogue. A Chef recipe has none: its photo is looked
+  // up at read time and cached in `recipePhotos`, never at write time.
+  photoUrl: v.optional(v.string()),
+  // Hidden allergens the ingredient names don't spell out (skyr → lactose,
+  // chorizo → porc). Curated on the catalogue only; the read filter checks the
+  // user's allergies and exclusions against them too.
+  allergens: v.optional(v.array(v.string())),
+});
 
 export default defineSchema({
   users: defineTable({
@@ -131,6 +210,17 @@ export default defineSchema({
     // and the Chef have a default context to talk about. Stamped by
     // `workouts.start`; read it as a hint, never as "the" program.
     currentProgramId: v.optional(v.id("programs")),
+    // --- Accueil et premiers pas (#127) ---
+    // On the server, not in localStorage: the iOS home-screen app has its own
+    // storage, and someone who installs mid-welcome must not get it twice.
+    // Present = the welcome was finished or skipped. Backfilled on every user
+    // that existed when it shipped (`markExistingUsersWelcomed`).
+    welcomedAt: v.optional(v.number()),
+    // The « Premiers pas » card, hidden by hand.
+    firstStepsDismissedAt: v.optional(v.number()),
+    // Seen running as an installed app (standalone display mode), stamped by
+    // the client — the server has no other way to know.
+    installedAt: v.optional(v.number()),
   }).index("by_token", ["tokenIdentifier"]),
 
   // A program is a LINEAGE of versioned rows: `generate_program` starts one,
@@ -159,6 +249,17 @@ export default defineSchema({
     deloadEveryWeeks: v.optional(v.number()),
   }).index("by_user_and_lineage", ["userId", "lineageId", "version"]),
 
+  // A share link for a program. Keyed by the LINEAGE, not a row id, so the link
+  // survives exercise swaps by construction. Deleting the row revokes the link.
+  programShares: defineTable({
+    lineageId: v.id("programs"), // the lineage root id (row.lineageId ?? row._id)
+    userId: v.id("users"), // owner who shared
+    code: v.string(),
+  })
+    .index("by_code", ["code"])
+    .index("by_lineage", ["lineageId"])
+    .index("by_user", ["userId"]),
+
   workouts: defineTable({
     userId: v.id("users"),
     programId: v.optional(v.id("programs")),
@@ -183,6 +284,22 @@ export default defineSchema({
     weight: v.number(),
     reps: v.number(),
     completed: v.boolean(),
+    // Circuit provenance of the set. Written by nobody yet — the séance screen
+    // (part 2 of #93) populates them; declared here so that PR can be frontend
+    // only. Optional forever: a classic set carries none of them.
+    circuit: v.optional(v.string()),
+    slot: v.optional(v.string()), // the occurrence inside the day, see programExercise
+    round: v.optional(v.number()), // 1-based tour number
+    // A timed set's work, in seconds. Present = timed, and then `weight` and
+    // `reps` are both 0: nothing was lifted or counted, so every weight × reps
+    // reader (volume, 1RM, records) sees a set that adds nothing, not a fake one.
+    seconds: v.optional(v.number()),
+    // Passed on purpose mid-séance (« j'étais cuit »): not done, but not still
+    // to do either, so the séance moves past it. Always with `completed: false`,
+    // so every reader that counts `completed` (volume, records, récap, coach)
+    // stays right without knowing this field. Optional forever: older rows and
+    // the previous bundle never write it.
+    skipped: v.optional(v.boolean()),
   })
     .index("by_workout", ["workoutId"])
     .index("by_user_and_exercise", ["userId", "exerciseName"]),
@@ -292,10 +409,31 @@ export default defineSchema({
 
   nutritionProfiles: defineTable(nutritionProfile).index("by_user", ["userId"]),
 
+  // The semaine type (#118): WHICH weekdays he trains, never WHICH séance — the
+  // programs keep their calendar-free rotation. One row per user, a handful of
+  // entries (≤ 3 per day, so ≤ 21).
+  weekTemplates: defineTable({
+    userId: v.id("users"),
+    entries: v.array(weekEntry),
+    // The level he picked by hand on /nutrition, for that date only. A single
+    // slot, not a log: once the date has passed it means nothing.
+    override: v.optional(v.object({ date: v.string(), level: dayLevel })),
+  }).index("by_user", ["userId"]),
+
   mealPlans: defineTable({
     userId: v.id("users"),
     weekStart: v.string(), // YYYY-MM-DD Monday, produced by monday()
     days: v.array(planDay),
+  }).index("by_user_and_week", ["userId", "weekStart"]),
+
+  // The shopping list's ticks (#121), one row per user and week. Keyed by the
+  // list's `normalizeName`, so a tick follows its ingredient when the Chef
+  // rewrites the week, and an ingredient that left the plan is pruned at the
+  // next write — bounded by the list itself.
+  shoppingChecks: defineTable({
+    userId: v.id("users"),
+    weekStart: v.string(),
+    keys: v.array(v.string()),
   }).index("by_user_and_week", ["userId", "weekStart"]),
 
   foodLog: defineTable({
@@ -335,8 +473,34 @@ export default defineSchema({
     confirmed: v.boolean(),
   }).index("by_user", ["userId"]),
 
-  // One row per LLM call, so we know who spends what. Written by the coach's
-  // `usageHandler` and by hand at the two `generateObject` sites.
+  // One batch of tapped questions, same durable-state contract as
+  // `visionAnalyses`: the card lives forever in a message stream, so a reload has
+  // to find it exactly as the user left it — never blank, never re-tappable once
+  // sent.
+  //
+  // `questions` (written by the model) and `answers` (written by the client) are
+  // `v.any()` for the same reason as `visionAnalyses.items`: they're validated at
+  // the boundary by `sanitizeQuestions` / `sanitizeAnswers`, which drop what's
+  // wrong, rather than by the table, which would reject the whole write for one
+  // bad option.
+  choices: defineTable({
+    userId: v.id("users"),
+    // Carried on the row, not read from the client: the card sends its answers
+    // back into ITS OWN conversation, which is not necessarily the thread
+    // currently selected in the URL — and on /demo there is no URL state at all.
+    threadId: v.string(),
+    questions: v.any(),
+    // Aligned with `questions`: null = not answered, [] = « je préfère
+    // t'expliquer », [...] = the labels chosen.
+    answers: v.any(),
+    // No index: a card is always reached by its id, which the tool part carries.
+    // The « one open card at a time » lookup that needed one is gone — several
+    // may be open, and each is read on its own.
+    status: v.union(v.literal("open"), v.literal("completed"), v.literal("abandoned")),
+  }),
+
+  // One row per LLM call, so we know who spends what. Written by the coach's and
+  // the chef's `usageHandler`, and by hand at every `generateObject` site.
   //
   // `userId` is absent for `demos`: demo matching is a cache shared by everyone,
   // and billing the first person who triggered it would be a wrong number. Same
@@ -349,9 +513,30 @@ export default defineSchema({
     outputTokens: v.number(),
     // Billed as output. Separate because it's invisible in the transcript.
     reasoningTokens: v.optional(v.number()),
+    // The part of `inputTokens` the provider already had cached, exactly as the
+    // provider reports it — never computed here.
+    cachedInputTokens: v.optional(v.number()),
     // OpenRouter's own figure when it returns one — never tokens x a hardcoded
     // rate, which would rot at the next model change.
     costUsd: v.optional(v.number()),
     date: v.string(), // YYYY-MM-DD (UTC), so aggregating never scans _creationTime
   }).index("by_user_and_date", ["userId", "date"]),
+
+  // --- Recettes (#119) ---------------------------------------------------
+  // One row per recipe per owner, deduplicated on `nameKey`. Grows by up to
+  // ~28 a week per user, so every read is bounded.
+  recipes: defineTable(recipe)
+    .index("by_user", ["userId"]) // (userId, _creationTime): newest first, seed order
+    .index("by_user_and_name_key", ["userId", "nameKey"])
+    .index("by_user_and_category", ["userId", "category"]),
+
+  // Recipe name -> TheMealDB photo, resolved once per normalised name and cached
+  // forever, `photoUrl: null` included — « no photo » is a real answer and the
+  // card draws an illustration instead. Same contract as `exerciseDemoMatches`.
+  recipePhotos: defineTable({
+    nameKey: v.string(),
+    name: v.string(), // the first spelling that asked, for the dashboard
+    englishGuess: v.optional(v.string()),
+    photoUrl: v.union(v.string(), v.null()),
+  }).index("by_name_key", ["nameKey"]),
 });

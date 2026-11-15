@@ -9,7 +9,7 @@ import { aiFeature } from "./schema";
 
 type UsageRow = Pick<
   Doc<"aiUsage">,
-  "inputTokens" | "outputTokens" | "reasoningTokens" | "costUsd"
+  "inputTokens" | "outputTokens" | "reasoningTokens" | "cachedInputTokens" | "costUsd"
 >;
 
 type Totals = {
@@ -17,10 +17,11 @@ type Totals = {
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
+  cachedInputTokens: number;
   costUsd: number;
 };
 
-/** Totals over any set of rows. Missing reasoning tokens / cost count as zero. */
+/** Totals over any set of rows. Missing reasoning / cached tokens / cost count as zero. */
 export function sumUsage(rows: UsageRow[]) {
   return rows.reduce<Totals>(
     (t, r) => ({
@@ -28,9 +29,17 @@ export function sumUsage(rows: UsageRow[]) {
       inputTokens: t.inputTokens + r.inputTokens,
       outputTokens: t.outputTokens + r.outputTokens,
       reasoningTokens: t.reasoningTokens + (r.reasoningTokens ?? 0),
+      cachedInputTokens: t.cachedInputTokens + (r.cachedInputTokens ?? 0),
       costUsd: t.costUsd + (r.costUsd ?? 0),
     }),
-    { calls: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, costUsd: 0 },
+    {
+      calls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      cachedInputTokens: 0,
+      costUsd: 0,
+    },
   );
 }
 
@@ -61,6 +70,7 @@ export const record = internalMutation({
     inputTokens: v.number(),
     outputTokens: v.number(),
     reasoningTokens: v.optional(v.number()),
+    cachedInputTokens: v.optional(v.number()),
     costUsd: v.optional(v.number()),
   },
   handler: async (ctx, args) => {

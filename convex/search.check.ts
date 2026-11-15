@@ -1,6 +1,6 @@
 /** Self-check for the pure parts of the search tool. Run: `bun convex/search.check.ts` */
 import assert from "node:assert/strict";
-import { normalizeResults, searchUrl } from "./search";
+import { assertFetchable, fetchPage, htmlToText, normalizeResults, searchUrl } from "./search";
 
 // Trailing slash is the whole point: `bunx convex env set` will get one sooner or later.
 assert.equal(
@@ -42,4 +42,111 @@ assert.deepEqual(normalizeResults({ results: [{ title: "T", url: "https://e.com"
   { title: "T", url: "https://e.com", snippet: "" },
 ]);
 
-console.log("search url + normalisation ok");
+// --- lecture d'une page ----------------------------------------------------
+
+const page = htmlToText(`
+<html>
+  <head>
+    <title>Créatine &amp; dose</title>
+    <style>body { color: red }</style>
+  </head>
+  <body>
+    <script>window.tracker = "ne doit pas sortir";</script>
+    <noscript>pas de js</noscript>
+    <nav><a href="/">Accueil</a></nav>
+    <header>Bandeau du site</header>
+    <aside>Articles connexes</aside>
+    <h1>Dose</h1>
+    <p>3 &agrave; 5&nbsp;g par jour.</p>
+    <p>Pas de phase de charge &#8212; c&#39;est inutile.</p>
+    <svg><path d="M0 0 L1 1"/></svg>
+    <footer>Mentions légales</footer>
+  </body>
+</html>`);
+
+assert.equal(page.title, "Créatine & dose"); // titre extrait et entités décodées
+assert.ok(!page.text.includes("tracker")); // <script> emporte son contenu
+assert.ok(!page.text.includes("color: red")); // <style> aussi
+assert.ok(!page.text.includes("pas de js")); // <noscript> aussi
+assert.ok(!page.text.includes("M0 0")); // <svg> aussi
+// Les repères de page : c'est ce qui mangeait le budget avant d'arriver à l'article.
+assert.ok(!page.text.includes("Accueil")); // <nav>
+assert.ok(!page.text.includes("Bandeau")); // <header>
+assert.ok(!page.text.includes("connexes")); // <aside>
+assert.ok(!page.text.includes("Mentions")); // <footer>
+assert.ok(!page.text.includes("Créatine & dose")); // le <head> ne descend pas dans le texte
+assert.ok(!page.text.includes("<")); // plus une seule balise
+assert.equal(
+  page.text,
+  "Dose\n\n3 &agrave; 5 g par jour.\n\nPas de phase de charge — c'est inutile.",
+);
+// ^ les paragraphes survivent en retours à la ligne, `&nbsp;` `&#8212;` `&#39;` décodés.
+// `&agrave;` reste telle quelle : hors du lot d'entités qui comptent, et une
+// entité affichée brute vaut mieux qu'un mot avalé.
+assert.ok(!page.text.includes("\n\n\n")); // les lignes vides en série sont écrasées
+
+// Troncature : 20 000 caractères de texte utile ne partent pas entiers au modèle.
+const long = htmlToText(`<p>${"x".repeat(20_000)}</p>`);
+assert.equal(long.text.length, 8000);
+assert.equal(long.title, "");
+
+// HTML cassé ou vide : on rend ce qu'on peut, on ne jette pas.
+assert.deepEqual(htmlToText(""), { title: "", text: "" });
+assert.deepEqual(htmlToText("   \n  "), { title: "", text: "" });
+assert.equal(htmlToText("<p>coupé au milieu <b>gras").text, "coupé au milieu gras");
+assert.equal(htmlToText("<title>sans fermeture").title, "");
+assert.equal(
+  htmlToText("texte nu, sans la moindre balise").text,
+  "texte nu, sans la moindre balise",
+);
+
+// Frontière de confiance : le garde-fou protocole passe avant le réseau, donc
+// cet appel ne sort pas de la machine.
+await assert.rejects(fetchPage("file:///etc/passwd"), /http\(s\)/);
+await assert.rejects(fetchPage("pas une url"), /pas une URL valide/);
+
+// Les adresses internes non plus : l'URL vient du modèle, qui lit des pages qui
+// peuvent lui souffler quoi ouvrir. 169.254.169.254 rend des credentials cloud à
+// qui la demande, donc elle compte autant que localhost.
+// `assertFetchable` plutôt que `fetchPage` : le garde-fou se teste sans toucher
+// au réseau, et c'est lui que chaque redirection repasse.
+for (const host of [
+  "http://localhost:3000/",
+  "http://127.0.0.1/",
+  "http://169.254.169.254/latest/meta-data/",
+  "http://10.0.0.5/admin",
+  "http://192.168.1.1/",
+  "http://172.16.0.1/",
+  "http://172.31.255.255/",
+  "http://[::1]:8080/",
+  "http://convex.local/",
+  // IPv6 : loopback, non spécifiée, ULA fc00::/7, link-local fe80::/10, et les
+  // IPv4 mappées — refusées en bloc, publiques comprises, cf. isPrivateIPv6.
+  "http://[::1]:8080/",
+  "http://[::]/",
+  "http://[fd00::1]/",
+  "http://[fc00::1]/",
+  "http://[fe80::1]/",
+  "http://[febf::1]/",
+  "http://[::ffff:127.0.0.1]/",
+  "http://[::ffff:169.254.169.254]/",
+  "http://[::ffff:8.8.8.8]/", // publique, refusée quand même : voir isPrivateIPv6
+]) {
+  assert.throws(() => assertFetchable(host), /adresse interne/, host);
+}
+// Les voisins publics des plages privées passent : 172.16-31 est privé, 172.15 et
+// 172.32 ne le sont pas, et un hôte n'est pas « localhost » parce qu'il finit par.
+for (const host of [
+  "https://172.15.0.1/",
+  "https://172.32.0.1/",
+  "https://notlocalhost.com/",
+  "https://mylocalhost.dev/",
+  "https://10.example.com/",
+  // 2001:db8:: est de la doc publique, et fe00:: n'est pas dans fe80::/10.
+  "https://[2001:db8::1]/",
+  "https://[fe00::1]/",
+]) {
+  assert.equal(assertFetchable(host), host, host);
+}
+
+console.log("search url + normalisation + lecture de page ok");

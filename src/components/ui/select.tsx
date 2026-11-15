@@ -1,16 +1,26 @@
 "use client"
 
 import * as React from "react"
-import { Select as SelectPrimitive } from "radix-ui"
+import { Select as SelectPrimitive } from "@base-ui/react/select"
 
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-function Select({
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />
-}
+/**
+ * Re-exported rather than wrapped so the `Value` generic survives: `value` and
+ * `onValueChange` are typed off it, and a `React.ComponentProps` wrapper would
+ * collapse them to `unknown`. `Root` renders no DOM element (Radix's didn't
+ * either), so the `data-slot="select"` it used to carry never reached the
+ * document.
+ *
+ * Note `items`: Base UI's `<Select.Value>` renders the *value*, not the selected
+ * item's text — unlike Radix, which mirrored `<Select.ItemText>`. The items live
+ * in a portal that isn't mounted while the select is closed, so nothing can
+ * recover the label from them. Any select whose labels differ from its values
+ * has to pass `items` here (a `Record<value, label>` or `{ value, label }[]`);
+ * with it, `<SelectValue />` and keyboard typeahead both read right.
+ */
+const Select = SelectPrimitive.Root
 
 function SelectGroup({
   className,
@@ -50,52 +60,90 @@ function SelectTrigger({
       {...props}
     >
       {children}
-      <SelectPrimitive.Icon asChild>
-        <ChevronDownIcon className="pointer-events-none size-4 text-muted-foreground" />
-      </SelectPrimitive.Icon>
+      {/* Not `<Select.Icon>`: it injects a literal "▼" as its children, which
+          `render` appends *inside* the svg (a stray glyph next to the chevron).
+          The part only exposed an `open` state we never styled, and lucide
+          already sets `aria-hidden`, so the icon goes in directly — same svg,
+          same classes, as Radix's `<Select.Icon asChild>` produced. */}
+      <ChevronDownIcon className="pointer-events-none size-4 text-muted-foreground" />
     </SelectPrimitive.Trigger>
   )
 }
 
+/**
+ * Portal → Positioner → Popup, with the scrolling list as its own `List` part
+ * (Radix called it `Viewport`).
+ *
+ * Radix's `position="item-aligned" | "popper"` is Base UI's
+ * `alignItemWithTrigger` boolean, same default (overlap the trigger so the
+ * selected item's text lands on the trigger's text). `data-align-trigger` and
+ * `data-position` are kept as the attributes our classes key on, so the class
+ * strings are unchanged apart from the custom properties:
+ * `--radix-select-content-available-height` → `--available-height`,
+ * `--radix-select-content-transform-origin` → `--transform-origin`,
+ * `--radix-select-trigger-height` → `--anchor-height`, and
+ * `--radix-select-trigger-width` → `--anchor-width`. Base UI writes all four on
+ * the positioner and they inherit into the popup and the list.
+ *
+ * `z-50` has to be on the positioner: that's the element the portal drops into
+ * `<body>`, so it's what stacks against the rest of the app.
+ */
 function SelectContent({
   className,
   children,
-  position = "item-aligned",
   align = "center",
+  alignOffset,
+  side,
+  sideOffset,
+  alignItemWithTrigger = true,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+}: React.ComponentProps<typeof SelectPrimitive.Popup> &
+  Pick<
+    React.ComponentProps<typeof SelectPrimitive.Positioner>,
+    "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger"
+  >) {
   return (
     <SelectPrimitive.Portal>
-      <SelectPrimitive.Content
-        data-slot="select-content"
-        data-align-trigger={position === "item-aligned"}
-        className={cn("relative z-50 max-h-(--radix-select-content-available-height) min-w-36 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", position ==="popper"&&"data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1", className )}
-        position={position}
+      <SelectPrimitive.Positioner
+        className="z-50"
         align={align}
-        {...props}
+        alignOffset={alignOffset}
+        side={side}
+        sideOffset={sideOffset}
+        alignItemWithTrigger={alignItemWithTrigger}
       >
-        <SelectScrollUpButton />
-        <SelectPrimitive.Viewport
-          data-position={position}
+        <SelectPrimitive.Popup
+          data-slot="select-content"
+          data-align-trigger={alignItemWithTrigger}
           className={cn(
-            "data-[position=popper]:h-(--radix-select-trigger-height) data-[position=popper]:w-full data-[position=popper]:min-w-(--radix-select-trigger-width)",
-            position === "popper" && ""
+            "relative z-50 max-h-(--available-height) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 outline-none data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            !alignItemWithTrigger &&
+              "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
+            className
           )}
+          {...props}
         >
-          {children}
-        </SelectPrimitive.Viewport>
-        <SelectScrollDownButton />
-      </SelectPrimitive.Content>
+          <SelectScrollUpButton />
+          <SelectPrimitive.List
+            data-position={alignItemWithTrigger ? "item-aligned" : "popper"}
+            className="data-[position=popper]:h-(--anchor-height) data-[position=popper]:w-full data-[position=popper]:min-w-(--anchor-width)"
+          >
+            {children}
+          </SelectPrimitive.List>
+          <SelectScrollDownButton />
+        </SelectPrimitive.Popup>
+      </SelectPrimitive.Positioner>
     </SelectPrimitive.Portal>
   )
 }
 
+/** Radix's `SelectLabel` is a group heading, which Base UI calls `GroupLabel`. */
 function SelectLabel({
   className,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Label>) {
+}: React.ComponentProps<typeof SelectPrimitive.GroupLabel>) {
   return (
-    <SelectPrimitive.Label
+    <SelectPrimitive.GroupLabel
       data-slot="select-label"
       className={cn("px-1.5 py-1 text-xs text-muted-foreground", className)}
       {...props}
@@ -103,6 +151,11 @@ function SelectLabel({
   )
 }
 
+/**
+ * `ItemText` is a `<div>` on Base UI where Radix gave a `<span>`, and the item's
+ * `*:[span]:last:flex items-center gap-2` classes select on that span — hence
+ * `render={<span />}`.
+ */
 function SelectItem({
   className,
   children,
@@ -122,7 +175,9 @@ function SelectItem({
           <CheckIcon className="pointer-events-none" />
         </SelectPrimitive.ItemIndicator>
       </span>
-      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      <SelectPrimitive.ItemText render={<span />}>
+        {children}
+      </SelectPrimitive.ItemText>
     </SelectPrimitive.Item>
   )
 }
@@ -140,41 +195,45 @@ function SelectSeparator({
   )
 }
 
+/**
+ * Radix's `ScrollUpButton`/`ScrollDownButton` are Base UI's
+ * `ScrollUpArrow`/`ScrollDownArrow`, and those come with `position: absolute`
+ * built in — hence the `top-0`/`bottom-0 w-full` the flow-laid Radix buttons
+ * didn't need. The popup is already `relative`, so they pin to its edges.
+ */
 function SelectScrollUpButton({
   className,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.ScrollUpButton>) {
+}: React.ComponentProps<typeof SelectPrimitive.ScrollUpArrow>) {
   return (
-    <SelectPrimitive.ScrollUpButton
+    <SelectPrimitive.ScrollUpArrow
       data-slot="select-scroll-up-button"
       className={cn(
-        "z-10 flex cursor-default items-center justify-center bg-popover py-1 [&_svg:not([class*='size-'])]:size-4",
+        "top-0 z-10 flex w-full cursor-default items-center justify-center bg-popover py-1 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
     >
-      <ChevronUpIcon
-      />
-    </SelectPrimitive.ScrollUpButton>
+      <ChevronUpIcon />
+    </SelectPrimitive.ScrollUpArrow>
   )
 }
 
 function SelectScrollDownButton({
   className,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.ScrollDownButton>) {
+}: React.ComponentProps<typeof SelectPrimitive.ScrollDownArrow>) {
   return (
-    <SelectPrimitive.ScrollDownButton
+    <SelectPrimitive.ScrollDownArrow
       data-slot="select-scroll-down-button"
       className={cn(
-        "z-10 flex cursor-default items-center justify-center bg-popover py-1 [&_svg:not([class*='size-'])]:size-4",
+        "bottom-0 z-10 flex w-full cursor-default items-center justify-center bg-popover py-1 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
     >
-      <ChevronDownIcon
-      />
-    </SelectPrimitive.ScrollDownButton>
+      <ChevronDownIcon />
+    </SelectPrimitive.ScrollDownArrow>
   )
 }
 

@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { QueryCtx, mutation, query } from "./_generated/server";
-import { lastInLineage, nextDayIndex } from "./progress";
+import { isDayIndex, lastInLineage, nextDayIndex } from "./progress";
 import { programStatus } from "./schema";
 import { getCurrentUser, requireCurrentUser } from "./users";
 
@@ -114,8 +114,8 @@ export async function prefillFor(
   ctx: QueryCtx,
   userId: Id<"users">,
   exercises: { name: string }[],
-): Promise<{ name: string; weight: number; reps: number }[]> {
-  const out: { name: string; weight: number; reps: number }[] = [];
+): Promise<{ name: string; weight: number; reps: number; seconds?: number }[]> {
+  const out: { name: string; weight: number; reps: number; seconds?: number }[] = [];
   // Deduped: an exercise listed twice in a day is one lookup, not two.
   for (const name of new Set(exercises.map((exercise) => exercise.name))) {
     const previous = await ctx.db
@@ -124,7 +124,15 @@ export async function prefillFor(
       .order("desc")
       .filter((q) => q.eq(q.field("completed"), true))
       .first();
-    if (previous) out.push({ name, weight: previous.weight, reps: previous.reps });
+    // `seconds` rides along only when the last set was timed, so a reps
+    // exercise's entry keeps exactly the shape it always had.
+    if (previous)
+      out.push({
+        name,
+        weight: previous.weight,
+        reps: previous.reps,
+        ...(previous.seconds !== undefined && { seconds: previous.seconds }),
+      });
   }
   return out;
 }
@@ -215,6 +223,25 @@ export const list = query({
       });
     }
     return out;
+  },
+});
+
+/**
+ * The prefill for one day the user picked instead of the proposed one. `list`
+ * only prefills each program's NEXT day; a chosen day would otherwise open on
+ * 0 kg. Its own query so `list` doesn't pay for every day of every program on
+ * every screen. An unknown or foreign program, or a day out of range, is `[]`:
+ * the séance still starts, from the prescription.
+ */
+export const dayPrefill = query({
+  args: { programId: v.id("programs"), dayIndex: v.number() },
+  handler: async (ctx, args) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return [];
+    const program = await ctx.db.get("programs", args.programId);
+    if (program?.userId !== user._id) return [];
+    if (!isDayIndex(program.days.length, args.dayIndex)) return [];
+    return await prefillFor(ctx, user._id, program.days[args.dayIndex].exercises);
   },
 });
 
