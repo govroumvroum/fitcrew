@@ -41,24 +41,34 @@ export function ShoppingList({ today }: { today: string }) {
   const done = data?.items.filter((item) => item.checked).length ?? 0;
   const weekOf = data ? formatWeekOf(data.weekStart) : null;
 
+  // From lg the title, the week and the count become a sticky rail on the left,
+  // so « 12 sur 30 » stays in view while the list scrolls past it.
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <header className="flex flex-col gap-1">
-        <Link
-          href="/nutrition"
-          className="-ml-2 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeftIcon className="size-4" aria-hidden />
-          Nutrition
-        </Link>
-        <h1 className="text-[clamp(1.4rem,6vw,1.9rem)] font-bold">Liste de courses</h1>
-        <p className="text-sm text-muted-foreground">
-          {weekOf ? `Semaine du lundi ${weekOf}, tirée de ton menu.` : "Tirée de ton menu."} Coche
-          au fur et à mesure : c&apos;est gardé, même sur un autre téléphone.
-        </p>
-      </header>
+    <div className="flex flex-col gap-4 p-4 lg:grid lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:items-start lg:gap-8">
+      <div className="flex flex-col gap-4 lg:sticky lg:top-4">
+        <header className="flex flex-col gap-1">
+          <Link
+            href="/nutrition"
+            className="-ml-2 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeftIcon className="size-4" aria-hidden />
+            Nutrition
+          </Link>
+          <h1 className="text-[clamp(1.4rem,6vw,1.9rem)] font-bold">Liste de courses</h1>
+          <p className="text-sm text-muted-foreground">
+            {weekOf ? `Semaine du lundi ${weekOf}, tirée de ton menu.` : "Tirée de ton menu."} Coche
+            au fur et à mesure : c&apos;est gardé, même sur un autre téléphone.
+          </p>
+        </header>
 
-      <WeekToggle week={week} onChange={(next) => go({ week: next, day: null })} />
+        <WeekToggle week={week} onChange={(next) => go({ week: next, day: null })} />
+
+        {data && data.items.length > 0 ? (
+          <p className="text-sm text-muted-foreground tabular-nums" aria-live="polite">
+            {done} sur {data.items.length} dans le panier
+          </p>
+        ) : null}
+      </div>
 
       {data === undefined ? (
         <Skeleton className="h-96" />
@@ -74,14 +84,18 @@ export function ShoppingList({ today }: { today: string }) {
           </Button>
         </div>
       ) : (
-        <>
-          <p className="text-sm text-muted-foreground tabular-nums" aria-live="polite">
-            {done} sur {data.items.length} dans le panier
-          </p>
-          <ul className="flex flex-col overflow-hidden rounded-xl border bg-card">
+        // Two columns from md, read top to bottom like a paper list. Every row
+        // keeps its bottom hairline there and the list sits 1 px under the
+        // card's clip, so the bottom of the taller column doesn't draw a second
+        // line on the card's border.
+        <div className="overflow-hidden rounded-xl border bg-card">
+          <ul className="flex flex-col md:block md:-mb-px md:columns-2 md:gap-0 md:[column-rule:1px_solid_var(--border)]">
             {data.items.map((item) => (
-              <li key={item.key} className="border-b last:border-b-0">
-                <label className="flex min-h-12 cursor-pointer items-center gap-3 px-3 py-2 active:bg-muted/60">
+              <li
+                key={item.key}
+                className="break-inside-avoid border-b last:border-b-0 md:last:border-b"
+              >
+                <label className="flex min-h-12 cursor-pointer items-center gap-3 px-3 py-2 hover:bg-muted/30 active:bg-muted/60">
                   <input
                     type="checkbox"
                     className="peer sr-only"
@@ -126,7 +140,7 @@ export function ShoppingList({ today }: { today: string }) {
               </li>
             ))}
           </ul>
-        </>
+        </div>
       )}
     </div>
   );
@@ -134,9 +148,11 @@ export function ShoppingList({ today }: { today: string }) {
 
 export function ShoppingListSkeleton() {
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <Skeleton className="h-24" />
-      <Skeleton className="h-11" />
+    <div className="flex flex-col gap-4 p-4 lg:grid lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:items-start lg:gap-8">
+      <div className="flex flex-col gap-4">
+        <Skeleton className="h-24" />
+        <Skeleton className="h-11" />
+      </div>
       <Skeleton className="h-96" />
     </div>
   );

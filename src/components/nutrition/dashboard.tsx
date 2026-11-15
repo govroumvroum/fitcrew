@@ -39,9 +39,9 @@ import { WeekPlan } from "./week-plan";
  *  waits are one shape (same reasoning as TodaySkeleton). */
 export function NutritionSkeleton() {
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-4 p-4 lg:grid lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:items-start lg:gap-x-8">
       <Skeleton className="h-72" />
-      <Skeleton className="h-40" />
+      <Skeleton className="h-40 lg:h-96" />
     </div>
   );
 }
@@ -65,106 +65,114 @@ export function NutritionDashboard({ today }: { today: string }) {
         <p className="eyebrow normal-case first-letter:uppercase">{formatFull(today)}</p>
       </header>
 
-      <div className="md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:items-start md:gap-5">
-        <div className="flex flex-col gap-5">
-          {/* The screen's one slab. Without a profile it explains Le Chef; with
-              one it's the day's estimated numbers. Either way the journal below
-              works — that's explicit in issue #31. */}
-          <section className="slab flex flex-col gap-3.5">
-            {profile && targets ? (
-              <>
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="eyebrow">
-                      {day && day.level !== null
-                        ? dayTitle(day.level, day.planned)
-                        : `Objectif moyen · ${formatNumber(targets.calories)} kcal`}{" "}
-                      · estimations
-                    </p>
-                    <h2 className="font-heading text-[1.375rem] leading-tight font-bold">
-                      {formatNumber(consumed.calories)} kcal sur {formatNumber(targets.calories)}
-                    </h2>
-                  </div>
-                  <Badge variant="secondary" className="shrink-0">
-                    {GOALS[profile.goal]}
-                  </Badge>
+      {/* One column up to lg, in the phone's order. From lg, today (the slab,
+          water, the journal) is a fixed-width rail on the left and the week
+          takes the rest: it's three recipe cards with photos, the richest thing
+          on the page, and halving the screen left each card ~235 px. Placed
+          with grid lines rather than reordered in the DOM, so reading and tab
+          order stay the phone's. `1fr` on the last row: when the week is the
+          taller side, the journal's row soaks up the difference instead of
+          opening a gap under the slab. */}
+      <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:grid-rows-[auto_auto_1fr] lg:items-start lg:gap-x-8">
+        {/* The screen's one slab. Without a profile it explains Le Chef; with
+            one it's the day's estimated numbers. Either way the journal below
+            works — that's explicit in issue #31. */}
+        <section className="slab flex flex-col gap-3.5 lg:col-start-1 lg:row-start-1">
+          {profile && targets ? (
+            <>
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="eyebrow">
+                    {day && day.level !== null
+                      ? dayTitle(day.level, day.planned)
+                      : `Objectif moyen · ${formatNumber(targets.calories)} kcal`}{" "}
+                    · estimations
+                  </p>
+                  <h2 className="font-heading text-[1.375rem] leading-tight font-bold">
+                    {formatNumber(consumed.calories)} kcal sur {formatNumber(targets.calories)}
+                  </h2>
                 </div>
-                <MacroProgress consumed={consumed} targets={targets} />
-                {/* No semaine type: no level, no selector — the flat target is an
-                    average that already includes sport. He fills his week first. */}
-                {day && day.level !== null ? (
-                  <DayLevelPicker today={today} level={day.level} source={day.source} />
-                ) : (
-                  <Link
-                    href="/programme#ma-semaine"
-                    className="text-[11px] text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2"
-                  >
-                    Dis au Coach tes jours d&apos;entraînement pour des objectifs jour par jour
-                  </Link>
-                )}
-              </>
-            ) : (
-              <>
-                {/* 40 px, not the chat header's 28: this slab is where someone
-                    meets Le Chef for the first time, so he gets to be seen.
-                    alt="" on purpose — his name is right there in the eyebrow, and
-                    a screen reader announcing it twice is noise. */}
-                <div className="flex items-start gap-3">
-                  <Image
-                    src="/chef.png"
-                    alt=""
-                    width={40}
-                    height={40}
-                    className="shrink-0 rounded-full ring-1 ring-white/10"
-                    priority
-                  />
-                  <div className="min-w-0">
-                    <p className="eyebrow">Le Chef</p>
-                    <h2 className="font-heading text-[1.375rem] leading-tight font-bold">
-                      Il te fait tes menus, tu ne cherches plus quoi manger.
-                    </h2>
-                  </div>
+                <Badge variant="secondary" className="shrink-0">
+                  {GOALS[profile.goal]}
+                </Badge>
+              </div>
+              <MacroProgress consumed={consumed} targets={targets} />
+              {/* No semaine type: no level, no selector — the flat target is an
+                  average that already includes sport. He fills his week first. */}
+              {day && day.level !== null ? (
+                <DayLevelPicker today={today} level={day.level} source={day.source} />
+              ) : (
+                <Link
+                  href="/programme#ma-semaine"
+                  className="text-[11px] text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2"
+                >
+                  Dis au Coach tes jours d&apos;entraînement pour des objectifs jour par jour
+                </Link>
+              )}
+            </>
+          ) : (
+            <>
+              {/* 40 px, not the chat header's 28: this slab is where someone
+                  meets Le Chef for the first time, so he gets to be seen.
+                  alt="" on purpose — his name is right there in the eyebrow, and
+                  a screen reader announcing it twice is noise. */}
+              <div className="flex items-start gap-3">
+                <Image
+                  src="/chef.png"
+                  alt=""
+                  width={40}
+                  height={40}
+                  className="shrink-0 rounded-full ring-1 ring-white/10"
+                  priority
+                />
+                <div className="min-w-0">
+                  <p className="eyebrow">Le Chef</p>
+                  <h2 className="font-heading text-[1.375rem] leading-tight font-bold">
+                    Il te fait tes menus, tu ne cherches plus quoi manger.
+                  </h2>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Dis-lui ton objectif, ton poids, ce que tu ne manges pas et le temps que tu as
-                  pour cuisiner. Il en tire des objectifs caloriques estimés, un menu de la semaine
-                  avec les recettes, et la liste de courses qui va avec. Le journal en dessous
-                  marche déjà sans lui.
-                </p>
-              </>
-            )}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Dis-lui ton objectif, ton poids, ce que tu ne manges pas et le temps que tu as pour
+                cuisiner. Il en tire des objectifs caloriques estimés, un menu de la semaine avec
+                les recettes, et la liste de courses qui va avec. Le journal en dessous marche déjà
+                sans lui.
+              </p>
+            </>
+          )}
 
-            <Button
-              asChild
-              size="lg"
-              className="h-14 w-full rounded-lg text-base transition-transform active:scale-[0.96]"
+          <Button
+            asChild
+            size="lg"
+            className="h-14 w-full rounded-lg text-base transition-transform active:scale-[0.96]"
+          >
+            <Link href="/chef">
+              {!profile
+                ? "Faire mon profil avec le Chef"
+                : hasPlan
+                  ? "Ajuster ma semaine avec le Chef"
+                  : "Générer mon menu de la semaine"}
+            </Link>
+          </Button>
+          {/* #126: the Chef can prepare next week over the weekend. The line
+              opens it in the week view below (#121). */}
+          {profile && data.hasPlanNextWeek ? (
+            <Link
+              href="/nutrition?semaine=prochaine#semaine"
+              className="-mt-1 text-center text-[11px] text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2"
             >
-              <Link href="/chef">
-                {!profile
-                  ? "Faire mon profil avec le Chef"
-                  : hasPlan
-                    ? "Ajuster ma semaine avec le Chef"
-                    : "Générer mon menu de la semaine"}
-              </Link>
-            </Button>
-            {/* #126: the Chef can prepare next week over the weekend. The line
-                opens it in the week view below (#121). */}
-            {profile && data.hasPlanNextWeek ? (
-              <Link
-                href="/nutrition?semaine=prochaine#semaine"
-                className="-mt-1 text-center text-[11px] text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2"
-              >
-                Plan de la semaine prochaine prêt
-              </Link>
-            ) : null}
-          </section>
+              Plan de la semaine prochaine prêt
+            </Link>
+          ) : null}
+        </section>
 
+        <div className="flex flex-col gap-5 lg:col-start-2 lg:row-span-full">
           <WeekPlan today={today} hasPlanNextWeek={data.hasPlanNextWeek} />
 
           {/* #119: every recipe the Chef wrote, plus the sèche catalogue. */}
           <Link
             href="/nutrition/recettes"
-            className="flex min-h-14 items-center gap-3 rounded-xl border bg-card px-3 py-2.5 transition-transform active:scale-[0.98]"
+            className="flex min-h-14 items-center gap-3 rounded-xl border bg-card px-3 py-2.5 transition-[transform,border-color] hover:border-accent-text/40 active:scale-[0.98]"
           >
             <BookOpenIcon className="size-5 shrink-0 text-accent-text" aria-hidden />
             <span className="min-w-0 flex-1">
@@ -175,12 +183,14 @@ export function NutritionDashboard({ today }: { today: string }) {
             </span>
             <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           </Link>
+        </div>
 
-          <Separator className="md:hidden" />
+        <Separator className="lg:hidden" />
+        <div className="lg:col-start-1 lg:row-start-2">
           <Hydration today={today} ml={hydrationMl} />
         </div>
 
-        <div className="mt-5 flex flex-col gap-5 md:mt-0">
+        <div className="lg:col-start-1 lg:row-start-3">
           <FoodLog today={today} log={log} />
         </div>
       </div>

@@ -138,40 +138,49 @@ export function WeekPlan({ today, hasPlanNextWeek }: { today: string; hasPlanNex
         </Link>
       </div>
 
-      <WeekToggle week={week} onChange={(next) => go({ week: next, day: null })} />
+      {/* Stacked on a phone; one control bar at xl, where the column is wide
+          enough that seven day tabs stretched across it would be 120 px each. */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:gap-4">
+        <div className="xl:w-72 xl:shrink-0">
+          <WeekToggle week={week} onChange={(next) => go({ week: next, day: null })} />
+        </div>
 
-      <fieldset className="grid min-w-0 grid-cols-7 gap-1">
-        <legend className="sr-only">Jour</legend>
-        {dates.map((date, i) => {
-          const pressed = date === selected;
-          const planned = (data?.days[i]?.meals.length ?? 0) > 0;
-          return (
-            <button
-              key={date}
-              type="button"
-              aria-pressed={pressed}
-              aria-label={`${formatFull(date)}${date === today ? ", aujourd'hui" : ""}${planned ? "" : ", rien de prévu"}`}
-              onClick={() => go({ day: date })}
-              className={cn(
-                "flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-lg border text-sm transition-transform active:scale-[0.94]",
-                pressed
-                  ? "border-primary/50 bg-secondary font-semibold ring-1 ring-primary/30"
-                  : "bg-card",
-                date === today && !pressed && "border-accent-text/60",
-              )}
-            >
-              <span className={cn("text-[11px]", !pressed && "text-muted-foreground")}>
-                {LETTERS[i]}
-              </span>
-              <span className="tabular-nums">{Number(date.slice(8))}</span>
-              <span
-                aria-hidden
-                className={cn("size-1 rounded-full", planned ? "bg-accent-text" : "bg-transparent")}
-              />
-            </button>
-          );
-        })}
-      </fieldset>
+        <fieldset className="grid min-w-0 grid-cols-7 gap-1 xl:flex-1">
+          <legend className="sr-only">Jour</legend>
+          {dates.map((date, i) => {
+            const pressed = date === selected;
+            const planned = (data?.days[i]?.meals.length ?? 0) > 0;
+            return (
+              <button
+                key={date}
+                type="button"
+                aria-pressed={pressed}
+                aria-label={`${formatFull(date)}${date === today ? ", aujourd'hui" : ""}${planned ? "" : ", rien de prévu"}`}
+                onClick={() => go({ day: date })}
+                className={cn(
+                  "flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-lg border text-sm transition-[transform,border-color] active:scale-[0.94]",
+                  pressed
+                    ? "border-primary/50 bg-secondary font-semibold ring-1 ring-primary/30"
+                    : "bg-card hover:border-muted-foreground/40",
+                  date === today && !pressed && "border-accent-text/60",
+                )}
+              >
+                <span className={cn("text-[11px]", !pressed && "text-muted-foreground")}>
+                  {LETTERS[i]}
+                </span>
+                <span className="tabular-nums">{Number(date.slice(8))}</span>
+                <span
+                  aria-hidden
+                  className={cn(
+                    "size-1 rounded-full",
+                    planned ? "bg-accent-text" : "bg-transparent",
+                  )}
+                />
+              </button>
+            );
+          })}
+        </fieldset>
+      </div>
 
       {data === undefined || !day ? (
         <Skeleton className="h-96" />
@@ -235,7 +244,7 @@ function DayMeals({
           </Button>
         </div>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
+        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {day.meals.map((meal) => (
             <li key={meal.slot}>
               <MealCard meal={meal} date={day.date} today={today} weekStart={weekStart} />

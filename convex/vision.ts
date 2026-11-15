@@ -161,7 +161,7 @@ RÈGLES
 1. N'utilise que les ingrédients listés, plus les basiques d'un placard (sel, poivre, eau, huile). Si une recette a besoin d'autre chose, elle ne va pas dans la liste.
 2. Les contraintes ci-dessous sont ABSOLUES : une allergie ou une exclusion ne se négocie pas, même « en petite quantité ».
 3. Les macros sont des ESTIMATIONS par portion, pas des mesures.
-4. Étapes courtes et exécutables, dans l'ordre. "prepMinutes" est le temps total réaliste, préparation comprise.
+4. Étapes dans l'ordre, à l'infinitif, chacune exécutable seule : les quantités de la liste, le feu, les temps, la température du four, un repère de cuisson (« jusqu'à ce que… », « cuit à cœur »). 4 à 8 étapes. "prepMinutes" est le temps total réaliste, préparation comprise.
 5. Aucun conseil médical, aucun jugement sur ce que la personne mange.
 6. Trois recettes maximum, et moins s'il n'y a honnêtement pas de quoi.
 

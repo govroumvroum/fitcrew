@@ -132,7 +132,7 @@ export function secheCatalogueLines(forbidden: string[]): string[] {
 }
 
 /** JSON with sorted keys: a stored document needn't come back in the key order
- *  it was written in, and a false « changed » would rewrite 31 rows per user. */
+ *  it was written in, and a false « changed » would rewrite every row per user. */
 export function canonical(value: unknown): string {
   return JSON.stringify(value, (_key, v: unknown) =>
     v && typeof v === "object" && !Array.isArray(v)
@@ -196,7 +196,7 @@ export const upsertFromMeals = internalMutation({
 });
 
 /**
- * Upserts the 31 « sèche » recipes into the shared catalogue (no `userId`).
+ * Upserts the 80 « sèche » recipes into the shared catalogue (no `userId`).
  * Idempotent on the normalised name, and writes nothing when a row already
  * matches — so the migration that calls it can run on every user, and rerunning
  * it never creates a duplicate.
@@ -296,7 +296,7 @@ export async function libraryFor(ctx: QueryCtx, userId: Id<"users">, category?: 
   // dish by the slot it chose (a « collation » mousse eaten at déjeuner lands in
   // `repas`), and that copy only inherits the curated `allergens` if its twin is
   // in the merge. Filtering the catalogue first made the health guard depend on
-  // the tab. 31 rows; the shelf filter applies AFTER the guard.
+  // the tab. 80 rows (CATALOGUE_LIMIT is 100); the shelf filter applies AFTER the guard.
   // Ascending `by_user` = insertion order = the seed's (diet's, by shelf).
   const catalogue = await ownedBy(ctx, undefined).take(CATALOGUE_LIMIT);
 
