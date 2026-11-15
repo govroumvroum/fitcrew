@@ -1182,7 +1182,7 @@ export const SECHE_CATALOGUE: CatalogueRecipe[] = [
     ],
     steps: [
       "Préchauffer le four à 180 °C. Couper 800 g de courgettes (200 g ×4) en rondelles de 5 mm et les faire revenir 6-8 min à feu vif dans une poêle avec 4 c. à café d'huile, jusqu'à ce qu'elles soient dorées et sèches.",
-      "Cuire les 100 g de pommes de terre 12 min à l'eau bouillante salée (ou prendre un reste), les couper en dés, les ajouter et les faire dorer 3 min. Saler, poivrer, ajouter la menthe ciselée. Étaler le tout dans un plat à gratin huilé.",
+      "Cuire 400 g de pommes de terre (100 g ×4) 12-15 min à l'eau bouillante salée (ou prendre un reste), les couper en dés, les ajouter et les faire dorer 3 min. Saler, poivrer, ajouter la menthe ciselée. Étaler le tout dans un plat à gratin huilé.",
       "Battre 12 œufs et 400 g de blancs d'œufs à la fourchette, sans faire mousser, avec sel et poivre. Verser sur les légumes, puis émietter la feta dessus.",
       "Cuire 20-25 min, jusqu'à ce que le centre soit pris et que la lame d'un couteau ressorte propre. Si le dessus dore trop vite, couvrir de papier cuisson.",
       "Laisser refroidir 15 min dans le plat : la frittata finit de prendre et se coupe net. Découper en 4 parts égales.",
@@ -1704,7 +1704,7 @@ export const SECHE_CATALOGUE: CatalogueRecipe[] = [
       "Chauffer la demi c. à café d'huile dans une poêle à feu moyen et faire suer l'oignon et le poivron 5 min, jusqu'à ce qu'ils soient souples. Ajouter la courgette râpée et cuire 2 min de plus pour chasser le reste d'humidité. Laisser tiédir 2 min.",
       "Battre les 2 œufs et les 60 g de blancs à la fourchette, saler, poivrer, ajouter les herbes de Provence. Incorporer les légumes tiédis et les 15 g de fromage râpé.",
       "Verser dans le moule chemisé, égaliser la surface à la spatule et enfourner 22-25 min : la frittata est cuite quand elle est dorée sur les bords, gonflée au centre et qu'une lame plantée au milieu ressort propre.",
-      "Laisser reposer 5 min hors du four : elle se raffermit et se coupe net. Découper en 4 parts égales.",
+      "Laisser reposer 5 min hors du four : elle se raffermit et se coupe net.",
       "Batch : multiplier par 4 (8 œufs, 240 g de blancs, 320 g de courgette) pour 4 parts. Garder 4 jours au frais dans une boîte fermée, ou congeler 2 mois part par part. Réchauffer 40 s au micro-ondes, ou manger froide avec la tranche de pain complet grillée.",
     ],
     photoUrl:
