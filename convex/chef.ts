@@ -228,17 +228,17 @@ export function chefTools(today: string) {
           // No semaine type → no level at all, the flat target (`dayTargets`).
           level:
             day && day.level !== null
-            ? {
-                level: day.level,
-                why: day.source === "none" ? null : LEVEL_SOURCE[day.source],
-                planned: day.planned.map((entry) => ({
-                  what: entryLabel(entry),
-                  level: entry.level,
-                  time: entry.time ?? null,
-                })),
-                targets,
-              }
-            : null,
+              ? {
+                  level: day.level,
+                  why: day.source === "none" ? null : LEVEL_SOURCE[day.source],
+                  planned: day.planned.map((entry) => ({
+                    what: entryLabel(entry),
+                    level: entry.level,
+                    time: entry.time ?? null,
+                  })),
+                  targets,
+                }
+              : null,
           weekStart: dashboard.weekStart,
           hasPlanThisWeek: dashboard.hasPlan,
           // So he's warned before `generate_meal_plan` overwrites next week too.
@@ -328,7 +328,7 @@ export function chefTools(today: string) {
 
     read_plan: createTool({
       description:
-        "Le plan enregistré d'une semaine (en cours ou prochaine), jour par jour : créneau, nom du plat, kcal, verrou. Appelle-le avant de modifier un jour que tu n'as pas écrit dans CETTE conversation, ou pour savoir ce qui est prévu un autre jour qu'aujourd'hui.",
+        "Le plan enregistré d'une semaine (en cours ou prochaine), jour par jour : créneau, nom du plat, kcal, verrou, ingrédients. Appelle-le avant de modifier un jour que tu n'as pas écrit dans CETTE conversation, ou pour savoir ce qui est prévu un autre jour qu'aujourd'hui.",
       inputSchema: zReadPlan,
       execute: async (ctx: ToolCtx, { week: which }) => {
         const monday = weeks[which];
@@ -355,6 +355,9 @@ export function chefTools(today: string) {
               name: m.name,
               calories: m.macros.calories,
               locked: m.locked === true,
+              // So a replaced meal can reuse the names (and amounts) the rest of
+              // the week already uses — the shopping list merges by name.
+              ingredients: m.ingredients.map((i) => `${i.name} ${i.quantity}`.trim()),
             })),
           })),
         };
@@ -657,7 +660,7 @@ Une question dont tu connais déjà l'éventail des réponses (objectif, sexe, n
 CE PROMPT NE CONTIENT PAS SA JOURNÉE — TU VAS LA CHERCHER
 Ses repas prévus, ce qu'il a déjà mangé, ses totaux du jour, son hydratation et son frigo ne sont PAS écrits ici. Tu y as accès, mais par outil, et un outil qu'on n'appelle pas ne renvoie rien.
 - \`read_today\` : le niveau RÉEL d'aujourd'hui quand il a une semaine type (off, léger, dur — il a pu le changer à la main ou s'entraîner un jour off), repas prévus (avec leur verrou), journal du jour, totaux, ce qu'il reste sur la cible du jour, hydratation, et s'il existe un plan cette semaine et la semaine prochaine. Appelle-le avant de parler de ce qu'il a mangé, de ce qu'il lui reste à manger, de son eau, ou de proposer un repas pour aujourd'hui — et avant \`generate_meal_plan\`, pour savoir si un plan existe déjà : générer ÉCRASE le plan de la semaine visée, donc s'il en a un, dis-le et demande avant d'écraser.
-- \`read_plan\` : le plan enregistré de la semaine en cours ou de la prochaine, jour par jour, avec les verrous. Appelle-le avant de modifier un jour que tu n'as pas écrit dans cette conversation.
+- \`read_plan\` : le plan enregistré de la semaine en cours ou de la prochaine, jour par jour, avec les verrous et les ingrédients de chaque repas (reprends leurs noms quand tu remplaces un repas). Appelle-le avant de modifier un jour que tu n'as pas écrit dans cette conversation.
 - \`read_inventory\` : son frigo et ses placards. Appelle-le avant de proposer de cuisiner avec ce qu'il a.
 - Les totaux et le restant arrivent DÉJÀ calculés : ne refais pas les additions ni les soustractions.
 - Ne dis JAMAIS que tu n'as pas accès à sa journée, et n'invente ni un repas prévu, ni un chiffre du journal : tout ça se lit.
@@ -672,14 +675,14 @@ RÈGLES NON NÉGOCIABLES
 RÈGLES PLAN (quand tu appelles generate_meal_plan)
 - Un plan couvre UNE semaine, du lundi au dimanche : la semaine en cours ou la semaine prochaine, toutes deux datées dans la section DATES en fin de prompt. Recopie ces dates, ne calcule aucune autre semaine. La section DATES dit aussi laquelle choisir quand il ne le précise pas.
 - Enregistrer une semaine ne touche pas l'autre. Dans ton résumé, dis pour quelle semaine c'est (« ta semaine du lundi 16 »).${
-  // The targets depend on the PROFILE, the training days on the WEEK: the Coach
-  // can write the week before the Chef's onboarding, so all four cases exist.
-  !p
-    ? "- Pas encore de profil nutrition, donc aucune cible : fais d'abord son profil (questions ci-dessus) et `save_nutrition_profile`, avant tout menu."
-    : week
-      ? `- ${p.mealsPerDay} repas par jour. Chaque jour vise la cible de SON niveau dans sa semaine type (off, léger ou dur, ci-dessus) : un jour de séance a plus de glucides qu'un jour off, les protéines restent les mêmes. Pas au kcal près : c'est une estimation. La date de chaque jour de la semaine est dans la section DATES.`
-      : `- ${p.mealsPerDay} repas par jour, et le total journalier tourne autour de sa cible moyenne, la même chaque jour. Pas au kcal près : c'est une estimation.`
-}
+    // The targets depend on the PROFILE, the training days on the WEEK: the Coach
+    // can write the week before the Chef's onboarding, so all four cases exist.
+    !p
+      ? "- Pas encore de profil nutrition, donc aucune cible : fais d'abord son profil (questions ci-dessus) et `save_nutrition_profile`, avant tout menu."
+      : week
+        ? `- ${p.mealsPerDay} repas par jour. Chaque jour vise la cible de SON niveau dans sa semaine type (off, léger ou dur, ci-dessus) : un jour de séance a plus de glucides qu'un jour off, les protéines restent les mêmes. Pas au kcal près : c'est une estimation. La date de chaque jour de la semaine est dans la section DATES.`
+        : `- ${p.mealsPerDay} repas par jour, et le total journalier tourne autour de sa cible moyenne, la même chaque jour. Pas au kcal près : c'est une estimation.`
+  }
 - Respecte le temps de cuisine et le budget. Réutilise les mêmes ingrédients sur plusieurs repas — c'est moins cher et ça évite le gaspillage. Utilise \`mealPrep\` quand un plat se prépare la veille ou en double.
 ${
   week
