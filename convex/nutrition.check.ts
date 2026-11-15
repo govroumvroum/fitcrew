@@ -147,8 +147,8 @@ const days: PlanDay[] = [
 ];
 
 // One shopping line per ingredient, whatever the spelling and the plural: the
-// first spelling seen is the display name and every raw quantity is kept as
-// written — "200 g" + "3" has no sum.
+// first spelling seen is the display name, and quantities in different units
+// stay apart — "200 g" + "3" has no sum.
 assert.deepEqual(shoppingListFrom(days), [
   { name: "Tomate", quantities: ["200 g", "3"] },
   { name: "Huile d'olive", quantities: ["1 cuillère"] },
@@ -158,17 +158,20 @@ assert.deepEqual(shoppingListFrom(days), [
 assert.deepEqual(shoppingListFrom([]), []);
 
 // Same unit is summed (plural and spacing aside); what can't be parsed is kept
-// as written, once.
+// as written, every occurrence, after the sums — two "1/2 citron" is a whole
+// lemon to buy, not half of one.
 assert.deepEqual(sumQuantities(["250 g", "250g", "1,5 g", "1 moyenne", "2 moyennes", "3", "6"]), [
   "501,5 g",
   "3 moyenne",
   "9",
 ]);
-assert.deepEqual(sumQuantities(["1/2 citron", "une pincée", "Une pincée", "2-3 tranches"]), [
+assert.deepEqual(sumQuantities(["1/2 citron", "100 g", "1/2 citron", "2-3 tranches", "50 g"]), [
+  "150 g",
   "1/2 citron",
-  "Une pincée",
+  "1/2 citron",
   "2-3 tranches",
 ]);
+
 // --- Allergy / exclusion guard ---------------------------------------------
 // The health-safety path: the prompt says allergies are hard constraints, this
 // is what makes it true. Under-matching hurts the user, over-matching makes the

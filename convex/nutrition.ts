@@ -363,31 +363,31 @@ export function shoppingListFrom(days: PlanDay[]): { name: string; quantities: s
 /**
  * "250 g", "250 g", "1 cuillère" → "500 g", "1 cuillère". Only "<number> <unit>"
  * (or a bare number) is summed, per unit; anything else — "1/2 citron",
- * "2-3 tranches", "une pincée" — is kept as written, once.
+ * "2-3 tranches", "une pincée" — is kept as written, after the sums.
  *
  * ponytail: no unit conversion, so "1 kg" and "200 g" stay two entries. Add a
  * conversion table if the model starts mixing them.
  */
 export function sumQuantities(quantities: string[]): string[] {
-  const sums = new Map<string, { total: number; unit: string } | string>();
+  const sums = new Map<string, { total: number; unit: string }>();
+  const raw: string[] = [];
   for (const quantity of quantities) {
     const match = quantity.match(/^(\d+(?:[.,]\d+)?)\s*(\p{L}.*)?$/u);
     if (!match) {
-      sums.set(`raw:${quantity.toLowerCase()}`, quantity);
+      raw.push(quantity);
       continue;
     }
     const unit = match[2] ?? "";
-    const key = `unit:${normalizeName(unit)}`;
+    const key = normalizeName(unit);
     const sum = sums.get(key);
     const amount = Number(match[1].replace(",", "."));
-    if (sum && typeof sum !== "string") sum.total += amount;
+    if (sum) sum.total += amount;
     else sums.set(key, { total: amount, unit });
   }
-  return [...sums.values()].map((sum) =>
-    typeof sum === "string"
-      ? sum
-      : `${String(Math.round(sum.total * 100) / 100).replace(".", ",")} ${sum.unit}`.trim(),
+  const summed = [...sums.values()].map((sum) =>
+    `${String(Math.round(sum.total * 100) / 100).replace(".", ",")} ${sum.unit}`.trim(),
   );
+  return [...summed, ...raw];
 }
 
 const SLOT_ORDER: MealSlot[] = ["petit_dejeuner", "dejeuner", "collation", "diner"];
