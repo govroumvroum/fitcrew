@@ -111,10 +111,8 @@ export function normalizeName(name: string): string {
 /**
  * A week's ingredients as a shopping list, merged by normalised name.
  *
- * ponytail: quantities are collected as the strings the model wrote, never
- * summed — "200 g" + "1 cuillère" has no answer, and unit parsing is a rabbit
- * hole for a list someone reads in a supermarket. Sum them if the day comes
- * when every quantity is machine-written.
+ * Quantities sharing a unit are summed (see `sumQuantities`); the rest stay as
+ * the strings the model wrote.
  */
 export function shoppingListFrom(days: PlanDay[]): { name: string; quantities: string[] }[] {
   const lines = new Map<string, { name: string; quantities: string[] }>();
@@ -132,7 +130,40 @@ export function shoppingListFrom(days: PlanDay[]): { name: string; quantities: s
       }
     }
   }
-  return [...lines.values()];
+  return [...lines.values()].map((line) => ({
+    ...line,
+    quantities: sumQuantities(line.quantities),
+  }));
+}
+
+/**
+ * "250 g", "250 g", "1 cuillère" → "500 g", "1 cuillère". Only "<number> <unit>"
+ * (or a bare number) is summed, per unit; anything else — "1/2 citron",
+ * "2-3 tranches", "une pincée" — is kept as written, once.
+ *
+ * ponytail: no unit conversion, so "1 kg" and "200 g" stay two entries. Add a
+ * conversion table if the model starts mixing them.
+ */
+export function sumQuantities(quantities: string[]): string[] {
+  const sums = new Map<string, { total: number; unit: string } | string>();
+  for (const quantity of quantities) {
+    const match = quantity.match(/^(\d+(?:[.,]\d+)?)\s*(\p{L}.*)?$/u);
+    if (!match) {
+      sums.set(`raw:${quantity.toLowerCase()}`, quantity);
+      continue;
+    }
+    const unit = match[2] ?? "";
+    const key = `unit:${normalizeName(unit)}`;
+    const sum = sums.get(key);
+    const amount = Number(match[1].replace(",", "."));
+    if (sum && typeof sum !== "string") sum.total += amount;
+    else sums.set(key, { total: amount, unit });
+  }
+  return [...sums.values()].map((sum) =>
+    typeof sum === "string"
+      ? sum
+      : `${String(Math.round(sum.total * 100) / 100).replace(".", ",")} ${sum.unit}`.trim(),
+  );
 }
 
 const SLOT_ORDER: MealSlot[] = ["petit_dejeuner", "dejeuner", "collation", "diner"];

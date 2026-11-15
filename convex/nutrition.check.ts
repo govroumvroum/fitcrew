@@ -1,6 +1,12 @@
 /** Self-check for the nutrition maths. Run: `bun convex/nutrition.check.ts` */
 import assert from "node:assert/strict";
-import { type PlanDay, estimateTargets, shoppingListFrom, sumMacros } from "./nutrition";
+import {
+  type PlanDay,
+  estimateTargets,
+  shoppingListFrom,
+  sumMacros,
+  sumQuantities,
+} from "./nutrition";
 
 const base = { age: 30, sex: "h", heightCm: 180, weightKg: 80, activityLevel: "modere" } as const;
 
@@ -88,5 +94,18 @@ assert.deepEqual(shoppingListFrom(days), [
 
 // An empty week is an empty list.
 assert.deepEqual(shoppingListFrom([]), []);
+
+// Same unit is summed (plural and spacing aside); what can't be parsed is kept
+// as written, once.
+assert.deepEqual(sumQuantities(["250 g", "250g", "1,5 g", "1 moyenne", "2 moyennes", "3", "6"]), [
+  "501,5 g",
+  "3 moyenne",
+  "9",
+]);
+assert.deepEqual(sumQuantities(["1/2 citron", "une pincée", "Une pincée", "2-3 tranches"]), [
+  "1/2 citron",
+  "Une pincée",
+  "2-3 tranches",
+]);
 
 console.log("nutrition targets + shopping list ok");

@@ -40,7 +40,10 @@ export const zPlannedMeal = z.object({
   name: z.string().describe('Ex : "Poulet rôti, patate douce, brocolis"'),
   ingredients: z
     .array(z.object({ name: z.string(), quantity: z.string().describe('"200 g", "1 cuillère"') }))
-    .min(1),
+    .min(1)
+    .describe(
+      'Tels qu\'on les achète, poids CRU / SEC : "Riz" 80 g (sec), jamais "Riz cuit" 250 g. Pâtes, riz, semoule, quinoa, légumineuses sèches, viande et poisson : toujours le poids avant cuisson, et un nom sans "cuit" ni "sec" pour que la liste de courses les regroupe. Les macros restent celles de la portion mangée.',
+    ),
   steps: z.array(z.string()).min(1).describe("Étapes courtes, à l'impératif"),
   prepMinutes: z.number().int().min(0).max(240),
   macros: zMacros,
