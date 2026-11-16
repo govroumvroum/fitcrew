@@ -39,9 +39,12 @@ it, so re-apply it by hand:
   attach label, « réfléchit… » copy, `Text` and `ToolFallback` slots,
   `aboveMessages`, `messagesClassName`) so Coach and Chef share the file; trimmed
   to what the chat has (no welcome, suggestions, action bars, edit, branches,
-  dictation, voice, reasoning, file/image parts, stop button — the registry's
-  `ActionBarMorePrimitive` is a **Radix** menu); tools never grouped;
-  `indicator="empty"`; `autoScroll` forced on the `turnAnchor="top"` viewport;
+  dictation, voice, file/image parts, stop button — the registry's
+  `ActionBarMorePrimitive` is a **Radix** menu); tools never grouped; reasoning
+  as our own closed `<details>` (`ReasoningDisclosure`, adjacent blocks merged
+  via `group-reasoning`); `indicator="always"` filtered by `TrailingIndicator`
+  (« réfléchit… » under a settled last part, with `components.toolRunning`
+  deciding for tools); `autoScroll` forced on the `turnAnchor="top"` viewport;
   `role="log"`; the previous bubble/`text-sm`/95 % layout.
 - `attachment.tsx` — translated; `ComposerAddAttachment` takes its label as a
   prop and shows the image icon; `uploadState` no longer reads

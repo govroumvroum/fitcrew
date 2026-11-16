@@ -8,7 +8,7 @@ import type { AgentApi } from "@/components/chat/agent-thread";
 import { agentStatus } from "@/components/chat/convert-message";
 import { StreamedText } from "@/components/chat/message-text";
 import type { ToolIcon } from "@/components/chat/tool-cards";
-import { agentTools, type ToolPart } from "@/components/chat/tool-part";
+import { agentTools, toolRunning, type ToolPart } from "@/components/chat/tool-part";
 import { useAgentRuntime } from "@/components/chat/use-agent-runtime";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -142,10 +142,21 @@ function chatParts(agent: AgentConfig) {
   let hit = parts.get(agent);
   if (!hit) {
     const { ToolUIs, Fallback } = agentTools(agent);
-    hit = { ToolUIs, components: { Text: AgentText, ToolFallback: Fallback } };
+    hit = { ToolUIs, components: { Text: AgentText, ToolFallback: Fallback, toolRunning: toolBusy } };
     parts.set(agent, hit);
   }
   return hit;
+}
+
+/**
+ * What keeps the trailing « réfléchit… » off a tool line: the line still
+ * shimmering, or a question card on screen. Once `ask_choices` has its output
+ * the turn is over in all but name — it closes up to 2 s later — and
+ * « réfléchit… » under a question waiting for the user's answer said the
+ * opposite.
+ */
+function toolBusy(part: Parameters<typeof toolRunning>[0]) {
+  return toolRunning(part) || (part.toolName === "ask_choices" && part.result !== undefined);
 }
 
 function AgentText({ text }: { text: string }) {

@@ -3,6 +3,7 @@
 import {
   ArrowLeftRightIcon,
   ArrowRightIcon,
+  BookOpenIcon,
   BoxIcon,
   CalendarDaysIcon,
   CheckIcon,
@@ -10,10 +11,12 @@ import {
   DatabaseIcon,
   DumbbellIcon,
   NotebookPenIcon,
+  PackageSearchIcon,
   RefreshCwIcon,
   RefrigeratorIcon,
   ShoppingBasketIcon,
   ShoppingCartIcon,
+  SunIcon,
   TagIcon,
   UtensilsCrossedIcon,
   UtensilsIcon,
@@ -115,6 +118,28 @@ export const CHEF: AgentConfig = {
       running: "J'enregistre ton profil…",
       done: "Profil nutrition enregistré",
       failed: "Le profil n'a pas pu être enregistré.",
+    },
+    // The reads, same as the Coach's. Without an entry they fell back to
+    // FALLBACK, and a « C'est fait. » right before the model's next 20 s of
+    // thinking said nothing about what had been done, nor that more was coming.
+    // No `running`: a read is quick, and the vague copy is already accurate.
+    "tool-read_plan": {
+      icon: BookOpenIcon,
+      pending: "Je relis ton menu…",
+      done: "J'ai relu ton menu",
+      failed: "Je n'ai pas pu relire ton menu.",
+    },
+    "tool-read_today": {
+      icon: SunIcon,
+      pending: "Je regarde ta journée…",
+      done: "J'ai regardé ta journée",
+      failed: "Je n'ai pas pu lire ta journée.",
+    },
+    "tool-read_inventory": {
+      icon: PackageSearchIcon,
+      pending: "Je regarde ton inventaire…",
+      done: "J'ai regardé ton inventaire",
+      failed: "Je n'ai pas pu lire ton inventaire.",
     },
     // The long one: writing 21 meals takes a while, and this line is the only
     // thing telling the user the app hasn't hung.

@@ -11,13 +11,20 @@
 //   par des props, pour que le Coach et le Chef partagent ce seul fichier ;
 // - retirés, parce que le chat n'en a pas (hors périmètre de #110) : accueil et
 //   suggestions, suggestions de relance, barres d'action (copier, régénérer, menu
-//   « plus »), édition, branches, dictée, messages vocaux, raisonnement, groupes de
-//   tâches, parts `file`/`image`, bouton d'arrêt. `ActionBarMorePrimitive` était
-//   aussi un menu Radix : il n'a rien à faire dans l'app (#69) ;
+//   « plus »), édition, branches, dictée, messages vocaux, groupes de tâches,
+//   parts `file`/`image`, bouton d'arrêt. `ActionBarMorePrimitive` était aussi un
+//   menu Radix : il n'a rien à faire dans l'app (#69) ;
 // - aucun regroupement des outils : chaque outil est enregistré en `standalone`
 //   et un outil inconnu passe par `ToolFallback`, jamais par un groupe replié ;
-// - l'indicateur « réfléchit… » seulement sur une réponse encore vide
-//   (`indicator="empty"`) ;
+// - le raisonnement, sans le composant `reasoning` du registry : un `<details>`
+//   natif fermé par défaut (`ReasoningDisclosure`), de la famille des lignes
+//   d'outil — « réfléchit… » animé tant qu'il s'écrit, puis « Réflexion » en gris ;
+//   les blocs adjacents fusionnent (`group-reasoning`) ;
+// - l'indicateur « réfléchit… » (`indicator="always"`, filtré par
+//   `TrailingIndicator`) : en bas de la réponse tant que le tour tourne et que la
+//   dernière part ne montre pas déjà qu'il travaille (outil en cours, texte ou
+//   raisonnement qui s'écrit). Plein format sur une réponse vide, petite ligne
+//   ensuite. `components.toolRunning` dit quand un outil est « en cours » ;
 // - `autoScroll` forcé sur le viewport (voir le commentaire sur place) ;
 // - la mise en page reprend celle d'avant (`ai-elements`) : bulle utilisateur,
 //   `text-sm`, `role="log"`, composer en bas de la zone de lecture.
@@ -31,11 +38,12 @@ import {
   ErrorPrimitive,
   groupPartByType,
   MessagePrimitive,
+  type PartState,
   ThreadPrimitive,
   type ToolCallMessagePartComponent,
   useAuiState,
 } from "@assistant-ui/react";
-import { ArrowDownIcon, ArrowUpIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, BrainIcon, ChevronDownIcon, Loader2Icon } from "lucide-react";
 import { createContext, useContext, useMemo, type ComponentType, type FC, type ReactNode } from "react";
 
 /**
@@ -43,10 +51,20 @@ import { createContext, useContext, useMemo, type ComponentType, type FC, type R
  * (`makeAssistantToolUI`) take precedence over `ToolFallback`.
  */
 export type ThreadComponents = {
-  /** An assistant text part. Defaults to the raw text. */
+  /** An assistant text part — and the body of an opened reasoning block.
+   *  Defaults to the raw text. */
   Text?: ComponentType<{ text: string }> | undefined;
   ToolFallback?: ToolCallMessagePartComponent | undefined;
+  /**
+   * Whether a tool line already speaks for the turn — it shimmers, or it is a
+   * card waiting on the user — so the trailing « réfléchit… » would be noise. Defaults to assistant-ui's own status —
+   * which calls a tool that threw « running » while it has no result, so a
+   * renderer with its own state machine should answer from that instead.
+   */
+  toolRunning?: ((part: ToolPartState) => boolean) | undefined;
 };
+
+export type ToolPartState = Extract<PartState, { type: "tool-call" }>;
 
 export type ThreadProps = {
   /** Keep this object referentially stable (module scope): a new one remounts
@@ -60,7 +78,9 @@ export type ThreadProps = {
   composerPlaceholder?: string | undefined;
   /** Accessible name of the attach button. No label, no button. */
   attachLabel?: string | undefined;
-  /** The placeholder reply while the turn hasn't produced anything yet. */
+  /** « … réfléchit… »: the placeholder reply while the turn hasn't produced
+   *  anything yet, a reasoning block still being written, and the trailing line
+   *  while the turn keeps going after its last visible part. */
   thinking?: string | undefined;
 };
 
@@ -71,9 +91,11 @@ const ThreadConfigContext = createContext<Omit<ThreadProps, "aboveMessages">>(EM
 const useThreadConfig = () => useContext(ThreadConfigContext);
 const useThreadComponents = () => useThreadConfig().components ?? EMPTY_COMPONENTS;
 
-// No group at all: every agent tool is registered as `standalone`, and an unknown
-// tool still renders on its own line rather than folded into « 3 outils ».
+// No tool group at all: every agent tool is registered as `standalone`, and an
+// unknown tool still renders on its own line rather than folded into « 3 outils ».
+// Reasoning is the one group: back-to-back blocks are one thought, one line.
 const messageGroupBy = groupPartByType({
+  reasoning: ["group-reasoning"],
   "tool-call": [],
   "standalone-tool-call": [],
 });
@@ -217,8 +239,106 @@ const MessageError: FC = () => {
 
 const PlainText: FC<{ text: string }> = ({ text }) => <p className="whitespace-pre-wrap">{text}</p>;
 
-const AssistantMessage: FC = () => {
+const defaultToolRunning = (part: ToolPartState) => part.status.type === "running";
+
+/**
+ * Whether the message's last part already tells the user the turn is working:
+ * a tool line that shimmers, or text / reasoning still being written. Anything
+ * else — a finished tool, finished text, nothing — is where the model goes quiet
+ * for 10–30 s before its next step, and where the trailing line goes.
+ */
+function lastPartShowsProgress(
+  parts: readonly PartState[],
+  toolRunning: (part: ToolPartState) => boolean,
+) {
+  const last = parts.at(-1);
+  if (!last) return false;
+  if (last.type === "tool-call") return toolRunning(last);
+  if (last.type === "text" || last.type === "reasoning") return last.status.type === "running";
+  return false;
+}
+
+/** The small working line, sized like a tool line so they read as one family. */
+const ThinkingLine: FC<{ text: string }> = ({ text }) => (
+  <>
+    <Loader2Icon className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+    {/* `shimmer` turns itself off under prefers-reduced-motion. */}
+    <span className="shimmer min-w-0 flex-1">{text}</span>
+  </>
+);
+
+/**
+ * The synthetic `indicator` part, emitted on every render of a running message
+ * (`indicator="always"`) and filtered here: assistant-ui's own modes only know
+ * « empty » and « last part isn't text ». `empty` alone left a tool line
+ * followed by half a minute of nothing, which read as the app having hung.
+ */
+const TrailingIndicator: FC = () => {
   const { thinking } = useThreadConfig();
+  const { toolRunning = defaultToolRunning } = useThreadComponents();
+  // A string, not the parts: this re-renders on every delta otherwise.
+  const mode = useAuiState((s) =>
+    s.message.parts.length === 0
+      ? "empty"
+      : lastPartShowsProgress(s.message.parts, toolRunning)
+        ? "none"
+        : "line",
+  );
+  const text = thinking ?? "Un instant…";
+
+  if (mode === "none") return null;
+  if (mode === "empty") {
+    return (
+      <span
+        data-slot="aui_assistant-message-indicator"
+        className="flex items-center gap-2 text-sm text-muted-foreground"
+      >
+        <Spinner /> {text}
+      </span>
+    );
+  }
+  return (
+    <p
+      data-slot="aui_assistant-message-indicator"
+      className="flex items-center gap-1.5 py-1 text-[11px] text-muted-foreground"
+    >
+      <ThinkingLine text={text} />
+    </p>
+  );
+};
+
+/**
+ * One reasoning block, collapsed. Native `<details>` like `ToolDisclosure` in
+ * `chat/tool-part.tsx`, for the same reasons: no state, and it survives
+ * re-render and thread paging — and the same `<details>` carries the block from
+ * « réfléchit… » to « Réflexion », so one opened mid-stream stays open.
+ *
+ * Grey once done, never the tool lines' success green: a thought isn't an action
+ * that worked, and green would read as one.
+ */
+const ReasoningDisclosure: FC<{ running: boolean; children: ReactNode }> = ({ running, children }) => {
+  const { thinking } = useThreadConfig();
+  return (
+    <details data-slot="aui_reasoning" className="group w-full">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] text-muted-foreground marker:hidden hover:text-foreground">
+        {running ? (
+          <ThinkingLine text={thinking ?? "Un instant…"} />
+        ) : (
+          <>
+            <BrainIcon className="size-3.5 shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1">Réflexion</span>
+          </>
+        )}
+        <ChevronDownIcon className="chevron size-3.5 shrink-0" aria-hidden />
+      </summary>
+      <div className="mt-1 flex flex-col gap-2 border-l border-border pl-3 text-xs text-muted-foreground">
+        {children}
+      </div>
+    </details>
+  );
+};
+
+const AssistantMessage: FC = () => {
   const { Text = PlainText, ToolFallback } = useThreadComponents();
 
   return (
@@ -234,24 +354,26 @@ const AssistantMessage: FC = () => {
         data-slot="aui_assistant-message-content"
         className="flex w-full min-w-0 flex-col gap-2 text-sm wrap-break-word text-foreground"
       >
-        {/* `empty`, not the default `no-text`: a tool line already shimmers
-            while it runs, and « réfléchit… » under it said the same thing twice. */}
-        <MessagePrimitive.GroupedParts groupBy={messageGroupBy} indicator="empty">
-          {({ part }) => {
+        {/* `always`, filtered by `TrailingIndicator`: neither `empty` nor the
+            default `no-text` covers a finished tool line followed by a long
+            silence without doubling a tool line that already shimmers. */}
+        <MessagePrimitive.GroupedParts groupBy={messageGroupBy} indicator="always">
+          {({ part, children }) => {
             switch (part.type) {
               case "text":
+                return <Text text={part.text} />;
+              case "group-reasoning":
+                return (
+                  <ReasoningDisclosure running={part.status.type === "running"}>
+                    {children}
+                  </ReasoningDisclosure>
+                );
+              case "reasoning":
                 return <Text text={part.text} />;
               case "tool-call":
                 return part.toolUI ?? (ToolFallback ? <ToolFallback {...part} /> : null);
               case "indicator":
-                return (
-                  <span
-                    data-slot="aui_assistant-message-indicator"
-                    className="flex items-center gap-2 text-sm text-muted-foreground"
-                  >
-                    <Spinner /> {thinking ?? "Un instant…"}
-                  </span>
-                );
+                return <TrailingIndicator />;
               default:
                 return null;
             }
