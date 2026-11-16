@@ -1,0 +1,7 @@
+# Hoisted node_modules for this project, whatever the machine's global bunfig says.
+# Under the isolated linker with bun's global store, node_modules symlinks point
+# into ~/.bun/install/cache — outside the project root — and Turbopack panics on
+# them (`next build`); the isolated layout also hides @clerk/backend from
+# scripts/agent-login.ts, failing the build's type check.
+[install]
+linker = "hoisted"
