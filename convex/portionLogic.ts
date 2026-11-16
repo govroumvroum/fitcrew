@@ -326,9 +326,32 @@ export function applyBatches<D extends { meals: M[] }, M extends Meal>(
   batches: Batch[],
   lookup: Lookup,
 ): { days: D[]; batches: Batch[]; notes: string[] } {
+  const notes: string[] = [];
+  // A pot too small for the plates aimed at it grows first — its scalable
+  // ingredients, up to ×2 — before any plate shrinks. The live run of #138: 3 ×
+  // ~800 kcal of bolognaise aimed at a 2 300 kcal pot.
+  batches = batches.map((batch) => {
+    const aimed = days
+      .flatMap((d) => d.meals)
+      .filter((m) => m.batch?.id === batch.id)
+      .reduce((sum, m) => sum + m.macros.calories, 0);
+    const pot = macrosFromIngredients(batch.ingredients, lookup);
+    if (!pot || aimed <= pot.calories * (1 + RESIZE_TOLERANCE)) return batch;
+    const grown = sizeIngredients(batch.ingredients, lookup, aimed);
+    if (!grown || grown.resized.length === 0) return batch;
+    notes.push(
+      `La marmite « ${batch.name} » a été agrandie pour toutes ses parts : ${grown.resized.map((r) => `${r.name} ${r.from} → ${r.to}`).join(", ")}.`,
+    );
+    const ratio = grown.macros.calories / Math.max(pot.calories, 1);
+    return {
+      ...batch,
+      ingredients: grown.ingredients,
+      steps: rewriteSteps(batch.steps, batch.ingredients, grown.ingredients),
+      ...(batch.cookedGrams && { cookedGrams: Math.round((batch.cookedGrams * ratio) / 10) * 10 }),
+    };
+  });
   const byId = new Map(batches.map((b) => [b.id, b]));
   const potKcal = new Map(batches.map((b) => [b.id, batchMacros(b, lookup)]));
-  const notes: string[] = [];
 
   // First pass: the wanted share of every linked meal.
   const wanted = new Map<string, number>();
@@ -379,7 +402,14 @@ export function applyBatches<D extends { meals: M[] }, M extends Meal>(
   }
 
   const eaten = new Set(linked.map((l) => l.meal.batch!.id));
-  return { days, batches: batches.filter((b) => eaten.has(b.id)), notes };
+  // The pot carries the macros its shares were computed from — the reference's
+  // total when it covers every ingredient — so the cook-day card and the meals
+  // agree.
+  return {
+    days,
+    batches: batches.filter((b) => eaten.has(b.id)).map((b) => ({ ...b, macros: potKcal.get(b.id)! })),
+    notes,
+  };
 }
 
 /** What's left in a pot after the planned shares — « reste ≈ 1 part ». */

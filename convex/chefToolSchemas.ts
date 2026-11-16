@@ -43,7 +43,9 @@ export const zSaveNutritionProfile = z.object({
 export const zIngredient = z.object({
   name: z.string(),
   quantity: z.string().describe('"200 g", "2", "1 cuillère"'),
-  amount: z
+  // Coerced: one live week (#138) had the model write "2" for 2 eggs, and the
+  // whole 21-meal call failed validation and was paid twice.
+  amount: z.coerce
     .number()
     .min(0)
     .nullable()
@@ -95,7 +97,7 @@ export const zPlannedMeal = z.object({
     .string()
     .nullable()
     .describe("L'id d'un batch de la semaine si ce repas en est une part, sinon null"),
-  share: z
+  share: z.coerce
     .number()
     .min(0)
     .max(1)
@@ -113,7 +115,7 @@ export const zBatch = z.object({
   ingredients: z.array(zIngredient).min(1).describe("Pour TOUTE la marmite, poids cru/sec"),
   steps: z.array(z.string()).min(1).describe("La recette de TOUTE la marmite"),
   macros: zMacros.describe("Ton estimation pour TOUTE la marmite"),
-  cookedGrams: z
+  cookedGrams: z.coerce
     .number()
     .min(0)
     .nullable()

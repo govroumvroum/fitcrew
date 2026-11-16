@@ -146,7 +146,9 @@ assert.equal(hard.batch!.share, Math.round((700 / potKcal) * 100) / 100);
 assert.equal(hard.macros.calories, Math.round(potKcal * hard.batch!.share));
 assert.equal(hard.batch!.cookedGrams, Math.round((1800 * hard.batch!.share) / 10) * 10);
 assert.equal(hard.ingredients.length, 3, "what to take out of the pot");
-assert.deepEqual(out.batches, [bolo]);
+assert.equal(out.batches.length, 1);
+assert.equal(out.batches[0].macros.calories, potKcal, "the pot carries its computed total, not the model's");
+assert.deepEqual({ ...out.batches[0], macros: bolo.macros }, bolo);
 assert.ok(batchLeftover("bolo", week) > 0.3);
 
 // Idempotent: rerunning over its own output moves nothing.
@@ -154,13 +156,36 @@ const snapshot = JSON.stringify(week);
 applyBatches(week, [bolo], lookup);
 assert.equal(JSON.stringify(week), snapshot);
 
-// Shares never exceed the pot.
+// Shares never exceed the pot — and a pot with nothing scalable can't grow, so
+// the plates shrink to fit.
 const greedy: PlanDay[] = [1, 2, 3].map((d) => ({ date: `2026-11-1${d}`, meals: [eat(1000)] }));
 const squeezed = applyBatches(greedy, [bolo], lookup);
 const total = greedy.reduce((s, d) => s + d.meals[0].batch!.share, 0);
 assert.ok(total <= 1.01, `Σ shares ${total}`);
 assert.equal(squeezed.notes.length, 1);
+assert.match(squeezed.notes[0], /réduites/);
 assert.equal(batchLeftover("bolo", greedy) <= 0.01, true);
+
+// A pot with scalable ingredients grows to feed the plates aimed at it.
+const scalableBolo: MealBatch = {
+  ...bolo,
+  ingredients: [g("Pâtes", 300, true), g("Bœuf haché 5 %", 600, true), g("Sauce tomate", 500)],
+  steps: ["Cuire 300 g de pâtes et 600 g de bœuf."],
+};
+const hungryWeek: PlanDay[] = [1, 2, 3].map((d) => ({ date: `2026-11-1${d}`, meals: [eat(800)] }));
+const grown = applyBatches(hungryWeek, [scalableBolo], lookup);
+assert.match(grown.notes[0], /agrandie/);
+assert.ok(grown.batches[0].ingredients[0].amount! > 300, "more pasta in the pot");
+assert.ok(grown.batches[0].cookedGrams! > 1800, "a bigger pot weighs more");
+assert.match(grown.batches[0].steps[0], new RegExp(`${grown.batches[0].ingredients[0].amount} g de pâtes`));
+for (const d of hungryWeek) {
+  assert.ok(Math.abs(d.meals[0].macros.calories - 800) < 60, `plate ≈ 800, got ${d.meals[0].macros.calories}`);
+}
+// …and rerunning moves nothing.
+const grownSnapshot = JSON.stringify(hungryWeek);
+const again = applyBatches(hungryWeek, grown.batches, lookup);
+assert.equal(JSON.stringify(hungryWeek), grownSnapshot);
+assert.deepEqual(again.notes, []);
 
 // A pot nobody eats from is dropped; a link to a missing pot is dropped.
 const lonely: PlanDay[] = [{ date: "2026-11-16", meals: [{ ...eat(600), batch: { id: "ghost", share: 0.5 } }] }];
