@@ -83,17 +83,59 @@ export const macros = v.object({
   fat: v.number(),
 });
 
+// --- Portions (#138) ---------------------------------------------------------
+// How an ingredient is counted: by weight (g, ml — its value is per 100) or by
+// the piece (a bun, a tortilla — a whole number, never cut).
+export const ingredientUnit = v.union(v.literal("g"), v.literal("ml"), v.literal("piece"));
+
+// One ingredient. `quantity` is the text every reader shows and stays written:
+// the previous bundle reads only `{ name, quantity }`. The structured fields are
+// optional forever — a meal written before #138 has none and keeps the model's
+// announced macros (see portionLogic.ts).
+export const ingredient = v.object({
+  name: v.string(),
+  quantity: v.string(),
+  amount: v.optional(v.number()), // grams, millilitres or pieces, per `unit`
+  unit: v.optional(ingredientUnit),
+  // The sizing lever: the filling, the meat, the starch. A sauce, a vegetable or
+  // a piece is never resized.
+  scalable: v.optional(v.boolean()),
+});
+
+// A meal that eats from a batch (`mealPlans.batches`): its share of the pot,
+// and the pot's estimated cooked weight × that share (decision A: the share
+// makes the macros, the grams are shown as an estimate).
+export const batchLink = v.object({
+  id: v.string(),
+  share: v.number(),
+  cookedGrams: v.optional(v.number()),
+});
+
+// A pot cooked once and eaten on several days, for ONE person (decision D).
+// Its ingredients and steps are the whole pot's; the shopping list counts them
+// once, and skips the meals that eat from it.
+export const mealBatch = v.object({
+  id: v.string(), // local to the plan, chosen by the model ("chili")
+  name: v.string(),
+  cookDate: v.string(),
+  ingredients: v.array(ingredient),
+  steps: v.array(v.string()),
+  macros, // the whole pot's, used when the reference can't compute it
+  cookedGrams: v.optional(v.number()),
+});
+
 export const plannedMeal = v.object({
   slot: mealSlot,
   name: v.string(),
   // An array, not a record keyed by the ingredient: a Convex field name must be
   // non-control ASCII and every one of these names is French.
-  ingredients: v.array(v.object({ name: v.string(), quantity: v.string() })),
+  ingredients: v.array(ingredient),
   steps: v.array(v.string()),
   prepMinutes: v.number(),
   macros,
   locked: v.optional(v.boolean()),
   mealPrep: v.optional(v.string()), // "se prépare la veille", when relevant
+  batch: v.optional(batchLink),
 });
 
 export const planDay = v.object({ date: v.string(), meals: v.array(plannedMeal) });
@@ -183,8 +225,8 @@ export const recipe = v.object({
   tags: v.array(v.string()), // "seche" on the catalogue
   description: v.optional(v.string()),
   // Same shape as `plannedMeal`: an array, because French names aren't valid
-  // Convex field names.
-  ingredients: v.array(v.object({ name: v.string(), quantity: v.string() })),
+  // Convex field names. Structured fields (#138) only on a Chef recipe.
+  ingredients: v.array(ingredient),
   steps: v.array(v.string()),
   prepMinutes: v.number(),
   macros,
@@ -424,7 +466,27 @@ export default defineSchema({
     userId: v.id("users"),
     weekStart: v.string(), // YYYY-MM-DD Monday, produced by monday()
     days: v.array(planDay),
+    // The week's batches (#138). Optional: a plan written before has none, and
+    // a batch no meal eats from is pruned at every write. Bounded (≤ 4).
+    batches: v.optional(v.array(mealBatch)),
   }).index("by_user_and_week", ["userId", "weekStart"]),
+
+  // What one food is worth, per user (#138, decision C): per 100 g / 100 ml
+  // and/or per piece. Written by the Chef — from a photographed label, an Open
+  // Food Facts product, or its own estimate the first time an ingredient shows
+  // up — and read by every meal write to compute and size portions. One row per
+  // `nameKey` (`normalizeName`); a few dozen per user.
+  foodRefs: defineTable({
+    userId: v.id("users"),
+    nameKey: v.string(),
+    name: v.string(),
+    per100: v.optional(macros),
+    perPiece: v.optional(macros),
+    pieceGrams: v.optional(v.number()),
+    // label > off > estimate: an estimate never overwrites the other two.
+    source: v.union(v.literal("label"), v.literal("off"), v.literal("estimate")),
+    offCode: v.optional(v.string()),
+  }).index("by_user_and_name_key", ["userId", "nameKey"]),
 
   // The shopping list's ticks (#121), one row per user and week. Keyed by the
   // list's `normalizeName`, so a tick follows its ingredient when the Chef
@@ -444,6 +506,9 @@ export default defineSchema({
     quantity: v.optional(v.string()),
     macros,
     source: v.union(v.literal("plan"), v.literal("manual"), v.literal("image")),
+    // « J'ai mangé » with a different portion (#138, decision B): the plan's
+    // macros × this. Absent = as planned. The plan itself never changes.
+    factor: v.optional(v.number()),
   }).index("by_user_and_date", ["userId", "date"]),
 
   // One row per day, upserted: a water counter is a single number per date.

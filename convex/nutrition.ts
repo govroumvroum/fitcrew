@@ -18,10 +18,21 @@ import {
   mealSlot,
   nutritionGoal,
   nutritionProfile,
+  mealBatch,
   planDay,
   plannedMeal,
 } from "./schema";
 import { getCurrentUser, requireCurrentUser } from "./users";
+import {
+  applyBatches,
+  logFactor,
+  normalizeName,
+  quantityText,
+  rewriteSteps,
+  scaleMacros,
+  sizeIngredients,
+} from "./portionLogic";
+import { type Estimate, recordEstimates, refsFor, valuesOf } from "./foodRefs";
 
 export type NutritionGoal = Infer<typeof nutritionGoal>;
 export type ActivityLevel = Infer<typeof activityLevel>;
@@ -29,6 +40,8 @@ export type Macros = Infer<typeof macros>;
 export type MealSlot = Infer<typeof mealSlot>;
 export type PlannedMeal = Infer<typeof plannedMeal>;
 export type PlanDay = Infer<typeof planDay>;
+export type MealBatch = Infer<typeof mealBatch>;
+type Ingredient = PlannedMeal["ingredients"][number];
 
 // ---------------------------------------------------------------------------
 // Pure logic. No ctx, no clock — see nutrition.check.ts.
@@ -162,23 +175,9 @@ export function sumMacros(entries: { macros: Macros }[]): Macros {
   );
 }
 
-/**
- * Merge key for a food name: lowercased, unaccented, punctuation and spaces
- * stripped, trailing plural dropped — so "Tomate", "tomates" and "TOMATE"
- * collide.
- *
- * ponytail: one plural rule ("s"), same as `candidateSlugs` in exerciseDemos.ts.
- * That one isn't reused here because it can't singularise and importing it would
- * drag the AI SDK into a module that is otherwise pure arithmetic.
- */
-export function normalizeName(name: string): string {
-  return name
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
-    .replace(/s$/, "");
-}
+// `normalizeName` moved to portionLogic.ts (#138) so the food reference can use
+// it without importing this module; re-exported for every existing caller.
+export { normalizeName };
 
 // --- Allergy / exclusion guard --------------------------------------------
 //
@@ -338,20 +337,34 @@ export function forbiddenHits(
  * Quantities sharing a unit are summed (see `sumQuantities`); the rest stay as
  * the strings the model wrote.
  */
-export function shoppingListFrom(days: PlanDay[]): { name: string; quantities: string[] }[] {
+export function shoppingListFrom(
+  days: PlanDay[],
+  batches: MealBatch[] = [],
+): { name: string; quantities: string[] }[] {
   const lines = new Map<string, { name: string; quantities: string[] }>();
+  const add = (ingredient: PlannedMeal["ingredients"][number]) => {
+    const key = normalizeName(ingredient.name);
+    if (!key) return;
+    // First spelling seen wins as the display name — it's the one the user
+    // already read in their plan.
+    const line = lines.get(key) ?? { name: ingredient.name.trim(), quantities: [] };
+    // Structured (#138): rebuilt from the number, so "2 (100 g)" and "2" both
+    // add up as pieces, and grams as grams.
+    const quantity =
+      ingredient.amount !== undefined && ingredient.unit !== undefined
+        ? quantityText(ingredient.amount, ingredient.unit)
+        : ingredient.quantity.trim();
+    if (quantity) line.quantities.push(quantity);
+    lines.set(key, line);
+  };
+  // A batch is bought once, for the whole pot; the meals eating from it buy
+  // nothing more. A link to a batch that isn't there buys the meal's own list.
+  const pots = new Set(batches.map((b) => b.id));
+  for (const batch of batches) batch.ingredients.forEach(add);
   for (const day of days) {
     for (const meal of day.meals) {
-      for (const ingredient of meal.ingredients) {
-        const key = normalizeName(ingredient.name);
-        if (!key) continue;
-        // First spelling seen wins as the display name — it's the one the user
-        // already read in their plan.
-        const line = lines.get(key) ?? { name: ingredient.name.trim(), quantities: [] };
-        const quantity = ingredient.quantity.trim();
-        if (quantity) line.quantities.push(quantity);
-        lines.set(key, line);
-      }
+      if (meal.batch && pots.has(meal.batch.id)) continue;
+      meal.ingredients.forEach(add);
     }
   }
   return [...lines.values()].map((line) => ({
@@ -412,7 +425,22 @@ export function clampMacros(m: Macros): Macros {
 export const clampMeal = (meal: PlannedMeal): PlannedMeal => ({
   ...meal,
   macros: clampMacros(meal.macros),
+  ingredients: meal.ingredients.map(clampIngredient),
+  ...(meal.batch && { batch: { ...meal.batch, share: clamp(meal.batch.share, 0, 1) } }),
 });
+
+/**
+ * A structured amount the model got wrong is dropped back to text, not thrown:
+ * a negative or absurd amount is noise. A piece count is a whole number.
+ */
+function clampIngredient(i: Ingredient): Ingredient {
+  if (i.amount === undefined || i.unit === undefined) return i;
+  if (!Number.isFinite(i.amount) || i.amount < 0 || i.amount > 5000) {
+    const { amount: _a, unit: _u, scalable: _s, ...text } = i;
+    return text;
+  }
+  return i.unit === "piece" ? { ...i, amount: Math.max(1, Math.round(i.amount)) } : i;
+}
 
 // ---------------------------------------------------------------------------
 // Convex
@@ -458,6 +486,76 @@ const refused = (violations: ForbiddenHit[]) =>
     violations,
     note: "Rien n'a été enregistré : ces ingrédients sont dans les ALLERGIES ou les ALIMENTS EXCLUS du user. Remplace-les et rappelle l'outil. Dis-lui ce que tu as changé.",
   }) as const;
+
+// --- Portions (#138) ---------------------------------------------------------
+
+const MAX_BATCHES = 4;
+
+export const estimate = v.object({
+  name: v.string(),
+  unit: v.union(v.literal("g"), v.literal("ml"), v.literal("piece")),
+  macros,
+});
+
+/**
+ * Every plan write goes through here before it's checked and saved:
+ * 1. the model's estimates fill the reference for ingredients it doesn't know
+ *    (never overwriting a label or an Open Food Facts value);
+ * 2. each INCOMING meal is computed from the reference and resized to the kcal
+ *    the Chef aimed it at — weights move, pieces stay whole (`sizeIngredients`);
+ * 3. every batch meal of the week is made consistent with its pot
+ *    (`applyBatches`), and pots nobody eats from are dropped.
+ *
+ * Meals already in the plan are not resized: a label saved since must not
+ * silently rewrite a week he already shopped for. Mutates `days` in place.
+ */
+async function portionWrite(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  days: PlanDay[],
+  batches: MealBatch[],
+  incoming: PlannedMeal[],
+  estimates: Estimate[],
+) {
+  const names = [
+    ...incoming.flatMap((m) => m.ingredients.map((i) => i.name)),
+    ...batches.flatMap((b) => b.ingredients.map((i) => i.name)),
+  ];
+  const refs = await refsFor(ctx, userId, names);
+  const estimated = await recordEstimates(ctx, userId, estimates, refs);
+  const lookup = (name: string) => valuesOf(refs.get(normalizeName(name)));
+
+  const resized: string[] = [];
+  for (const meal of incoming) {
+    if (meal.batch) continue;
+    const sized = sizeIngredients(meal.ingredients, lookup, meal.macros.calories);
+    if (!sized) continue;
+    meal.steps = rewriteSteps(meal.steps, meal.ingredients, sized.ingredients);
+    meal.ingredients = sized.ingredients;
+    meal.macros = clampMacros(sized.macros);
+    for (const r of sized.resized) resized.push(`${meal.name} : ${r.name} ${r.from} → ${r.to}`);
+  }
+  const applied = applyBatches(days, batches, lookup);
+  return {
+    batches: applied.batches,
+    portions: {
+      resized,
+      estimated,
+      notes: applied.notes,
+    },
+  };
+}
+
+/** The tool result's line about portions, or nothing when nothing happened. */
+const portionNote = (p: { resized: string[]; estimated: string[]; notes: string[] }) =>
+  p.resized.length + p.estimated.length + p.notes.length === 0
+    ? {}
+    : {
+        portions: {
+          ...p,
+          hint: "« resized » : quantités ajustées pour tenir le kcal visé, avec les valeurs de sa référence d'aliments — c'est ce qui est enregistré, annonce ces quantités-là. « estimated » : ingrédients encore inconnus, enregistrés avec TON estimation ; une photo d'étiquette ou lookup_food + save_food_ref les rendrait exacts.",
+        },
+      };
 
 async function requirePlan(ctx: MutationCtx, week: string) {
   const user = await requireCurrentUser(ctx);
@@ -630,7 +728,13 @@ export const plan = query({
 });
 
 export const savePlan = internalMutation({
-  args: { weekStart: v.string(), days: v.array(planDay) },
+  args: {
+    weekStart: v.string(),
+    days: v.array(planDay),
+    // #138. Optional: an in-flight call from the previous deploy sends neither.
+    batches: v.optional(v.array(mealBatch)),
+    estimates: v.optional(v.array(estimate)),
+  },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
     // Mirrors crew.generateChallenge: every week key in the app is a Monday, and
@@ -657,6 +761,18 @@ export const savePlan = internalMutation({
       date: day.date,
       meals: day.meals.map(clampMeal).sort(bySlot),
     }));
+    const { batches, portions } = await portionWrite(
+      ctx,
+      user._id,
+      days,
+      // Bounded, like the meals: a week has a handful of pots, not twenty.
+      (args.batches ?? []).slice(0, MAX_BATCHES).map((batch) => ({
+        ...batch,
+        ingredients: batch.ingredients.map(clampIngredient),
+      })),
+      days.flatMap((day) => day.meals),
+      args.estimates ?? [],
+    );
 
     // Checked across the WHOLE week before anything is written: a half-saved
     // plan is worse than a refused one.
@@ -668,10 +784,16 @@ export const savePlan = internalMutation({
     if (violations.length > 0) return refused(violations);
 
     const existing = await planFor(ctx, user._id, args.weekStart);
+    // A new week replaces the old one's batches too: they were its pots.
     if (existing) {
-      await ctx.db.patch("mealPlans", existing._id, { days });
+      await ctx.db.patch("mealPlans", existing._id, { days, batches });
     } else {
-      await ctx.db.insert("mealPlans", { userId: user._id, weekStart: args.weekStart, days });
+      await ctx.db.insert("mealPlans", {
+        userId: user._id,
+        weekStart: args.weekStart,
+        days,
+        batches,
+      });
     }
     // Same transaction as the plan, after the allergy check: a refused plan
     // adds no recipe (#119).
@@ -679,12 +801,22 @@ export const savePlan = internalMutation({
       userId: user._id,
       meals: days.flatMap((day) => day.meals),
     });
-    return { result: "ok" as const, meals: days.reduce((n, day) => n + day.meals.length, 0) };
+    return {
+      result: "ok" as const,
+      meals: days.reduce((n, day) => n + day.meals.length, 0),
+      ...portionNote(portions),
+    };
   },
 });
 
 export const replaceMeal = internalMutation({
-  args: { weekStart: v.string(), date: v.string(), slot: mealSlot, meal: plannedMeal },
+  args: {
+    weekStart: v.string(),
+    date: v.string(),
+    slot: mealSlot,
+    meal: plannedMeal,
+    estimates: v.optional(v.array(estimate)),
+  },
   handler: async (ctx, args) => {
     const found = await planOrRefusal(ctx, args.weekStart, [args.date]);
     if ("refusal" in found) return found.refusal;
@@ -692,17 +824,27 @@ export const replaceMeal = internalMutation({
     const day = requireDay(plan, args.date);
     const meal = clampMeal({ ...args.meal, slot: args.slot });
 
-    const violations = await forbiddenIn(ctx, plan.userId, [meal]);
-    if (violations.length > 0) return refused(violations);
-
     const index = day.meals.findIndex((m) => m.slot === args.slot);
     if (index >= 0) day.meals[index] = meal;
     else day.meals.push(meal);
     day.meals.sort(bySlot);
 
-    await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
+    // In memory until the patch below: a refusal writes nothing but the
+    // estimates, which are worth keeping either way.
+    const { batches, portions } = await portionWrite(
+      ctx,
+      plan.userId,
+      plan.days,
+      plan.batches ?? [],
+      [meal],
+      args.estimates ?? [],
+    );
+    const violations = await forbiddenIn(ctx, plan.userId, [meal]);
+    if (violations.length > 0) return refused(violations);
+
+    await ctx.db.patch("mealPlans", plan._id, { days: plan.days, batches });
     await ctx.runMutation(internal.recipes.upsertFromMeals, { userId: plan.userId, meals: [meal] });
-    return { result: "ok" as const, name: meal.name };
+    return { result: "ok" as const, name: meal.name, ...portionNote(portions) };
   },
 });
 
@@ -748,7 +890,12 @@ export const moveMeal = internalMutation({
  * dinners on one evening is not what anyone asked for.
  */
 export const regenerateDay = internalMutation({
-  args: { weekStart: v.string(), date: v.string(), meals: v.array(plannedMeal) },
+  args: {
+    weekStart: v.string(),
+    date: v.string(),
+    meals: v.array(plannedMeal),
+    estimates: v.optional(v.array(estimate)),
+  },
   handler: async (ctx, args) => {
     const found = await planOrRefusal(ctx, args.weekStart, [args.date]);
     if ("refusal" in found) return found.refusal;
@@ -759,16 +906,25 @@ export const regenerateDay = internalMutation({
     const locked = new Set(kept.map((meal) => meal.slot));
     const added = args.meals.filter((meal) => !locked.has(meal.slot)).map(clampMeal);
 
+    day.meals = [...kept, ...added].sort(bySlot);
+    const { batches, portions } = await portionWrite(
+      ctx,
+      plan.userId,
+      plan.days,
+      plan.batches ?? [],
+      added,
+      args.estimates ?? [],
+    );
+
     // Only the incoming meals are checked. The kept ones are already in the plan
     // and locked BY THE USER — refusing the whole day over one of those would
     // leave the model unable to regenerate anything, with no way to fix it.
     const violations = await forbiddenIn(ctx, plan.userId, added);
     if (violations.length > 0) return refused(violations);
 
-    day.meals = [...kept, ...added].sort(bySlot);
-    await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
+    await ctx.db.patch("mealPlans", plan._id, { days: plan.days, batches });
     await ctx.runMutation(internal.recipes.upsertFromMeals, { userId: plan.userId, meals: added });
-    return { result: "ok" as const, kept: kept.length, added: added.length };
+    return { result: "ok" as const, kept: kept.length, added: added.length, ...portionNote(portions) };
   },
 });
 
@@ -792,7 +948,7 @@ export const shoppingList = query({
     const user = await getCurrentUser(ctx);
     if (!user) return [];
     const found = await planFor(ctx, user._id, args.weekStart);
-    return shoppingListFrom(found?.days ?? []);
+    return shoppingListFrom(found?.days ?? [], found?.batches ?? []);
   },
 });
 
@@ -821,20 +977,33 @@ export const addLogEntry = mutation({
 
 /** Copies a planned meal into the log as-is: "j'ai mangé ce qui était prévu". */
 export const logPlannedMeal = mutation({
-  args: { date: v.string(), slot: mealSlot, weekStart: v.string() },
+  args: {
+    date: v.string(),
+    slot: mealSlot,
+    weekStart: v.string(),
+    // #138, decision B: « j'en ai pris plus / moins ». The plan's macros × this,
+    // bounded; absent = as planned. `quantity` is the screen's words for it
+    // (« 3 tacos », « ×1,25 »). Both optional: the previous bundle sends neither.
+    factor: v.optional(v.number()),
+    quantity: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const plan = await requirePlan(ctx, args.weekStart);
     const day = requireDay(plan, args.date);
     const meal = day.meals.find((m) => m.slot === args.slot);
     if (!meal) throw new Error("Aucun repas prévu sur ce créneau");
 
+    const factor = logFactor(args.factor);
+    const quantity = args.quantity?.trim();
     return await ctx.db.insert("foodLog", {
       userId: plan.userId,
       date: args.date,
       slot: args.slot,
       name: meal.name,
-      macros: clampMacros(meal.macros),
+      macros: clampMacros(factor === 1 ? meal.macros : scaleMacros(meal.macros, factor)),
       source: "plan",
+      ...(factor !== 1 && { factor }),
+      ...(quantity && { quantity }),
     });
   },
 });
