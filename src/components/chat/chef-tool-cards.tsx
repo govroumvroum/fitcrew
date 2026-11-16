@@ -6,6 +6,7 @@ import {
   CalendarDaysIcon,
   CheckIcon,
   ChevronDownIcon,
+  CookingPotIcon,
   DatabaseIcon,
   NotebookPenIcon,
   RefreshCwIcon,
@@ -120,7 +121,13 @@ const icon = (Icon: typeof CheckIcon) => <Icon className="size-4 shrink-0 text-m
  * the macros while the dish name took the emphasis — but the name is a label you
  * read once, and the number is what the card exists to tell you.
  */
-function MealBlock({ meal }: { meal: Meal }) {
+function MealBlock({
+  meal,
+  batchName,
+}: {
+  meal: Meal;
+  batchName?: (id: string) => string | undefined;
+}) {
   return (
     <li className="space-y-1 border-b px-1 py-2.5 last:border-b-0">
       <div className="flex items-baseline gap-2">
@@ -140,11 +147,47 @@ function MealBlock({ meal }: { meal: Meal }) {
       {/* ponytail: ingredient names, no quantities, and no steps. The whole recipe
           for 21 meals is a wall on a phone; the Chef narrates the day and
           /nutrition shows today's meals in full. */}
-      <p className="text-[11px] text-muted-foreground">
-        {meal.ingredients.map((i) => i.name).join(", ")}
-      </p>
+      {/* A share of a pot (#138) has no ingredients of its own: say which pot.
+          `?? null`: a thread from before #138 has no `batchId` at all. */}
+      {(meal.batchId ?? null) !== null ? (
+        <p className="text-[11px] text-muted-foreground">
+          Part du batch « {batchName?.(meal.batchId!) ?? meal.batchId} »
+        </p>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">
+          {meal.ingredients.map((i) => i.name).join(", ")}
+        </p>
+      )}
       {meal.mealPrep ? <p className="text-[11px] text-muted-foreground">{meal.mealPrep}</p> : null}
     </li>
+  );
+}
+
+type PlanBatch = NonNullable<MealPlanInput["batches"]>[number];
+
+/** The week's pots, above its days: what to cook, when, for how many meals. */
+function BatchList({ batches, days }: { batches: PlanBatch[]; days: MealPlanInput["days"] }) {
+  return (
+    <ul className="space-y-1">
+      {batches.map((batch) => {
+        const eaters = days.flatMap((d) => d.meals).filter((m) => m.batchId === batch.id).length;
+        return (
+          <li key={batch.id} className="flex items-baseline gap-2 rounded-md bg-muted/40 px-2 py-1.5">
+            <CookingPotIcon className="size-3.5 shrink-0 self-center text-muted-foreground" />
+            <span className="min-w-0 flex-1 text-sm">
+              {batch.name}
+              <span className="text-[11px] text-muted-foreground">
+                {" "}
+                · {formatLoose(batch.cookDate)}, {eaters} repas
+              </span>
+            </span>
+            <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+              ≈ {formatNumber(batch.macros.calories)} kcal la marmite
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -221,6 +264,7 @@ export function MealPlanCard({
         title={week ? `Ta semaine du ${week}` : "Ta semaine de repas"}
         aside={meals ? `${meals} repas` : undefined}
       />
+      {input.batches?.length ? <BatchList batches={input.batches} days={input.days} /> : null}
       {/* Native <details>: a disclosure without a dependency or a state hook.
           First day open, the rest collapsed — seven days at once is a wall. */}
       {input.days.map((day, i) => (
@@ -234,7 +278,11 @@ export function MealPlanCard({
           </summary>
           <ul className="mt-1 mb-2">
             {day.meals.map((meal) => (
-              <MealBlock key={`${meal.slot}-${meal.name}`} meal={meal} />
+              <MealBlock
+                key={`${meal.slot}-${meal.name}`}
+                meal={meal}
+                batchName={(id) => input.batches?.find((b) => b.id === id)?.name}
+              />
             ))}
           </ul>
         </details>
@@ -395,7 +443,10 @@ export function PlannedMealLoggedCard({
         aside={formatLoose(input.date)}
       />
       <p className="text-[11px] text-muted-foreground">
-        Recopié du plan dans ton journal, avec ses valeurs estimées.
+        {/* #138: `factor` is absent on threads from before it. */}
+        {input.factor != null && input.factor !== 1
+          ? `Recopié du plan dans ton journal${input.quantity ? ` (${input.quantity})` : ""}, valeurs × ${String(input.factor).replace(".", ",")} — estimations.`
+          : "Recopié du plan dans ton journal, avec ses valeurs estimées."}
       </p>
     </Surface>
   );

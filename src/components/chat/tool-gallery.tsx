@@ -1091,6 +1091,24 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
       }),
     },
   ],
+  // #138: no card, the one-line marker from `toolLabels`.
+  "tool-save_food_ref": [
+    {
+      label: "Valeurs d'un ingrédient, depuis une étiquette",
+      tool: done(
+        "tool-save_food_ref",
+        {
+          name: "Tortillas de blé",
+          per100: { calories: 310, protein: 8.5, carbs: 52, fat: 7 },
+          perPiece: { calories: 124, protein: 3.4, carbs: 21, fat: 2.8 },
+          pieceGrams: 40,
+          source: "label",
+          offCode: null,
+        },
+        { result: "ok", name: "Tortillas de blé", replaced: "estimate" },
+      ),
+    },
+  ],
 };
 
 /**

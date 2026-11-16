@@ -93,6 +93,7 @@ function emptyWeek(today: string, week: PlanWeek) {
     weekStart,
     hasPlan: false,
     days: dates.map((date) => ({ date, level: null, targets: null, meals: [] })),
+    batches: [],
   };
 }
 
@@ -125,7 +126,9 @@ async function weekFor(ctx: QueryCtx, userId: Id<"users">, today: string, week: 
       };
     }),
   );
-  return { weekStart, hasPlan: plan !== null, days };
+  // The week's pots (#138): the cook day shows the whole pot and how it's
+  // shared out. Added, not swapped in — the previous bundle never reads it.
+  return { weekStart, hasPlan: plan !== null, days, batches: plan?.batches ?? [] };
 }
 
 /**
@@ -146,7 +149,9 @@ export const weekForMcp = internalQuery({
         meals: day.meals.map((meal) => ({
           slot: meal.slot,
           name: meal.name,
-          ingredients: meal.ingredients,
+          // Projected: the tool's `returns` validator is `{ name, quantity }`,
+          // and the structured fields (#138) would fail it.
+          ingredients: meal.ingredients.map(({ name, quantity }) => ({ name, quantity })),
           macros: meal.macros,
           prepMinutes: meal.prepMinutes,
           locked: meal.locked,
@@ -232,7 +237,14 @@ export const swapMeal = mutation({
     });
     day.meals[index] = meal;
     day.meals.sort(bySlot);
-    await ctx.db.patch("mealPlans", plan._id, { days: plan.days });
+    // The swapped-out meal may have been a batch's last eater (#138): a pot
+    // nobody eats from leaves the plan, or the shopping list would still buy it.
+    const eaten = new Set(plan.days.flatMap((d) => d.meals.flatMap((m) => m.batch?.id ?? [])));
+    const batches = plan.batches?.filter((b) => eaten.has(b.id));
+    await ctx.db.patch("mealPlans", plan._id, {
+      days: plan.days,
+      ...(batches && { batches }),
+    });
     return { result: "ok" as const, name: meal.name };
   },
 });
@@ -261,7 +273,7 @@ export const shoppingList = query({
 async function shoppingListFor(ctx: QueryCtx, userId: Id<"users">, today: string, week: PlanWeek) {
   const weekStart = planWeeks(today)[week];
   const plan = await planFor(ctx, userId, weekStart);
-  const lines = shoppingListFrom(plan?.days ?? []).map((line) => ({
+  const lines = shoppingListFrom(plan?.days ?? [], plan?.batches ?? []).map((line) => ({
     ...line,
     key: normalizeName(line.name),
   }));
@@ -300,7 +312,9 @@ async function writeChecks(
 ): Promise<CheckWrite> {
   const plan = await planFor(ctx, userId, weekStart);
   if (!plan) return { hasPlan: false, keys: [] };
-  const listKeys = shoppingListFrom(plan.days).map((line) => normalizeName(line.name));
+  const listKeys = shoppingListFrom(plan.days, plan.batches ?? []).map((line) =>
+    normalizeName(line.name),
+  );
   const existing = await checksFor(ctx, userId, weekStart);
   const next = checkKeys(existing?.keys ?? [], listKeys, keys, checked);
   if (existing) await ctx.db.patch("shoppingChecks", existing._id, { keys: next });

@@ -29,7 +29,9 @@ import {
   zAddFoodLogEntry,
   zAnalyzeImage,
   zAskCoach,
+  zBatch,
   zGenerateMealPlan,
+  zIngredient,
   zLogPlannedMeal,
   zLookupFood,
   zMoveMeal,
@@ -37,14 +39,17 @@ import {
   zReadPlan,
   zRegenerateDay,
   zReplaceMeal,
+  zSaveFoodRef,
   zSaveNutritionProfile,
   zShoppingList,
   zSuggestRecipes,
   zUpdateInventory,
 } from "./chefToolSchemas";
 import { foodByBarcode, isBarcode, searchFood } from "./foodFacts";
+import { batchLeftover } from "./portionLogic";
 import { CONTEXT_OPTIONS, languageModel } from "./model";
-import { levelTargetsOf, type Macros, type PlannedMeal } from "./nutrition";
+import type { Estimate } from "./foodRefs";
+import { levelTargetsOf, type Macros, type MealBatch, type PlannedMeal } from "./nutrition";
 import { WEEK_LABEL, nextWeekLine, planWeeks, weekOfDates } from "./planWeeks";
 import { shift, weekStart } from "./progress";
 import { type DayLevelView, type EntryProgram, loadTemplate } from "./week";
@@ -68,14 +73,52 @@ import { getCurrentUser, requireCurrentUser } from "./users";
 // ---------------------------------------------------------------------------
 
 type ModelMeal = z.infer<typeof zPlannedMeal>;
+type ModelIngredient = z.infer<typeof zIngredient>;
+type ModelBatch = z.infer<typeof zBatch>;
+type Ingredient = PlannedMeal["ingredients"][number];
+
+/**
+ * One model ingredient → the stored one, plus its estimate (#138). The text
+ * `quantity` always stays; the structure travels only when both `amount` and
+ * `unit` are there. `per` never reaches the plan: it goes to the food reference.
+ */
+export function toIngredient(
+  { per, amount, unit, scalable, ...text }: ModelIngredient,
+  estimates: Estimate[],
+): Ingredient {
+  if (amount === null || unit === null) return text;
+  if (per) estimates.push({ name: text.name, unit, macros: per });
+  return { ...text, amount, unit, ...(scalable !== null && { scalable }) };
+}
 
 /**
  * Strict structured output can't express "optional", so nulls come back instead.
  * `locked` is deliberately absent: it belongs to the user (the lock button in the
  * UI), and letting the model set it would let it lock its own proposals.
+ *
+ * `estimates` collects the model's per-ingredient guesses (#138) for the write.
  */
-export function toPlannedMeal({ mealPrep, ...rest }: ModelMeal): PlannedMeal {
-  return { ...rest, ...(mealPrep ? { mealPrep } : {}) };
+export function toPlannedMeal(
+  { mealPrep, batchId, share, ingredients, ...rest }: ModelMeal,
+  estimates: Estimate[] = [],
+): PlannedMeal {
+  return {
+    ...rest,
+    ingredients: ingredients.map((i) => toIngredient(i, estimates)),
+    ...(mealPrep ? { mealPrep } : {}),
+    ...(batchId ? { batch: { id: batchId, share: share ?? 0 } } : {}),
+  };
+}
+
+export function toBatch(
+  { cookedGrams, ingredients, ...rest }: ModelBatch,
+  estimates: Estimate[],
+): MealBatch {
+  return {
+    ...rest,
+    ingredients: ingredients.map((i) => toIngredient(i, estimates)),
+    ...(cookedGrams !== null && cookedGrams > 0 ? { cookedGrams } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -309,15 +352,21 @@ export function chefTools(today: string) {
       description:
         "Génère et enregistre les repas d'UNE semaine : la semaine en cours OU la semaine prochaine, jamais une autre. Toutes les dates dans la même semaine, du lundi au dimanche, prises dans la section DATES à la fin de ton system prompt — la semaine est déduite des dates. Écrase le plan existant de CETTE semaine-là, sans toucher l'autre.",
       inputSchema: zGenerateMealPlan,
-      execute: async (ctx: ToolCtx, { days }) => {
+      execute: async (ctx: ToolCtx, { days, batches }) => {
         const target = weekOfDates(
           today,
           days.map((day) => day.date),
         );
         if ("error" in target) return outOfRange(target.error);
+        const estimates: Estimate[] = [];
         const saved = await ctx.runMutation(internal.nutrition.savePlan, {
           weekStart: target.weekStart,
-          days: days.map((day) => ({ date: day.date, meals: day.meals.map(toPlannedMeal) })),
+          days: days.map((day) => ({
+            date: day.date,
+            meals: day.meals.map((meal) => toPlannedMeal(meal, estimates)),
+          })),
+          batches: (batches ?? []).map((batch) => toBatch(batch, estimates)),
+          estimates,
         });
         // Which week it went to, so the summary says so — the card reads `meals`.
         return saved.result === "ok"
@@ -358,7 +407,17 @@ export function chefTools(today: string) {
               // So a replaced meal can reuse the names (and amounts) the rest of
               // the week already uses — the shopping list merges by name.
               ingredients: m.ingredients.map((i) => `${i.name} ${i.quantity}`.trim()),
+              batch: m.batch ? { id: m.batch.id, share: m.batch.share } : null,
             })),
+          })),
+          // Its pots (#138): a replaced or regenerated meal can take a share of
+          // one by its id. What's left of each is computed, not to recount.
+          batches: (plan.batches ?? []).map((b) => ({
+            id: b.id,
+            name: b.name,
+            cookDate: b.cookDate,
+            calories: b.macros.calories,
+            leftover: batchLeftover(b.id, plan.days),
           })),
         };
       },
@@ -371,11 +430,13 @@ export function chefTools(today: string) {
       execute: async (ctx: ToolCtx, { date, slot, meal }) => {
         const target = weekOfDates(today, [date]);
         if ("error" in target) return outOfRange(target.error);
+        const estimates: Estimate[] = [];
         return await ctx.runMutation(internal.nutrition.replaceMeal, {
           weekStart: target.weekStart,
           date,
           slot,
-          meal: toPlannedMeal(meal),
+          meal: toPlannedMeal(meal, estimates),
+          estimates,
         });
       },
     }),
@@ -404,10 +465,12 @@ export function chefTools(today: string) {
       execute: async (ctx: ToolCtx, { date, meals }) => {
         const target = weekOfDates(today, [date]);
         if ("error" in target) return outOfRange(target.error);
+        const estimates: Estimate[] = [];
         return await ctx.runMutation(internal.nutrition.regenerateDay, {
           weekStart: target.weekStart,
           date,
-          meals: meals.map(toPlannedMeal),
+          meals: meals.map((meal) => toPlannedMeal(meal, estimates)),
+          estimates,
         });
       },
     }),
@@ -447,14 +510,20 @@ export function chefTools(today: string) {
 
     log_planned_meal: createTool({
       description:
-        "« J'ai mangé ce qui était prévu » : recopie le repas du plan dans le journal, tel quel.",
+        "« J'ai mangé ce qui était prévu » : recopie le repas du plan dans le journal. S'il en a mangé plus ou moins (« que la moitié », « un taco de plus »), donne factor : les macros enregistrées sont celles du plan × factor, et le plan ne change pas.",
       inputSchema: zLogPlannedMeal.extend({
         date: z
           .string()
           .describe("YYYY-MM-DD. La date d'aujourd'hui est donnée à la fin de ton system prompt"),
       }),
-      execute: async (ctx: ToolCtx, { date, slot }) =>
-        await ctx.runMutation(api.nutrition.logPlannedMeal, { ...week, date, slot }),
+      execute: async (ctx: ToolCtx, { date, slot, factor, quantity }) =>
+        await ctx.runMutation(api.nutrition.logPlannedMeal, {
+          ...week,
+          date,
+          slot,
+          ...(factor !== null && { factor }),
+          ...(quantity && { quantity }),
+        }),
     }),
 
     update_inventory: createTool({
@@ -497,6 +566,20 @@ export function chefTools(today: string) {
           return { query, results: [], error: message };
         }
       },
+    }),
+
+    save_food_ref: createTool({
+      description:
+        "Enregistre les vraies valeurs d'un ingrédient dans sa référence d'aliments, celle qui sert à calculer et doser ses repas. Après read_nutrition_label (source label) quand il t'envoie l'étiquette d'un produit qu'il utilise, ou après lookup_food quand un produit précis correspond (source off, avec son code-barres). Remplace l'estimation ou la valeur précédente.",
+      inputSchema: zSaveFoodRef,
+      execute: async (ctx: ToolCtx, { per100, perPiece, pieceGrams, offCode, ...rest }) =>
+        await ctx.runMutation(internal.foodRefs.save, {
+          ...rest,
+          ...(per100 && { per100 }),
+          ...(perPiece && { perPiece }),
+          ...(pieceGrams !== null && { pieceGrams }),
+          ...(offCode && { offCode }),
+        }),
     }),
 
     analyze_plate: createTool({
@@ -683,7 +766,15 @@ RÈGLES PLAN (quand tu appelles generate_meal_plan)
         ? `- ${p.mealsPerDay} repas par jour. Chaque jour vise la cible de SON niveau dans sa semaine type (off, léger ou dur, ci-dessus) : un jour de séance a plus de glucides qu'un jour off, les protéines restent les mêmes. Pas au kcal près : c'est une estimation. La date de chaque jour de la semaine est dans la section DATES.`
         : `- ${p.mealsPerDay} repas par jour, et le total journalier tourne autour de sa cible moyenne, la même chaque jour. Pas au kcal près : c'est une estimation.`
   }
-- Respecte le temps de cuisine et le budget. Réutilise les mêmes ingrédients sur plusieurs repas — c'est moins cher et ça évite le gaspillage. Utilise \`mealPrep\` quand un plat se prépare la veille ou en double.
+- Respecte le temps de cuisine et le budget. Réutilise les mêmes ingrédients sur plusieurs repas — c'est moins cher et ça évite le gaspillage. Utilise \`mealPrep\` quand un plat se prépare la veille.
+- TOUT est pour lui seul : chaque quantité, chaque marmite, chaque part.
+
+PORTIONS
+- Chaque ingrédient qui compte a \`amount\` + \`unit\` : au poids (g, ml), ou en pièces ENTIÈRES (piece) pour ce qui ne se coupe pas — pain burger, tortilla, pita, œuf. Jamais 1,5 tortilla.
+- Les \`macros\` d'un repas sont ce que tu VISES. Le serveur calcule le vrai total avec sa référence d'aliments et ajuste les ingrédients \`scalable\` (viande, féculent, garniture) pour la tenir ; les pièces restent entières, au pire ±1. Un burger plus gros, c'est un steak plus lourd, pas un bout de pain en plus. Le résultat te revient dans \`portions\` : annonce les quantités enregistrées, pas les tiennes.
+- Donne \`per\` (tes valeurs pour 100 g, ou pour UNE pièce) : elles ne servent que pour un ingrédient qu'il n'a pas encore dans sa référence.
+- BATCH : un plat cuisiné une fois et mangé sur plusieurs jours (bolognaise, chili, curry) va dans \`batches\` de \`generate_meal_plan\` — ingrédients, étapes et macros de TOUTE la marmite, et son poids cuit estimé. Chaque repas qui en mange a \`batchId\`, des ingrédients vides, des étapes de réchauffe, et ses macros visées : le serveur en déduit sa part (plus grosse un jour dur). Une marmite sert au moins 2 repas ; les parts ne dépassent pas la marmite. \`replace_meal\` et \`regenerate_day\` peuvent reprendre une marmite existante par son id (\`read_plan\` les liste, avec ce qu'il en reste).
+- Il t'envoie l'étiquette d'un produit qu'il utilise → \`read_nutrition_label\`, puis \`save_food_ref\` (source label) sous le nom de l'ingrédient tel qu'il est dans ses repas. Un produit Open Food Facts qui correspond → \`save_food_ref\` (source off).
 ${
   week
     ? `- Sers son entraînement selon le moment prévu dans sa semaine type : les glucides dans le repas ou la collation ~1h30 AVANT la séance, les protéines dans le repas d'APRÈS. Séance le matin → glucides au petit-déjeuner ou juste avant, protéines au repas suivant ; le soir → glucides au déjeuner ou au goûter, protéines au dîner. Sans moment précisé, dis « autour de la séance » et n'invente pas d'heure.

@@ -211,6 +211,13 @@ export const CHEF: AgentConfig = {
       done: "Valeurs Open Food Facts",
       failed: "Open Food Facts ne répond pas.",
     },
+    // #138: no card, the line is enough — the Chef says what it saved.
+    "tool-save_food_ref": {
+      icon: DatabaseIcon,
+      pending: "Je note ces valeurs…",
+      done: "Valeurs de l'ingrédient enregistrées",
+      failed: "Les valeurs n'ont pas pu être enregistrées.",
+    },
     // The four photo skills each get their own icon: at a glance the row says
     // WHAT was photographed, which is the only thing distinguishing them.
     // "J'ouvre" while the model is still choosing the analysis, "je regarde" once
