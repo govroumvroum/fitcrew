@@ -61,8 +61,13 @@ assert.equal(valuePerUnit(undefined, "g"), null);
 
 const burger = [piece("Pain burger", 1), g("Steak haché 5 %", 150, true), { name: "Sel", quantity: "" }];
 assert.equal(macrosFromIngredients(burger, lookup)!.calories, 150 + 195);
-// An ingredient that weighs but has no structure, or no known value → null.
-assert.equal(macrosFromIngredients([...burger, { name: "Cheddar", quantity: "20 g" }], lookup), null);
+// A spice the way the tool asks for it (`amount: null`, « 1 pincée ») counts
+// zero in a structured meal — it must not switch sizing off for the whole meal.
+const seasoned = [...burger, { name: "Paprika", quantity: "1 pincée" }];
+assert.equal(macrosFromIngredients(seasoned, lookup)!.calories, 150 + 195);
+assert.ok(sizeIngredients(seasoned, lookup, 450), "a pinch of paprika doesn't stop sizing");
+// A legacy meal (text quantities only), or a structured line with no known value → null.
+assert.equal(macrosFromIngredients([{ name: "Cheddar", quantity: "20 g" }, { name: "Sel", quantity: "" }], lookup), null);
 assert.equal(macrosFromIngredients([g("Inconnu", 100)], lookup), null);
 
 // --- sizing ----------------------------------------------------------------
@@ -146,6 +151,14 @@ assert.equal(hard.batch!.share, Math.round((700 / potKcal) * 100) / 100);
 assert.equal(hard.macros.calories, Math.round(potKcal * hard.batch!.share));
 assert.equal(hard.batch!.cookedGrams, Math.round((1800 * hard.batch!.share) / 10) * 10);
 assert.equal(hard.ingredients.length, 3, "what to take out of the pot");
+// A small amount shared stays small: no 5 g floor on a share of the pot.
+{
+  const garlicky: MealBatch = { ...bolo, ingredients: [...bolo.ingredients, { ...g("Ail", 6), name: "Ail" }] };
+  const quarters: PlanDay[] = [1, 2, 3, 4].map((d) => ({ date: `2026-11-1${d}`, meals: [eat(500)] }));
+  applyBatches(quarters, [garlicky], lookup);
+  const ail = quarters[0].meals[0].ingredients.find((i) => i.name === "Ail")!;
+  assert.ok(ail.amount! < 5, `≈ 1,5 g of garlic a meal, got ${ail.amount}`);
+}
 assert.equal(out.batches.length, 1);
 assert.equal(out.batches[0].macros.calories, potKcal, "the pot carries its computed total, not the model's");
 assert.deepEqual({ ...out.batches[0], macros: bolo.macros }, bolo);
@@ -244,6 +257,11 @@ assert.match(ghost!.note, /« chili »/);
 assert.match(ghost!.note, /« bolo » \(Bolognaise\)/, "names the pots that do exist");
 const hollow = portionRefusal([{ ...eat(600), batch: undefined }], []);
 assert.equal(hollow?.result, "refused", "no pot, no ingredients: refused");
+// A new week's pot must be cooked on one of its days, or no screen shows it.
+assert.equal(portionRefusal([eat(600)], [bolo], ["2026-11-16", "2026-11-18"]), null);
+const adrift = portionRefusal([eat(600)], [{ ...bolo, cookDate: "lundi 16" }], ["2026-11-16"]);
+assert.equal(adrift?.result, "refused");
+assert.match(adrift!.note, /« lundi 16 »/);
 
 console.log("portionLogic.check: ok");
 

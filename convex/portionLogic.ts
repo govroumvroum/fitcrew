@@ -155,18 +155,21 @@ const scaleMacros100 = (per100: Macros, grams: number) => mapMacros(per100, (n) 
 const weighs = (i: Ingredient) => i.quantity.trim() !== "" || (i.amount ?? 0) > 0;
 
 /**
- * The meal's macros from its ingredients and the reference, or null when one
- * ingredient that weighs isn't structured or has no known value — then the
- * model's announced total stays, as before #138. Unrounded on purpose: rounding
- * happens once, at the end.
+ * The meal's macros from its ingredients and the reference, or null when it
+ * can't be computed — then the model's announced total stays, as before #138.
+ *
+ * In a structured meal (one written since #138), a line without amount + unit
+ * is the Chef saying it doesn't count: the tool asks for `amount: null` on
+ * salt, pepper, spices and herbs (« 1 pincée »), so it counts zero. Only a
+ * legacy meal, where no line is structured, falls back to the announced total.
+ * A structured line with no known value still makes the meal uncomputable.
+ * Unrounded on purpose: rounding happens once, at the end.
  */
 export function macrosFromIngredients(ingredients: Ingredient[], lookup: Lookup): Macros | null {
+  if (!ingredients.some(isStructured) && ingredients.some(weighs)) return null;
   let total = ZERO;
   for (const ingredient of ingredients) {
-    if (!isStructured(ingredient)) {
-      if (weighs(ingredient)) return null;
-      continue;
-    }
+    if (!isStructured(ingredient)) continue;
     const per = valuePerUnit(lookup(ingredient.name), ingredient.unit);
     if (!per) return null;
     total = add(
@@ -185,6 +188,12 @@ export function quantityText(amount: number, unit: Unit): string {
 
 /** Grams move by 5 (a scale's useful precision), never below 5. */
 const roundGrams = (n: number) => Math.max(5, Math.round(n / 5) * 5);
+
+/**
+ * A share of a pot's weight: by 5 g too, but no 5 g floor — 6 g of garlic
+ * shared four ways is 1,5 g a meal, not 5 g each (20 g in all).
+ */
+const shareGrams = (n: number) => (n < 5 ? Math.round(n * 10) / 10 : Math.round(n / 5) * 5);
 
 export type Resize = { name: string; from: string; to: string };
 
@@ -389,7 +398,7 @@ export function applyBatches<D extends { meals: M[] }, M extends Meal>(
     meal.ingredients = batch.ingredients.map((i) => {
       if (!isStructured(i)) return i;
       const amount =
-        i.unit === "piece" ? Math.round(i.amount * share * 10) / 10 : roundGrams(i.amount * share);
+        i.unit === "piece" ? Math.round(i.amount * share * 10) / 10 : shareGrams(i.amount * share);
       return { ...i, amount, quantity: quantityText(amount, i.unit) };
     });
   }

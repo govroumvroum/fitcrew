@@ -111,7 +111,7 @@ export const zPlannedMeal = z.object({
 export const zBatch = z.object({
   id: z.string().describe('Court et unique dans la semaine : "chili", "curry"'),
   name: z.string(),
-  cookDate: z.string().describe("Le jour où il cuisine la marmite"),
+  cookDate: z.string().describe("Le jour où il cuisine la marmite, une des dates du plan (AAAA-MM-JJ)"),
   ingredients: z.array(zIngredient).min(1).describe("Pour TOUTE la marmite, poids cru/sec"),
   steps: z.array(z.string()).min(1).describe("La recette de TOUTE la marmite"),
   macros: zMacros.describe("Ton estimation pour TOUTE la marmite"),

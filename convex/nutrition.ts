@@ -549,8 +549,23 @@ async function portionWrite(
  * A meal pointing at a pot the plan doesn't have, or a meal outside any pot with
  * no ingredients: refused, never saved half-empty. Returned, like `refused`, so
  * the model reads what to fix.
+ *
+ * With `dates` (a new week's days), a pot cooked on none of them is refused too:
+ * its cook-day card is the only place the pot shows (`b.cookDate === day.date`),
+ * so « lundi 16 » or a date in another week would leave a pot the shopping list
+ * buys and no screen shows.
  */
-export function portionRefusal(incoming: PlannedMeal[], batches: MealBatch[]) {
+export function portionRefusal(incoming: PlannedMeal[], batches: MealBatch[], dates?: string[]) {
+  if (dates) {
+    const days = new Set(dates);
+    const adrift = batches.filter((b) => !days.has(b.cookDate));
+    if (adrift.length > 0) {
+      return {
+        result: "refused" as const,
+        note: `Rien n'a été enregistré : ${adrift.map((b) => `le batch « ${b.name} » se cuisine le « ${b.cookDate} »`).join(" ; ")}, qui n'est aucun des jours du plan. cookDate doit être une date du plan, au format AAAA-MM-JJ (${dates.join(", ")}).`,
+      };
+    }
+  }
   const pots = new Set(batches.map((b) => b.id));
   const unknown = incoming.filter((m) => m.batch && !pots.has(m.batch.id));
   if (unknown.length > 0) {
@@ -791,7 +806,11 @@ export const savePlan = internalMutation({
       ingredients: batch.ingredients.map(clampIngredient),
     }));
     const incoming = days.flatMap((day) => day.meals);
-    const invalid = portionRefusal(incoming, pots);
+    const invalid = portionRefusal(
+      incoming,
+      pots,
+      days.map((day) => day.date),
+    );
     if (invalid) return invalid;
     const { batches, portions, commit } = await portionWrite(
       ctx,
