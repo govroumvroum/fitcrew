@@ -262,6 +262,8 @@ assert.equal(portionRefusal([eat(600)], [bolo], ["2026-11-16", "2026-11-18"]), n
 const adrift = portionRefusal([eat(600)], [{ ...bolo, cookDate: "lundi 16" }], ["2026-11-16"]);
 assert.equal(adrift?.result, "refused");
 assert.match(adrift!.note, /« lundi 16 »/);
+// Two pots under one id: refused, every pot invariant is keyed on it.
+assert.equal(portionRefusal([eat(600)], [bolo, { ...bolo, name: "Bolognaise bis" }])?.result, "refused");
 
 console.log("portionLogic.check: ok");
 

@@ -570,6 +570,14 @@ export function portionRefusal(incoming: PlannedMeal[], batches: MealBatch[], da
     }
   }
   const pots = new Set(batches.map((b) => b.id));
+  // Every pot invariant in `applyBatches` is keyed on the id: two pots sharing
+  // one would mix their shares and both grow against the whole aimed total.
+  if (pots.size !== batches.length) {
+    return {
+      result: "refused" as const,
+      note: "Rien n'a été enregistré : deux batchs portent le même id. Donne à chaque marmite un id unique dans la semaine.",
+    };
+  }
   const unknown = incoming.filter((m) => m.batch && !pots.has(m.batch.id));
   if (unknown.length > 0) {
     const known = batches.map((b) => `« ${b.id} » (${b.name})`).join(", ") || "aucun";
