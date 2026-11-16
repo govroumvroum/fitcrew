@@ -1,6 +1,13 @@
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { type QueryCtx, mutation, query } from "./_generated/server";
+import {
+  type MutationCtx,
+  type QueryCtx,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import {
   type PlannedMeal,
   bySlot,
@@ -11,14 +18,14 @@ import {
   shoppingListFrom,
   normalizeName,
 } from "./nutrition";
-import { planWeeks } from "./planWeeks";
+import { type PlanWeek, planWeeks } from "./planWeeks";
 import { byOwnerAndKey, forbiddenFor, libraryFor, photoFor, recipeKey, visibleTo } from "./recipes";
 import { categoryForSlot } from "./recipeLogic";
 import { mealSlot } from "./schema";
 import { getCurrentUser, requireCurrentUser } from "./users";
 import { sessionsOn, templateFor } from "./week";
 import { resolveDayLevel } from "./weekTemplate";
-import { liveChecks, nextChecks, pickCandidates } from "./weekPlanLogic";
+import { checkKeys, liveChecks, pickCandidates } from "./weekPlanLogic";
 
 /**
  * /nutrition's week view and shopping list (#121): the current week and the
@@ -68,40 +75,84 @@ async function mealCard(ctx: QueryCtx, userId: Id<"users">, meal: PlannedMeal) {
 export const week = query({
   args: { today: v.string(), week: planWeek },
   handler: async (ctx, args) => {
-    const weekStart = planWeeks(args.today)[args.week];
-    const dates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
     const user = await getCurrentUser(ctx);
-    if (!user) {
+    if (!user) return emptyWeek(args.today, args.week);
+    return await weekFor(ctx, user._id, args.today, args.week);
+  },
+});
+
+/** Today's Monday and its seven dates, Monday first. */
+function weekDates(today: string, week: PlanWeek) {
+  const weekStart = planWeeks(today)[week];
+  return { weekStart, dates: Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)) };
+}
+
+function emptyWeek(today: string, week: PlanWeek) {
+  const { weekStart, dates } = weekDates(today, week);
+  return {
+    weekStart,
+    hasPlan: false,
+    days: dates.map((date) => ({ date, level: null, targets: null, meals: [] })),
+  };
+}
+
+/**
+ * The week for a known user. The public query resolves the Clerk identity, the
+ * MCP tool passes the verified `userId` from its key (#135) — one reader, so the
+ * screen and the agent can't drift.
+ */
+async function weekFor(ctx: QueryCtx, userId: Id<"users">, today: string, week: PlanWeek) {
+  const { weekStart, dates } = weekDates(today, week);
+  const plan = await planFor(ctx, userId, weekStart);
+  const profile = await profileFor(ctx, userId);
+  const template = await templateFor(ctx, userId);
+
+  const days = await Promise.all(
+    dates.map(async (date) => {
+      const { level } = resolveDayLevel({
+        date,
+        entries: template?.entries ?? [],
+        override: template?.override ?? null,
+        // The future has no séances yet: no read.
+        sessions: date <= today ? await sessionsOn(ctx, userId, date) : [],
+      });
+      const meals = plan?.days.find((day) => day.date === date)?.meals ?? [];
       return {
-        weekStart,
-        hasPlan: false,
-        days: dates.map((date) => ({ date, level: null, targets: null, meals: [] })),
+        date,
+        level,
+        targets: dayTargets(profile, { level }),
+        meals: await Promise.all(meals.map((meal) => mealCard(ctx, userId, meal))),
       };
-    }
+    }),
+  );
+  return { weekStart, hasPlan: plan !== null, days };
+}
 
-    const plan = await planFor(ctx, user._id, weekStart);
-    const profile = await profileFor(ctx, user._id);
-    const template = await templateFor(ctx, user._id);
-
-    const days = await Promise.all(
-      dates.map(async (date) => {
-        const { level } = resolveDayLevel({
-          date,
-          entries: template?.entries ?? [],
-          override: template?.override ?? null,
-          // The future has no séances yet: no read.
-          sessions: date <= args.today ? await sessionsOn(ctx, user._id, date) : [],
-        });
-        const meals = plan?.days.find((day) => day.date === date)?.meals ?? [];
-        return {
-          date,
-          level,
-          targets: dayTargets(profile, { level }),
-          meals: await Promise.all(meals.map((meal) => mealCard(ctx, user._id, meal))),
-        };
-      }),
-    );
-    return { weekStart, hasPlan: plan !== null, days };
+/**
+ * The same week for the MCP tool. The tool's `returns` is an allowlist, so the
+ * projection here is what leaves FitCrew: no steps, photos or tags.
+ */
+export const weekForMcp = internalQuery({
+  args: { userId: v.id("users"), today: v.string(), week: planWeek },
+  handler: async (ctx, args) => {
+    const plan = await weekFor(ctx, args.userId, args.today, args.week);
+    return {
+      weekStart: plan.weekStart,
+      hasPlan: plan.hasPlan,
+      days: plan.days.map((day) => ({
+        date: day.date,
+        level: day.level,
+        targets: day.targets,
+        meals: day.meals.map((meal) => ({
+          slot: meal.slot,
+          name: meal.name,
+          ingredients: meal.ingredients,
+          macros: meal.macros,
+          prepMinutes: meal.prepMinutes,
+          ...(meal.locked !== undefined && { locked: meal.locked }),
+        })),
+      })),
+    };
   },
 });
 
@@ -200,41 +251,86 @@ const checksFor = (ctx: QueryCtx, userId: Id<"users">, weekStart: string) =>
 export const shoppingList = query({
   args: { today: v.string(), week: planWeek },
   handler: async (ctx, args) => {
-    const weekStart = planWeeks(args.today)[args.week];
     const user = await getCurrentUser(ctx);
-    if (!user) return { weekStart, hasPlan: false, items: [] };
-    const plan = await planFor(ctx, user._id, weekStart);
-    const lines = shoppingListFrom(plan?.days ?? []).map((line) => ({
-      ...line,
-      key: normalizeName(line.name),
-    }));
-    const checked = new Set(
-      liveChecks(
-        (await checksFor(ctx, user._id, weekStart))?.keys ?? [],
-        lines.map((l) => l.key),
-      ),
-    );
-    return {
-      weekStart,
-      hasPlan: plan !== null,
-      items: lines.map((line) => ({ ...line, checked: checked.has(line.key) })),
-    };
+    if (!user) return { weekStart: planWeeks(args.today)[args.week], hasPlan: false, items: [] };
+    return await shoppingListFor(ctx, user._id, args.today, args.week);
   },
 });
+
+/** The list for a known user — the screen's query and the MCP tool share it. */
+async function shoppingListFor(ctx: QueryCtx, userId: Id<"users">, today: string, week: PlanWeek) {
+  const weekStart = planWeeks(today)[week];
+  const plan = await planFor(ctx, userId, weekStart);
+  const lines = shoppingListFrom(plan?.days ?? []).map((line) => ({
+    ...line,
+    key: normalizeName(line.name),
+  }));
+  const checked = new Set(
+    liveChecks(
+      (await checksFor(ctx, userId, weekStart))?.keys ?? [],
+      lines.map((l) => l.key),
+    ),
+  );
+  return {
+    weekStart,
+    hasPlan: plan !== null,
+    items: lines.map((line) => ({ ...line, checked: checked.has(line.key) })),
+  };
+}
+
+/** The same list for the MCP tool (`get_shopping_list`). */
+export const shoppingListForMcp = internalQuery({
+  args: { userId: v.id("users"), today: v.string(), week: planWeek },
+  handler: async (ctx, args) => shoppingListFor(ctx, args.userId, args.today, args.week),
+});
+
+type CheckWrite = { hasPlan: boolean; keys: string[] };
+
+/**
+ * Ticks a batch of keys for one week in a single transaction. `nextChecks` keeps
+ * only keys the list actually has, so a model-written (or stale) key writes
+ * nothing; a week without a plan writes nothing at all.
+ */
+async function writeChecks(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  weekStart: string,
+  keys: readonly string[],
+  checked: boolean,
+): Promise<CheckWrite> {
+  const plan = await planFor(ctx, userId, weekStart);
+  if (!plan) return { hasPlan: false, keys: [] };
+  const listKeys = shoppingListFrom(plan.days).map((line) => normalizeName(line.name));
+  const existing = await checksFor(ctx, userId, weekStart);
+  const next = checkKeys(existing?.keys ?? [], listKeys, keys, checked);
+  if (existing) await ctx.db.patch("shoppingChecks", existing._id, { keys: next });
+  else if (next.length > 0)
+    await ctx.db.insert("shoppingChecks", { userId, weekStart, keys: next });
+  return { hasPlan: true, keys: next };
+}
 
 /** One tick. Prunes the orphans while it's there (`nextChecks`). */
 export const setShoppingCheck = mutation({
   args: { weekStart: v.string(), key: v.string(), checked: v.boolean() },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
-    const plan = await planFor(ctx, user._id, args.weekStart);
-    if (!plan) return null;
-    const listKeys = shoppingListFrom(plan.days).map((line) => normalizeName(line.name));
-    const existing = await checksFor(ctx, user._id, args.weekStart);
-    const keys = nextChecks(existing?.keys ?? [], listKeys, args.key, args.checked);
-    if (existing) await ctx.db.patch("shoppingChecks", existing._id, { keys });
-    else
-      await ctx.db.insert("shoppingChecks", { userId: user._id, weekStart: args.weekStart, keys });
+    await writeChecks(ctx, user._id, args.weekStart, [args.key], args.checked);
     return null;
   },
+});
+
+/**
+ * The same ticks for `check_shopping_items`: a whole basket, one transaction,
+ * as the verified MCP user. The public mutation above keeps its one-key shape
+ * for already-loaded PWA clients.
+ */
+export const setShoppingChecksForMcp = internalMutation({
+  args: {
+    userId: v.id("users"),
+    weekStart: v.string(),
+    keys: v.array(v.string()),
+    checked: v.boolean(),
+  },
+  handler: async (ctx, args) =>
+    writeChecks(ctx, args.userId, args.weekStart, args.keys, args.checked),
 });

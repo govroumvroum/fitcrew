@@ -2,6 +2,7 @@ import { httpRouter } from "convex/server";
 import { Webhook } from "svix";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
+import { mcp } from "./mcp";
 
 /** Only the fields we consume — the payload is much larger. */
 type ClerkUserEvent = {
@@ -77,5 +78,9 @@ http.route({
   method: "POST",
   handler: handleClerkWebhook,
 });
+
+// /mcp plus the OAuth and discovery routes (/.well-known/…). The component
+// serves the same origin as the webhook; no httpPrefix on the app.
+mcp.registerRoutes(http);
 
 export default http;
