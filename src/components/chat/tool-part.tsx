@@ -10,7 +10,7 @@ import { ChevronDownIcon, WrenchIcon } from "lucide-react";
 import posthog from "posthog-js";
 import { Component, type ComponentType, type ReactNode } from "react";
 import type { AgentConfig, AgentToolLabel } from "@/components/chat/agent-chat";
-import { agentStatus, toolPartFromCall } from "@/components/chat/convert-message";
+import { agentStatus, toolPartFromCall, type ToolCall } from "@/components/chat/convert-message";
 import { ToolLine } from "@/components/chat/tool-cards";
 
 /**
@@ -47,12 +47,17 @@ const toolErrored = (tool: ToolPart) => {
 /**
  * Copy for a tool with no entry in `toolLabels`. A tool added to the backend and
  * forgotten here still shows something rather than nothing.
+ *
+ * `done` claims nothing: « C'est fait. » over a read sat right above the edits
+ * and read as a write that never happened, and as the end of the turn when the
+ * model was only pausing to think. `tool-labels.check.ts` keeps every real tool
+ * off this path; it is only a net.
  */
 const FALLBACK: AgentToolLabel = {
   icon: WrenchIcon,
   pending: "Un instant…",
-  done: "C'est fait.",
-  failed: "Une action n'a pas marché.",
+  done: "Étape terminée",
+  failed: "Une étape n'a pas marché.",
 };
 
 /**
@@ -217,8 +222,20 @@ type ToolCallProps = ToolCallMessagePartProps<unknown, unknown>;
  * `artifact` because assistant-ui's own view of it (`args`, `status`) papers over
  * exactly the case the input guard exists for.
  */
-function toolPartOf(props: ToolCallProps): ToolPart {
+function toolPartOf(props: ToolCall & { artifact?: unknown }): ToolPart {
   return (props.artifact as ToolPart | undefined) ?? toolPartFromCall(props);
+}
+
+/**
+ * Whether the tool's line is still shimmering — the two in-flight states of
+ * `ToolPartView`. The thread asks so its trailing « réfléchit… » never doubles a
+ * line that already says the tool is working, and does show under one that has
+ * settled, failures included (assistant-ui alone calls a thrown tool running,
+ * since it has no result).
+ */
+export function toolRunning(props: ToolCall & { artifact?: unknown }) {
+  const { state } = toolPartOf(props);
+  return state === "input-streaming" || state === "input-available";
 }
 
 /** Only a streaming turn animates its cards in — not one merely left `pending`. */

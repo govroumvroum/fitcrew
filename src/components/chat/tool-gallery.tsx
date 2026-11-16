@@ -1061,6 +1061,27 @@ export const CHEF_FIXTURES: Record<string, Fixture[]> = {
       note: "État live, dépend d'une vraie ligne Convex.",
     },
   ],
+  "tool-read_plan": [
+    {
+      label: "Lecture sans carte",
+      tool: done("tool-read_plan", { week: "current" }),
+      note: "Lecture seule : pas de carte, la ligne dit juste ce que le Chef a lu.",
+    },
+  ],
+  "tool-read_today": [
+    {
+      label: "Lecture sans carte",
+      tool: done("tool-read_today", {}),
+      note: "Lecture seule : pas de carte.",
+    },
+  ],
+  "tool-read_inventory": [
+    {
+      label: "Lecture sans carte",
+      tool: done("tool-read_inventory", {}),
+      note: "Lecture seule : pas de carte.",
+    },
+  ],
   "tool-ask_coach": [
     {
       label: "Consultation du Coach",

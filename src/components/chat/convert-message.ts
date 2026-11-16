@@ -71,6 +71,41 @@ export function toolPartFromCall(call: ToolCall): ToolPart {
   return { ...base, state: "input-available" };
 }
 
+/**
+ * The agent's own word on whether a text or reasoning part is still streaming.
+ *
+ * Without it assistant-ui guesses: the LAST part of a running message is
+ * running, whatever it is. So a reasoning block finished seconds ago still
+ * shimmered « réfléchit… » while the next step hadn't started, and the thread
+ * couldn't tell that gap — the one the trailing indicator exists for — from the
+ * model actually writing. No `state` (a saved row from an older agent) keeps the
+ * guess. Only read while the message runs (`toMessagePartStatus`).
+ *
+ * `streaming` is only believed on the LAST part. The agent leaves a part at
+ * `streaming` until its whole step is saved — and the step includes the tool
+ * call after it — so a reasoning block that had stopped growing kept spinning
+ * « Le Chef réfléchit… » above a 37 s `generate_meal_plan`. Something came after
+ * it, so it is done.
+ */
+function partStatus(state: "streaming" | "done" | undefined, isLast: boolean) {
+  if (state === "streaming") {
+    return { status: { type: isLast ? "running" : "complete" } } as const;
+  }
+  if (state === "done") return { status: { type: "complete" } } as const;
+  return {};
+}
+
+/**
+ * The provider streams a step's whole reasoning as ONE part, its summaries
+ * glued end to end: « …per meal on average.**Adjusting meal plan** ». Each
+ * summary opens on a bold title line, so a title stuck to the end of a sentence
+ * gets its paragraph break back. Only that shape: a bold word mid-sentence
+ * isn't preceded by a full stop and followed by a line break.
+ */
+export function separateSummaries(text: string) {
+  return text.replace(/([.!?…])(\*\*[^*\n]+\*\*)(?=\n|$)/g, "$1\n\n$2");
+}
+
 export function convertMessage(row: Row): ThreadMessageLike {
   if (row.key === ECHO_KEY) {
     return {
@@ -85,13 +120,31 @@ export function convertMessage(row: Row): ThreadMessageLike {
   // A whitelist, not a blacklist: assistant-ui THROWS on a part type it doesn't
   // know (`Unsupported assistant message part type: step-start`), and accepts a
   // `file` part in the AI SDK's shape without complaint while rendering it wrong.
-  // Text and tool calls are all the chat has ever shown — reasoning, step
-  // markers, sources and the user's uploaded images were already dropped.
+  // Step markers, sources and the user's uploaded images stay dropped.
+  const kept = message.parts.filter(
+    (part) =>
+      part.type === "text" ||
+      (message.role === "assistant" &&
+        // An empty reasoning block is dropped here rather than by assistant-ui,
+        // so « last part » below means the same thing to both.
+        ((part.type === "reasoning" && part.text.trim() !== "") ||
+          part.type.startsWith("tool-"))),
+  );
   const content: Content[] = [];
-  for (const part of message.parts) {
+  for (const [i, part] of kept.entries()) {
+    const isLast = i === kept.length - 1;
     if (part.type === "text") {
-      content.push({ type: "text", text: part.text });
-    } else if (message.role === "assistant" && part.type.startsWith("tool-")) {
+      content.push({ type: "text", text: part.text, ...partStatus(part.state, isLast) });
+    } else if (part.type === "reasoning") {
+      // Kept since the model reasons for 10–30 s between two tool calls: with
+      // the reasoning dropped, a tool line followed by that much nothing read as
+      // the app having hung.
+      content.push({
+        type: "reasoning",
+        text: separateSummaries(part.text),
+        ...partStatus(part.state, isLast),
+      });
+    } else {
       const tool = settled(part as ToolPart & { toolCallId: string });
       content.push({
         type: "tool-call",

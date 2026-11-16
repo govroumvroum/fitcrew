@@ -15,6 +15,7 @@ import {
   agentStatus,
   convertMessage,
   ECHO_KEY,
+  separateSummaries,
   settled,
   threadIsRunning,
   toolPartFromCall,
@@ -70,9 +71,121 @@ function message(overrides: Partial<UIMessage> & Pick<UIMessage, "parts">): UIMe
   const out = toThread(raw);
   assert.deepEqual(
     out.content.map((p) => p.type),
-    ["text"],
-    "only text and tool-* parts survive",
+    ["reasoning", "text"],
+    "only text, reasoning and tool-* parts survive",
   );
+}
+
+// --- Reasoning is kept: the model thinks 10–30 s between two tool calls, and a
+// tool line followed by that much silence read as the app having hung. Its
+// streaming state rides along, because assistant-ui's own guess (the last part
+// of a running message is running) kept a finished block shimmering through the
+// gap before the next step.
+{
+  const raw = message({
+    status: "streaming",
+    parts: [
+      { type: "reasoning", text: "je relis le plan", state: "done" },
+      { type: "text", text: "Je regarde.", state: "done" },
+      { type: "reasoning", text: "puis la journée", state: "streaming" },
+    ] as UIMessage["parts"],
+  });
+  const out = toThread(raw);
+  assert.deepEqual(
+    out.content.map((p) => [p.type, (p as { status?: { type: string } }).status?.type]),
+    [
+      ["reasoning", "complete"],
+      ["text", "complete"],
+      ["reasoning", "running"],
+    ],
+    "a part's own streaming state becomes its status",
+  );
+  assert.equal((out.content[0] as { text: string }).text, "je relis le plan");
+}
+
+// The agent leaves a part at `streaming` until its whole step is saved, tool call
+// included. Believed, the reasoning kept spinning « réfléchit… » above the tool
+// that followed it for 37 s. Only the very last part may be running.
+{
+  const out = toThread(
+    message({
+      status: "streaming",
+      parts: [
+        { type: "reasoning", text: "je prépare la semaine", state: "streaming" },
+        { type: "text", text: "C'est parti.", state: "streaming" },
+        {
+          type: "tool-generate_meal_plan",
+          toolCallId: "c9",
+          state: "input-available",
+          input: { days: [] },
+        },
+      ] as UIMessage["parts"],
+    }),
+  );
+  assert.deepEqual(
+    out.content.map((p) => [p.type, (p as { status?: { type: string } }).status?.type]),
+    [
+      ["reasoning", "complete"],
+      ["text", "complete"],
+      ["tool-call", undefined],
+    ],
+    "a part with something after it is done, whatever its state says",
+  );
+}
+
+// Summaries streamed as one part come glued: each title gets its break back,
+// and a bold word inside a sentence is left alone.
+{
+  assert.equal(
+    separateSummaries("700 kcal par repas en moyenne.**Ajuster le plan**\n\nJe regarde."),
+    "700 kcal par repas en moyenne.\n\n**Ajuster le plan**\n\nJe regarde.",
+  );
+  assert.equal(separateSummaries("Fini.**Titre en cours**"), "Fini.\n\n**Titre en cours**");
+  assert.equal(separateSummaries("Un **très** bon plan."), "Un **très** bon plan.");
+  const out = toThread(
+    message({
+      parts: [
+        { type: "reasoning", text: "Fin.**Suite**\nDétail", state: "done" },
+      ] as UIMessage["parts"],
+    }),
+  );
+  assert.equal((out.content[0] as { text: string }).text, "Fin.\n\n**Suite**\nDétail");
+}
+
+// No state (an older saved row): no status, so assistant-ui keeps its own guess.
+{
+  const out = toThread(
+    message({ parts: [{ type: "reasoning", text: "hmm" }] as UIMessage["parts"] }),
+  );
+  assert.equal((out.content[0] as { status?: unknown }).status, undefined);
+}
+
+// An empty reasoning block (the provider's encrypted-only kind) is dropped by
+// assistant-ui itself, so it can't draw an empty « Réflexion » line.
+{
+  const out = toThread(
+    message({
+      parts: [
+        { type: "reasoning", text: "", state: "done" },
+        { type: "text", text: "Salut" },
+      ] as UIMessage["parts"],
+    }),
+  );
+  assert.deepEqual(out.content.map((p) => p.type), ["text"]);
+}
+
+// A user message never carries reasoning into the bubble.
+{
+  const out = toThread(
+    message({
+      role: "user",
+      parts: [
+        { type: "reasoning", text: "x", state: "done" },
+        { type: "text", text: "Salut" },
+      ] as UIMessage["parts"],
+    }),
+  );
+  assert.deepEqual(out.content.map((p) => p.type), ["text"]);
 }
 
 // A user message's uploaded image (`file`) is dropped too: the bubble never
