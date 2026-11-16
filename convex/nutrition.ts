@@ -440,7 +440,10 @@ function clampIngredient(i: Ingredient): Ingredient {
     const { amount: _a, unit: _u, scalable: _s, ...text } = i;
     return text;
   }
-  return i.unit === "piece" ? { ...i, amount: Math.max(1, Math.round(i.amount)) } : i;
+  if (i.unit !== "piece") return i;
+  // The text follows the whole count, or the screens would still print « 2,4 ».
+  const whole = Math.max(1, Math.round(i.amount));
+  return { ...i, amount: whole, quantity: quantityText(whole, i.unit) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,7 +1060,6 @@ export const logPlannedMeal = mutation({
       name: meal.name,
       macros: clampMacros(factor === 1 ? meal.macros : scaleMacros(meal.macros, factor)),
       source: "plan",
-      ...(factor !== 1 && { factor }),
       ...(quantity && { quantity }),
     });
   },

@@ -506,9 +506,6 @@ export default defineSchema({
     quantity: v.optional(v.string()),
     macros,
     source: v.union(v.literal("plan"), v.literal("manual"), v.literal("image")),
-    // « J'ai mangé » with a different portion (#138, decision B): the plan's
-    // macros × this. Absent = as planned. The plan itself never changes.
-    factor: v.optional(v.number()),
   }).index("by_user_and_date", ["userId", "date"]),
 
   // One row per day, upserted: a water counter is a single number per date.
