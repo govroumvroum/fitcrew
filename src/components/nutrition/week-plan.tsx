@@ -2,7 +2,14 @@
 
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
-import { ChevronRightIcon, LockIcon, LockOpenIcon, PlusIcon, ShoppingCartIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  CookingPotIcon,
+  LockIcon,
+  LockOpenIcon,
+  PlusIcon,
+  ShoppingCartIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -10,11 +17,17 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatFull } from "@/lib/dates";
+import { formatFull, formatShort } from "@/lib/dates";
 import { cn, formatNumber } from "@/lib/utils";
 import { api } from "../../../convex/_generated/api";
 import type { MealSlot } from "../../../convex/nutrition";
 import { type PlanWeek, defaultPlanWeek, planWeeks } from "../../../convex/planWeeks";
+import {
+  batchLeftover,
+  logOptions,
+  portionLine,
+  shareLabel,
+} from "../../../convex/portionLogic";
 import { type DayLevel, LEVEL_LABEL } from "../../../convex/weekTemplate";
 import { SLOT_LABELS, runMutation } from "./macros";
 import { RecipeCard, RecipeSheet, libraryEyebrow, usePhotoLookup } from "./recipe-card";
@@ -22,6 +35,7 @@ import { RecipeCard, RecipeSheet, libraryEyebrow, usePhotoLookup } from "./recip
 type Week = FunctionReturnType<typeof api.weekPlan.week>;
 type Day = Week["days"][number];
 type Meal = Day["meals"][number];
+type Batch = Week["batches"][number];
 
 /**
  * The week, in the URL: `?semaine=prochaine&jour=2026-11-19`. Never local
@@ -187,6 +201,8 @@ export function WeekPlan({ today, hasPlanNextWeek }: { today: string; hasPlanNex
       ) : (
         <DayMeals
           day={day}
+          days={data.days}
+          batches={data.batches}
           today={today}
           weekStart={data.weekStart}
           hasPlan={data.hasPlan}
@@ -199,18 +215,25 @@ export function WeekPlan({ today, hasPlanNextWeek }: { today: string; hasPlanNex
 
 function DayMeals({
   day,
+  days,
+  batches,
   today,
   weekStart,
   hasPlan,
   week,
 }: {
   day: Day;
+  days: Day[];
+  // Absent on a server from before #138 for one deploy at most; read as none.
+  batches: Batch[] | undefined;
   today: string;
   weekStart: string;
   hasPlan: boolean;
   week: PlanWeek;
 }) {
   const planned = day.meals.reduce((sum, meal) => sum + meal.macros.calories, 0);
+  const cooked = (batches ?? []).filter((b) => b.cookDate === day.date);
+  const potName = (id: string) => batches?.find((b) => b.id === id)?.name ?? null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -230,6 +253,10 @@ function DayMeals({
         </p>
       </div>
 
+      {cooked.map((batch) => (
+        <BatchCard key={batch.id} batch={batch} days={days} />
+      ))}
+
       {day.meals.length === 0 ? (
         <div className="flex flex-col gap-2 rounded-xl border border-dashed p-4">
           <p className="text-sm text-muted-foreground">
@@ -247,7 +274,13 @@ function DayMeals({
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {day.meals.map((meal) => (
             <li key={meal.slot}>
-              <MealCard meal={meal} date={day.date} today={today} weekStart={weekStart} />
+              <MealCard
+                meal={meal}
+                date={day.date}
+                today={today}
+                weekStart={weekStart}
+                potName={meal.batch ? potName(meal.batch.id) : null}
+              />
             </li>
           ))}
         </ul>
@@ -261,16 +294,24 @@ function MealCard({
   date,
   today,
   weekStart,
+  potName,
 }: {
   meal: Meal;
   date: string;
   today: string;
   weekStart: string;
+  potName: string | null;
 }) {
-  const [open, setOpen] = useState<"recipe" | "swap" | null>(null);
+  const [open, setOpen] = useState<"recipe" | "swap" | "log" | null>(null);
   const toggleLock = useMutation(api.nutrition.toggleLock);
-  const logPlannedMeal = useMutation(api.nutrition.logPlannedMeal);
   const locked = meal.locked === true;
+  // #138, decision A: the share of the pot, then the grams as an estimate.
+  const portion = meal.batch ? (
+    <p className="text-[11px] text-muted-foreground tabular-nums">
+      {portionLine(meal.batch)}
+      {potName ? ` (${potName})` : ""} — estimation
+    </p>
+  ) : null;
 
   return (
     <>
@@ -280,6 +321,7 @@ function MealCard({
         onOpen={() => setOpen("recipe")}
         footer={
           <div className="flex flex-col gap-1.5">
+            {portion}
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -317,12 +359,8 @@ function MealCard({
                 <Button
                   variant="outline"
                   className="h-11 flex-1"
-                  onClick={() =>
-                    runMutation(
-                      () => logPlannedMeal({ date, slot: meal.slot, weekStart }),
-                      "Ajouté au journal.",
-                    )
-                  }
+                  aria-haspopup="dialog"
+                  onClick={() => setOpen("log")}
                 >
                   <PlusIcon className="size-4" aria-hidden />
                   Journal
@@ -340,12 +378,15 @@ function MealCard({
       <Dialog open={open !== null} onOpenChange={(next) => !next && setOpen(null)}>
         {open === "recipe" ? (
           <RecipeSheet recipe={meal} eyebrow={`${SLOT_LABELS[meal.slot]} · ${formatFull(date)}`}>
+            {portion}
             {meal.mealPrep ? (
               <p className="text-sm text-muted-foreground">{meal.mealPrep}</p>
             ) : null}
           </RecipeSheet>
         ) : open === "swap" ? (
           <SwapSheet meal={meal} date={date} weekStart={weekStart} onDone={() => setOpen(null)} />
+        ) : open === "log" ? (
+          <LogSheet meal={meal} date={date} weekStart={weekStart} onDone={() => setOpen(null)} />
         ) : null}
       </Dialog>
     </>
@@ -440,5 +481,182 @@ function SwapSheet({
         <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       </Link>
     </DialogContent>
+  );
+}
+
+/**
+ * « J'ai mangé » (#138, decision B): as planned, or a bit less or more. A dish
+ * built on pieces moves by one whole piece; anything else by a quarter. The
+ * journal gets the plan's macros × the factor — the plan itself never moves.
+ */
+function LogSheet({
+  meal,
+  date,
+  weekStart,
+  onDone,
+}: {
+  meal: Meal;
+  date: string;
+  weekStart: string;
+  onDone: () => void;
+}) {
+  const logPlannedMeal = useMutation(api.nutrition.logPlannedMeal);
+  const options = logOptions(meal);
+  const [factor, setFactor] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const chosen = options.find((o) => o.factor === factor) ?? options[0];
+
+  const log = async () => {
+    setBusy(true);
+    await runMutation(
+      () =>
+        logPlannedMeal({
+          date,
+          slot: meal.slot,
+          weekStart,
+          // Absent when as planned: the entry reads exactly as before #138.
+          ...(factor !== 1 && { factor, quantity: chosen.label }),
+        }),
+      "Ajouté au journal.",
+    );
+    setBusy(false);
+    onDone();
+  };
+
+  return (
+    <DialogContent className="flex flex-col gap-3 sm:max-w-md">
+      <div className="flex flex-col gap-1 pr-10">
+        <DialogTitle className="text-xl leading-tight font-bold">J&apos;ai mangé</DialogTitle>
+        <DialogDescription>
+          {meal.name}. Si tu en as pris plus ou moins, dis-le : le journal suit, le menu ne change
+          pas.
+        </DialogDescription>
+      </div>
+      <fieldset className="flex flex-col gap-1.5">
+        <legend className="sr-only">Quantité mangée</legend>
+        {options.map((option) => {
+          const pressed = option.factor === factor;
+          return (
+            <Button
+              key={option.label}
+              type="button"
+              variant={pressed ? "secondary" : "outline"}
+              aria-pressed={pressed}
+              className={cn(
+                "h-12 justify-between px-3 text-sm",
+                pressed && "border-primary/50 ring-1 ring-primary/30",
+              )}
+              onClick={() => setFactor(option.factor)}
+            >
+              <span className="first-letter:uppercase">{option.label}</span>
+              <span className="text-muted-foreground tabular-nums">
+                ≈ {formatNumber(Math.round(meal.macros.calories * option.factor))} kcal
+              </span>
+            </Button>
+          );
+        })}
+      </fieldset>
+      <Button className="h-11" disabled={busy} onClick={() => void log()}>
+        <PlusIcon className="size-4" aria-hidden />
+        Ajouter au journal
+      </Button>
+      <p className="text-[11px] text-muted-foreground">Valeurs estimées.</p>
+    </DialogContent>
+  );
+}
+
+/**
+ * The pot to cook on its day (#138): the whole pot, and how it's shared out
+ * over the week — the share each meal takes, its cooked grams as an estimate,
+ * and what's left. Its recipe opens in a sheet.
+ */
+function BatchCard({ batch, days }: { batch: Batch; days: Day[] }) {
+  const [open, setOpen] = useState(false);
+  const eaters = days.flatMap((d) =>
+    d.meals.filter((m) => m.batch?.id === batch.id).map((m) => ({ date: d.date, meal: m })),
+  );
+  const leftover = batchLeftover(batch.id, days);
+
+  return (
+    <section
+      aria-label={`Batch à cuisiner : ${batch.name}`}
+      className="flex flex-col gap-2 rounded-xl border bg-card p-3"
+    >
+      <div className="flex items-start gap-2">
+        <CookingPotIcon className="mt-0.5 size-4 shrink-0 text-accent-text" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="eyebrow">Batch · à cuisiner ce jour-là</p>
+          <p className="font-heading leading-tight font-semibold">{batch.name}</p>
+          <p className="text-[11px] text-muted-foreground tabular-nums">
+            ≈ {formatNumber(batch.macros.calories)} kcal la marmite
+            {batch.cookedGrams ? ` · ≈ ${formatNumber(batch.cookedGrams)} g cuit` : ""}
+          </p>
+        </div>
+      </div>
+      <ul className="flex flex-col">
+        {eaters.map(({ date, meal }) => (
+          <li
+            key={`${date}-${meal.slot}`}
+            className="flex items-baseline gap-2 rounded-md px-2 py-1 text-sm odd:bg-muted/40"
+          >
+            <span className="min-w-0 flex-1 first-letter:uppercase">
+              {formatShort(date)} · {SLOT_LABELS[meal.slot].toLowerCase()}
+            </span>
+            <span className="shrink-0 text-muted-foreground tabular-nums">
+              {shareLabel(meal.batch!.share)}
+              {meal.batch!.cookedGrams ? ` · ≈ ${meal.batch!.cookedGrams} g` : ""}
+            </span>
+          </li>
+        ))}
+        {leftover >= 0.05 ? (
+          <li className="flex items-baseline gap-2 px-2 py-1 text-sm">
+            <span className="min-w-0 flex-1 text-muted-foreground">Reste</span>
+            <span className="shrink-0 text-muted-foreground tabular-nums">
+              {shareLabel(leftover)}, à garder au frais ou congeler
+            </span>
+          </li>
+        ) : null}
+      </ul>
+      <Button variant="outline" className="h-11" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        Recette de la marmite
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        {open ? (
+          <DialogContent className="flex max-h-[88dvh] flex-col gap-3 overflow-y-auto sm:max-w-md">
+            <div className="flex flex-col gap-1 pr-10">
+              <p className="eyebrow">Batch · {formatFull(batch.cookDate)}</p>
+              <DialogTitle className="text-xl leading-tight font-bold">{batch.name}</DialogTitle>
+              <DialogDescription>
+                Pour toute la marmite, pour toi seul. Les parts sont sur la fiche de chaque repas.
+              </DialogDescription>
+            </div>
+            <section className="flex flex-col gap-1">
+              <h3 className="font-semibold">Ingrédients</h3>
+              <ul>
+                {batch.ingredients.map((ingredient) => (
+                  <li
+                    key={`${ingredient.name}:${ingredient.quantity}`}
+                    className="flex items-baseline gap-2 rounded-md px-2 py-1 text-sm odd:bg-muted/40"
+                  >
+                    <span className="min-w-0 flex-1 first-letter:uppercase">{ingredient.name}</span>
+                    <span className="shrink-0 text-muted-foreground tabular-nums">
+                      {ingredient.quantity}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+            <section className="flex flex-col gap-1">
+              <h3 className="font-semibold">Préparation</h3>
+              <ol className="flex list-decimal flex-col gap-1 pl-6 text-sm">
+                {batch.steps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+            </section>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+    </section>
   );
 }

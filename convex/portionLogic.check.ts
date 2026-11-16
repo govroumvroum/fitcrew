@@ -221,3 +221,33 @@ const hollow = portionRefusal([{ ...eat(600), batch: undefined }], []);
 assert.equal(hollow?.result, "refused", "no pot, no ingredients: refused");
 
 console.log("portionLogic.check: ok");
+
+// --- words -------------------------------------------------------------------
+{
+  const { shareLabel, portionLine, logOptions } = await import("./portionLogic");
+  assert.equal(shareLabel(0.33), "un tiers");
+  assert.equal(shareLabel(0.25), "un quart");
+  assert.equal(shareLabel(0.5), "la moitié");
+  assert.equal(shareLabel(0.37), "37 %");
+  assert.equal(portionLine({ id: "x", share: 0.34, cookedGrams: 420 }), "Un tiers de la marmite, ≈ 420 g cuit");
+  assert.equal(portionLine({ id: "x", share: 1 }), "Toute la marmite");
+
+  // Pieces: ±1 whole piece, as a factor of the whole meal.
+  const taco = logOptions({ ingredients: tacos });
+  assert.deepEqual(
+    taco.map((o) => o.factor),
+    [0.5, 1, 1.5],
+  );
+  assert.match(taco[2].label, /^3 × tortilla/);
+  // One bun: no « 0 burgers ».
+  assert.deepEqual(
+    logOptions({ ingredients: burger }).map((o) => o.factor),
+    [1, 2],
+  );
+  // A pot share — even with pieces in the pot — moves by a quarter.
+  assert.deepEqual(
+    logOptions({ ingredients: tacos, batch: { id: "x", share: 0.3 } }).map((o) => o.factor),
+    [0.75, 1, 1.25],
+  );
+  console.log("portionLogic.check (words): ok");
+}

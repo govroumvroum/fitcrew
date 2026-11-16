@@ -410,3 +410,62 @@ export function mealPieces(ingredients: Ingredient[]): number | null {
   const piece = ingredients.find((i) => isStructured(i) && i.unit === "piece" && i.amount! >= 1);
   return piece ? Math.round(piece.amount!) : null;
 }
+
+// ---------------------------------------------------------------------------
+// Words for the screens
+// ---------------------------------------------------------------------------
+
+const FRACTIONS: [number, string][] = [
+  [1, "toute la marmite"],
+  [3 / 4, "les trois quarts"],
+  [2 / 3, "deux tiers"],
+  [1 / 2, "la moitié"],
+  [1 / 3, "un tiers"],
+  [1 / 4, "un quart"],
+  [1 / 5, "un cinquième"],
+  [1 / 6, "un sixième"],
+];
+
+/**
+ * « un tiers », « un quart »… — the fraction a person can eyeball, when the
+ * share is within 0.02 of one; else « 35 % ». Decision A: the share is what
+ * he's told, the grams are the estimate beside it.
+ */
+export function shareLabel(share: number): string {
+  const hit = FRACTIONS.find(([f]) => Math.abs(share - f) <= 0.02);
+  return hit ? hit[1] : `${Math.round(share * 100)} %`;
+}
+
+/** « Un tiers de la marmite, ≈ 420 g cuit » — the meal card's line. */
+export function portionLine(link: BatchLink): string {
+  const label = shareLabel(link.share);
+  const of = label === "toute la marmite" ? label : `${label} de la marmite`;
+  const grams = link.cookedGrams ? `, ≈ ${link.cookedGrams} g cuit` : "";
+  return `${of.charAt(0).toUpperCase()}${of.slice(1)}${grams}`;
+}
+
+export type LogOption = { label: string; factor: number };
+
+/**
+ * The « J'ai mangé » choices (decision B). A dish built on pieces moves by one
+ * whole piece — a third taco comes with its share of filling, so it's the whole
+ * meal × (n ± 1) / n. Anything else — a pot share, a plate — moves by a quarter.
+ * The middle option is always « comme prévu » (factor 1).
+ */
+export function logOptions(meal: { ingredients: Ingredient[]; batch?: BatchLink }): LogOption[] {
+  const pieces = meal.batch ? null : mealPieces(meal.ingredients);
+  if (pieces !== null) {
+    const name = meal.ingredients.find((i) => i.unit === "piece")!.name.toLowerCase();
+    const count = (n: number) => `${n} × ${name}`;
+    return [
+      ...(pieces > 1 ? [{ label: count(pieces - 1), factor: (pieces - 1) / pieces }] : []),
+      { label: `${count(pieces)} (prévu)`, factor: 1 },
+      { label: count(pieces + 1), factor: (pieces + 1) / pieces },
+    ];
+  }
+  return [
+    { label: "Un peu moins (×0,75)", factor: 0.75 },
+    { label: "Comme prévu", factor: 1 },
+    { label: "Un peu plus (×1,25)", factor: 1.25 },
+  ];
+}
