@@ -25,6 +25,7 @@ import {
 import { getCurrentUser, requireCurrentUser } from "./users";
 import {
   applyBatches,
+  foodKey,
   logFactor,
   normalizeName,
   quantityText,
@@ -32,7 +33,7 @@ import {
   scaleMacros,
   sizeIngredients,
 } from "./portionLogic";
-import { type Estimate, recordEstimates, refsFor, valuesOf } from "./foodRefs";
+import { type Estimate, insertEstimates, refsFor, stageEstimates, valuesOf } from "./foodRefs";
 
 export type NutritionGoal = Infer<typeof nutritionGoal>;
 export type ActivityLevel = Infer<typeof activityLevel>;
@@ -522,8 +523,8 @@ async function portionWrite(
     ...batches.flatMap((b) => b.ingredients.map((i) => i.name)),
   ];
   const refs = await refsFor(ctx, userId, names);
-  const estimated = await recordEstimates(ctx, userId, estimates, refs);
-  const lookup = (name: string) => valuesOf(refs.get(normalizeName(name)));
+  const staged = stageEstimates(userId, estimates, refs);
+  const lookup = (name: string) => valuesOf(refs.get(foodKey(name)));
 
   const resized: string[] = [];
   for (const meal of incoming) {
@@ -538,12 +539,35 @@ async function portionWrite(
   const applied = applyBatches(days, batches, lookup);
   return {
     batches: applied.batches,
-    portions: {
-      resized,
-      estimated,
-      notes: applied.notes,
-    },
+    portions: { resized, estimated: [] as string[], notes: applied.notes },
+    // Call once the write is accepted: an estimate from a refused write is not kept.
+    commit: async () => insertEstimates(ctx, staged),
   };
+}
+
+/**
+ * A meal pointing at a pot the plan doesn't have, or a meal outside any pot with
+ * no ingredients: refused, never saved half-empty. Returned, like `refused`, so
+ * the model reads what to fix.
+ */
+export function portionRefusal(incoming: PlannedMeal[], batches: MealBatch[]) {
+  const pots = new Set(batches.map((b) => b.id));
+  const unknown = incoming.filter((m) => m.batch && !pots.has(m.batch.id));
+  if (unknown.length > 0) {
+    const known = batches.map((b) => `« ${b.id} » (${b.name})`).join(", ") || "aucun";
+    return {
+      result: "refused" as const,
+      note: `Rien n'a été enregistré : ${unknown.map((m) => `« ${m.name} » vise le batch « ${m.batch!.id} », qui n'existe pas`).join(" ; ")}. Batchs de cette semaine : ${known}. Reprends un id existant (read_plan les liste), ou écris le repas avec ses propres ingrédients et batchId null. Un nouveau batch ne se crée qu'avec generate_meal_plan.`,
+    };
+  }
+  const empty = incoming.filter((m) => !m.batch && m.ingredients.length === 0);
+  if (empty.length > 0) {
+    return {
+      result: "refused" as const,
+      note: `Rien n'a été enregistré : ${empty.map((m) => `« ${m.name} »`).join(", ")} n'a aucun ingrédient et ne vient d'aucun batch. Donne ses ingrédients, ou son batchId.`,
+    };
+  }
+  return null;
 }
 
 /** The tool result's line about portions, or nothing when nothing happened. */
@@ -761,16 +785,20 @@ export const savePlan = internalMutation({
       date: day.date,
       meals: day.meals.map(clampMeal).sort(bySlot),
     }));
-    const { batches, portions } = await portionWrite(
+    // Bounded, like the meals: a week has a handful of pots, not twenty.
+    const pots = (args.batches ?? []).slice(0, MAX_BATCHES).map((batch) => ({
+      ...batch,
+      ingredients: batch.ingredients.map(clampIngredient),
+    }));
+    const incoming = days.flatMap((day) => day.meals);
+    const invalid = portionRefusal(incoming, pots);
+    if (invalid) return invalid;
+    const { batches, portions, commit } = await portionWrite(
       ctx,
       user._id,
       days,
-      // Bounded, like the meals: a week has a handful of pots, not twenty.
-      (args.batches ?? []).slice(0, MAX_BATCHES).map((batch) => ({
-        ...batch,
-        ingredients: batch.ingredients.map(clampIngredient),
-      })),
-      days.flatMap((day) => day.meals),
+      pots,
+      incoming,
       args.estimates ?? [],
     );
 
@@ -796,7 +824,8 @@ export const savePlan = internalMutation({
       });
     }
     // Same transaction as the plan, after the allergy check: a refused plan
-    // adds no recipe (#119).
+    // adds no recipe (#119), and no estimate (#138).
+    portions.estimated = await commit();
     await ctx.runMutation(internal.recipes.upsertFromMeals, {
       userId: user._id,
       meals: days.flatMap((day) => day.meals),
@@ -824,14 +853,16 @@ export const replaceMeal = internalMutation({
     const day = requireDay(plan, args.date);
     const meal = clampMeal({ ...args.meal, slot: args.slot });
 
+    const invalid = portionRefusal([meal], plan.batches ?? []);
+    if (invalid) return invalid;
+
     const index = day.meals.findIndex((m) => m.slot === args.slot);
     if (index >= 0) day.meals[index] = meal;
     else day.meals.push(meal);
     day.meals.sort(bySlot);
 
-    // In memory until the patch below: a refusal writes nothing but the
-    // estimates, which are worth keeping either way.
-    const { batches, portions } = await portionWrite(
+    // In memory until the patch below: a refusal writes nothing at all.
+    const { batches, portions, commit } = await portionWrite(
       ctx,
       plan.userId,
       plan.days,
@@ -843,6 +874,7 @@ export const replaceMeal = internalMutation({
     if (violations.length > 0) return refused(violations);
 
     await ctx.db.patch("mealPlans", plan._id, { days: plan.days, batches });
+    portions.estimated = await commit();
     await ctx.runMutation(internal.recipes.upsertFromMeals, { userId: plan.userId, meals: [meal] });
     return { result: "ok" as const, name: meal.name, ...portionNote(portions) };
   },
@@ -906,8 +938,11 @@ export const regenerateDay = internalMutation({
     const locked = new Set(kept.map((meal) => meal.slot));
     const added = args.meals.filter((meal) => !locked.has(meal.slot)).map(clampMeal);
 
+    const invalid = portionRefusal(added, plan.batches ?? []);
+    if (invalid) return invalid;
+
     day.meals = [...kept, ...added].sort(bySlot);
-    const { batches, portions } = await portionWrite(
+    const { batches, portions, commit } = await portionWrite(
       ctx,
       plan.userId,
       plan.days,
@@ -923,6 +958,7 @@ export const regenerateDay = internalMutation({
     if (violations.length > 0) return refused(violations);
 
     await ctx.db.patch("mealPlans", plan._id, { days: plan.days, batches });
+    portions.estimated = await commit();
     await ctx.runMutation(internal.recipes.upsertFromMeals, { userId: plan.userId, meals: added });
     return { result: "ok" as const, kept: kept.length, added: added.length, ...portionNote(portions) };
   },

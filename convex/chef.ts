@@ -510,14 +510,20 @@ export function chefTools(today: string) {
 
     log_planned_meal: createTool({
       description:
-        "« J'ai mangé ce qui était prévu » : recopie le repas du plan dans le journal, tel quel.",
+        "« J'ai mangé ce qui était prévu » : recopie le repas du plan dans le journal. S'il en a mangé plus ou moins (« que la moitié », « un taco de plus »), donne factor : les macros enregistrées sont celles du plan × factor, et le plan ne change pas.",
       inputSchema: zLogPlannedMeal.extend({
         date: z
           .string()
           .describe("YYYY-MM-DD. La date d'aujourd'hui est donnée à la fin de ton system prompt"),
       }),
-      execute: async (ctx: ToolCtx, { date, slot }) =>
-        await ctx.runMutation(api.nutrition.logPlannedMeal, { ...week, date, slot }),
+      execute: async (ctx: ToolCtx, { date, slot, factor, quantity }) =>
+        await ctx.runMutation(api.nutrition.logPlannedMeal, {
+          ...week,
+          date,
+          slot,
+          ...(factor !== null && { factor }),
+          ...(quantity && { quantity }),
+        }),
     }),
 
     update_inventory: createTool({

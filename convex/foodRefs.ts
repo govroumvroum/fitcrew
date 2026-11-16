@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { type MutationCtx, type QueryCtx, internalMutation } from "./_generated/server";
-import { type FoodValues, type Macros, type Unit, normalizeName } from "./portionLogic";
+import { type FoodValues, type Macros, type Unit, foodKey } from "./portionLogic";
 import { macros } from "./schema";
 import { requireCurrentUser } from "./users";
 
@@ -24,7 +24,7 @@ export async function refsFor(
   names: Iterable<string>,
 ): Promise<Map<string, FoodRef>> {
   const out = new Map<string, FoodRef>();
-  for (const key of new Set([...names].map(normalizeName))) {
+  for (const key of new Set([...names].map(foodKey))) {
     if (!key) continue;
     const row = await ctx.db
       .query("foodRefs")
@@ -52,31 +52,60 @@ const clampMacro = (m: Macros, max: number): Macros => ({
   fat: Math.min(Math.max(m.fat, 0), max),
 });
 
+type EstimateRow = Omit<FoodRef, "_id" | "_creationTime">;
+
 /**
- * Writes the model's estimates for the ingredients the reference doesn't know
- * yet, and adds them to `refs` so the caller computes with them right away.
- * An ingredient already known — by any source — is left alone.
+ * The model's estimates for the ingredients the reference doesn't know yet,
+ * added to `refs` IN MEMORY so the caller computes with them right away. An
+ * ingredient already known — by any source — is left alone.
+ *
+ * Nothing is written here: the caller inserts the returned rows with
+ * `insertEstimates` only once its write is accepted — an estimate from a plan
+ * the allergy guard refused would otherwise outlive the plan.
  *
  * Per 100 g can't exceed 100 g of anything (900 kcal is pure fat); a piece is
  * bounded at 1 kg's worth.
  */
-export async function recordEstimates(
-  ctx: MutationCtx,
+export function stageEstimates(
   userId: Id<"users">,
   estimates: Estimate[],
   refs: Map<string, FoodRef>,
-): Promise<string[]> {
-  const written: string[] = [];
+): EstimateRow[] {
+  const staged: EstimateRow[] = [];
   for (const estimate of estimates) {
-    const nameKey = normalizeName(estimate.name);
+    const nameKey = foodKey(estimate.name);
     if (!nameKey || refs.has(nameKey)) continue;
     const values =
       estimate.unit === "piece"
         ? { perPiece: clampMacro(estimate.macros, 1000) }
         : { per100: clampMacro(estimate.macros, 100) };
-    const row = { userId, nameKey, name: estimate.name.trim(), source: "estimate" as const, ...values };
-    const id = await ctx.db.insert("foodRefs", row);
-    refs.set(nameKey, { _id: id, _creationTime: Date.now(), ...row });
+    const row: EstimateRow = {
+      userId,
+      nameKey,
+      name: estimate.name.trim(),
+      source: "estimate",
+      ...values,
+    };
+    // A placeholder id: this map lives for one call and is never written back.
+    refs.set(nameKey, { _id: "" as Id<"foodRefs">, _creationTime: 0, ...row });
+    staged.push(row);
+  }
+  return staged;
+}
+
+/**
+ * Writes staged estimates. Re-checks each key: a label saved between staging
+ * and now (same transaction, so only by this very mutation) must win.
+ */
+export async function insertEstimates(ctx: MutationCtx, rows: EstimateRow[]): Promise<string[]> {
+  const written: string[] = [];
+  for (const row of rows) {
+    const existing = await ctx.db
+      .query("foodRefs")
+      .withIndex("by_user_and_name_key", (q) => q.eq("userId", row.userId).eq("nameKey", row.nameKey))
+      .unique();
+    if (existing) continue;
+    await ctx.db.insert("foodRefs", row);
     written.push(row.name);
   }
   return written;
@@ -99,7 +128,7 @@ export const save = internalMutation({
   },
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
-    const nameKey = normalizeName(args.name);
+    const nameKey = foodKey(args.name);
     if (!nameKey) return { result: "refused" as const, note: "Nom d'ingrédient vide." };
     if (!args.per100 && !args.perPiece) {
       return {

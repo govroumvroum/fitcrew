@@ -34,6 +34,21 @@ export function normalizeName(name: string): string {
     .replace(/s$/, "");
 }
 
+/**
+ * The food reference's key (#138): `normalizeName` with « œ » and « æ » spelled
+ * out first — NFD leaves them whole, so « Bœuf », « Boeuf » and « boeuf » would
+ * otherwise be three ingredients. Same rule as the recipe library's
+ * `recipeKey`, which is this function.
+ *
+ * Not used for the shopping list on purpose: its ticks are stored under
+ * `normalizeName`, and changing that key would drop the ticks of every « œ » line.
+ */
+export function foodKey(name: string): string {
+  return normalizeName(
+    name.replace(/œ/g, "oe").replace(/Œ/g, "OE").replace(/æ/g, "ae").replace(/Æ/g, "AE"),
+  );
+}
+
 export type Macros = { calories: number; protein: number; carbs: number; fat: number };
 export type Unit = "g" | "ml" | "piece";
 

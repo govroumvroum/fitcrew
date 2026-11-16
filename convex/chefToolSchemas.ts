@@ -169,7 +169,23 @@ export const zAddFoodLogEntry = z.object({
   macros: zMacros,
 });
 
-export const zLogPlannedMeal = z.object({ date: z.string(), slot: zMealSlot });
+export const zLogPlannedMeal = z.object({
+  date: z.string(),
+  slot: zMealSlot,
+  // #138: « j'en ai mangé que la moitié » → 0.5. null = comme prévu.
+  factor: z
+    .number()
+    .min(0.25)
+    .max(3)
+    .nullable()
+    .describe(
+      "La part réellement mangée par rapport au repas prévu : 0.5 = la moitié, 1.25 = un quart de plus, (n+1)/n pour une pièce de plus sur n. null = comme prévu",
+    ),
+  quantity: z
+    .string()
+    .nullable()
+    .describe('Ce qu\'il a dit, en court : "la moitié", "3 tacos". null si comme prévu'),
+});
 
 export const zUpdateInventory = z.object({
   items: z.array(z.object({ name: z.string(), quantity: z.string().nullable() })).min(1),

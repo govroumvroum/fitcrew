@@ -13,7 +13,8 @@ import {
 } from "./_generated/server";
 import { costUsdFrom } from "./aiUsage";
 import { MODEL_ID, languageModel } from "./model";
-import { type PlannedMeal, forbiddenHits, normalizeName } from "./nutrition";
+import { type PlannedMeal, forbiddenHits } from "./nutrition";
+import { foodKey } from "./portionLogic";
 import { SECHE_CATALOGUE, SECHE_TAG } from "./recipeCatalogue";
 import { type RecipeCategory, categoryForSlot } from "./recipeLogic";
 import { plannedMeal, recipe as recipeValidator, recipeCategory } from "./schema";
@@ -27,11 +28,8 @@ type RecipeFields = Infer<typeof recipeValidator>;
 
 /** Dedup key, within one owner: the shopping list's `normalizeName`, with « œ » and
  *  « æ » spelled out first — NFD leaves them whole, so « Bœuf » and « Boeuf »
- *  would otherwise be two recipes. */
-export const recipeKey = (name: string) =>
-  normalizeName(
-    name.replace(/œ/g, "oe").replace(/Œ/g, "OE").replace(/æ/g, "ae").replace(/Æ/g, "AE"),
-  );
+ *  would otherwise be two recipes. Shared with the food reference (#138). */
+export const recipeKey = foodKey;
 
 type MealRecipe = Pick<
   RecipeFields,

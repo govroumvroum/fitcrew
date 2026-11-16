@@ -1,6 +1,12 @@
 /** Self-check for portions (#138). Run: `bun convex/portionLogic.check.ts` */
 import assert from "node:assert/strict";
-import { shoppingListFrom, type MealBatch, type PlanDay, type PlannedMeal } from "./nutrition";
+import {
+  portionRefusal,
+  shoppingListFrom,
+  type MealBatch,
+  type PlanDay,
+  type PlannedMeal,
+} from "./nutrition";
 import {
   type FoodValues,
   type Ingredient,
@@ -8,6 +14,7 @@ import {
   batchLeftover,
   logFactor,
   macrosFromIngredients,
+  foodKey,
   mealPieces,
   normalizeName,
   quantityText,
@@ -25,11 +32,11 @@ const REF: Record<string, FoodValues> = {
   tortilla: { per100: m(300, 8, 50, 7), pieceGrams: 40 },
   "poulet effiloche": { per100: m(120, 24, 0, 2) },
   pates: { per100: m(360, 13, 72, 2) },
-  "Bœuf haché 5 %": { per100: m(130, 21, 0, 5) },
+  "boeuf hache 5 %": { per100: m(130, 21, 0, 5) },
   "sauce tomate": { per100: m(40, 1, 7, 1) },
 };
-const BY_KEY = new Map(Object.entries(REF).map(([name, values]) => [normalizeName(name), values]));
-const lookup = (name: string) => BY_KEY.get(normalizeName(name));
+const BY_KEY = new Map(Object.entries(REF).map(([name, values]) => [foodKey(name), values]));
+const lookup = (name: string) => BY_KEY.get(foodKey(name));
 
 const g = (name: string, amount: number, scalable = false): Ingredient => ({
   name,
@@ -191,5 +198,26 @@ assert.equal(logFactor(10), 3);
 assert.equal(logFactor(0.1), 0.25);
 assert.equal(mealPieces(tacos), 2);
 assert.equal(mealPieces([g("Riz", 80)]), null);
+
+// --- keys --------------------------------------------------------------------
+
+// Accents, ligatures, case and spaces don't split an ingredient in the reference.
+for (const spelling of ["Bœuf haché 5 %", "Boeuf haché 5 %", "boeuf  hache 5%", "BŒUF HACHÉ 5 %"]) {
+  assert.equal(foodKey(spelling), "boeufhache5", spelling);
+}
+assert.equal(foodKey("Œufs"), foodKey("oeuf"));
+assert.notEqual(foodKey("Blanc de poulet"), foodKey("Poulet"), "different cuts stay apart");
+// The shopping list's key is untouched: its stored ticks depend on it.
+assert.equal(normalizeName("Bœuf"), "buf");
+
+// --- refused writes ------------------------------------------------------------
+
+assert.equal(portionRefusal([eat(600)], [bolo]), null);
+const ghost = portionRefusal([{ ...eat(600), batch: { id: "chili", share: 0.3 } }], [bolo]);
+assert.equal(ghost?.result, "refused");
+assert.match(ghost!.note, /« chili »/);
+assert.match(ghost!.note, /« bolo » \(Bolognaise\)/, "names the pots that do exist");
+const hollow = portionRefusal([{ ...eat(600), batch: undefined }], []);
+assert.equal(hollow?.result, "refused", "no pot, no ingredients: refused");
 
 console.log("portionLogic.check: ok");
