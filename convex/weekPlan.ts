@@ -149,7 +149,7 @@ export const weekForMcp = internalQuery({
           ingredients: meal.ingredients,
           macros: meal.macros,
           prepMinutes: meal.prepMinutes,
-          ...(meal.locked !== undefined && { locked: meal.locked }),
+          locked: meal.locked,
         })),
       })),
     };

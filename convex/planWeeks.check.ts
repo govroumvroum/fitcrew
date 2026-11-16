@@ -10,6 +10,7 @@ import {
   weekOfDates,
 } from "./planWeeks";
 import { weekStart } from "./progress";
+import { parisDate } from "./weekPlanLogic";
 import { weekDates } from "./weekTemplate";
 
 // --- The two Mondays ---------------------------------------------------------
@@ -49,16 +50,15 @@ for (
 // `today` is the phone's local date (`localDate()`); this is what it is in Paris
 // for a given instant. Sunday 15 Nov, 23:30 UTC is already Monday 00:30 in Paris
 // (UTC+1 in winter): the current week is the new one, though UTC says Sunday.
-const parisDate = (iso: string) =>
-  new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date(iso));
-assert.equal(parisDate("2026-11-15T22:59:00Z"), "2026-11-15"); // dimanche 23h59 à Paris
-assert.equal(planWeeks(parisDate("2026-11-15T22:59:00Z")).current, "2026-11-09");
-assert.equal(parisDate("2026-11-15T23:30:00Z"), "2026-11-16"); // lundi 00h30 à Paris
-assert.equal(planWeeks(parisDate("2026-11-15T23:30:00Z")).current, "2026-11-16");
+const parisAt = (iso: string) => parisDate(new Date(iso));
+assert.equal(parisAt("2026-11-15T22:59:00Z"), "2026-11-15"); // dimanche 23h59 à Paris
+assert.equal(planWeeks(parisAt("2026-11-15T22:59:00Z")).current, "2026-11-09");
+assert.equal(parisAt("2026-11-15T23:30:00Z"), "2026-11-16"); // lundi 00h30 à Paris
+assert.equal(planWeeks(parisAt("2026-11-15T23:30:00Z")).current, "2026-11-16");
 // Summer time (UTC+2): Sunday 22:30 UTC is Monday 00:30 in Paris.
-assert.equal(planWeeks(parisDate("2026-06-14T22:30:00Z")).current, "2026-06-15");
+assert.equal(planWeeks(parisAt("2026-06-14T22:30:00Z")).current, "2026-06-15");
 // New Year's Eve at 23:30 in Paris is still 2026, and still the week of the 28th.
-assert.equal(planWeeks(parisDate("2026-12-31T22:30:00Z")).current, "2026-12-28");
+assert.equal(planWeeks(parisAt("2026-12-31T22:30:00Z")).current, "2026-12-28");
 
 // --- The default when he doesn't say which week --------------------------------
 // Friday, Saturday, Sunday: the next one. Monday to Thursday: ask.
