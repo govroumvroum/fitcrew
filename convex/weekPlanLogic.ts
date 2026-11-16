@@ -7,6 +7,16 @@ import { type RecipeCategory, categoryForSlot } from "./recipeLogic";
 
 type Slot = "petit_dejeuner" | "dejeuner" | "diner" | "collation";
 
+/**
+ * Today in Europe/Paris as `YYYY-MM-DD` (`en-CA` is the one locale whose date
+ * format is the ISO key). An MCP tool call is an HTTP action: there is no
+ * phone and no `localDate()`. V1 serves one user, in Paris (#135); a timezone
+ * stored on the profile is the fix when MCP opens to others.
+ */
+export function parisDate(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(now);
+}
+
 /** How many recipes the « Changer » sheet shows. */
 export const CANDIDATES = 3;
 
@@ -86,4 +96,21 @@ export function nextChecks(
   if (!checked) return live.filter((k) => k !== key);
   if (!listKeys.includes(key) || live.includes(key)) return live;
   return [...live, key];
+}
+
+/**
+ * `nextChecks` for a whole basket at once — `check_shopping_items` ticks many
+ * keys in one transaction. `nextChecks` drops any key the list doesn't have,
+ * so a key the model invented writes nothing.
+ */
+export function checkKeys(
+  stored: readonly string[],
+  listKeys: readonly string[],
+  keys: readonly string[],
+  checked: boolean,
+): string[] {
+  return keys.reduce(
+    (acc, key) => nextChecks(acc, listKeys, key, checked),
+    liveChecks(stored, listKeys),
+  );
 }
