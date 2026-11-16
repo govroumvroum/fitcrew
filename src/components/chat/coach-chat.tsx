@@ -132,9 +132,10 @@ export const COACH: AgentConfig = {
       done: "Statut du programme changé",
       failed: "Le statut du programme n'a pas changé.",
     },
-    // The reads. Without an entry they fall back to FALLBACK's « C'est fait. »,
-    // which lands right above every edit and status change (read_programs comes
-    // first) and reads as the coach claiming a write it didn't make.
+    // The reads. Without an entry they fell back to FALLBACK's old « C'est
+    // fait. », which landed right above every edit and status change
+    // (read_programs comes first) and read as the coach claiming a write it
+    // didn't make. `tool-labels.check.ts` now keeps every tool off FALLBACK.
     "tool-read_programs": {
       icon: BookOpenIcon,
       pending: "Je relis tes programmes…",
